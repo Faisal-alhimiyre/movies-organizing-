@@ -600,28 +600,28 @@ window.WATCHLIST = {
         "lead": "Yuji Itadori — Junya Enoki",
         "summary": "A student joins sorcerers after swallowing a cursed object.",
         "kind": "series",
-        "link": "https://www.imdb.com/title/tt13706018/"
+        "link": "https://www.imdb.com/title/tt12343534/"
       },
       {
         "title": "Hell's Paradise",
         "lead": "Gabimaru — Chiaki Kobayashi",
         "summary": "A condemned ninja searches a deadly island for immortality.",
         "kind": "series",
-        "link": "https://www.imdb.com/title/tt21934330/"
+        "link": "https://www.imdb.com/title/tt13911284/"
       },
       {
         "title": "Fire Force",
         "lead": "Shinra Kusakabe — Gakuto Kajiwara",
         "summary": "Supernatural firefighters battle people transformed into flame monsters.",
         "kind": "series",
-        "link": "https://www.imdb.com/title/tt10255412/"
+        "link": "https://www.imdb.com/title/tt9307686/"
       },
       {
         "title": "Kekkai Sensen",
         "lead": "Leonardo Watch — Daisuke Sakaguchi",
         "summary": "A young man with magical eyes protects a supernatural city.",
         "kind": "series",
-        "link": "https://www.imdb.com/title/tt4378666/"
+        "link": "https://www.imdb.com/title/tt4379632/"
       }
     ],
     "Adventure": [
@@ -630,7 +630,7 @@ window.WATCHLIST = {
         "lead": "Saichi Sugimoto — Chikahiro Kobayashi",
         "summary": "A war veteran and an Ainu girl search for hidden gold.",
         "kind": "series",
-        "link": "https://www.imdb.com/title/tt7965802/"
+        "link": "https://www.imdb.com/title/tt8225204/"
       }
     ],
     "Fantasy": [
@@ -639,7 +639,7 @@ window.WATCHLIST = {
         "lead": "Kiritsugu Emiya — Rikiya Koyama",
         "summary": "Mages summon historical heroes to fight for the Holy Grail.",
         "kind": "series",
-        "link": "https://www.imdb.com/title/tt2051171/"
+        "link": "https://www.imdb.com/title/tt2051178/"
       },
       {
         "title": "Overlord",
@@ -653,7 +653,7 @@ window.WATCHLIST = {
         "lead": "Toyohisa Shimazu — Yuichi Nakamura",
         "summary": "Historical warriors are transported into a fantasy war.",
         "kind": "series",
-        "link": "https://www.imdb.com/title/tt6075292/"
+        "link": "https://www.imdb.com/title/tt5225764/"
       }
     ],
     "Horror": [
@@ -662,7 +662,7 @@ window.WATCHLIST = {
         "lead": "Alucard — Jouji Nakata",
         "summary": "A powerful vampire hunts supernatural threats for an organisation.",
         "kind": "series",
-        "link": "https://www.imdb.com/title/tt0354440/"
+        "link": "https://www.imdb.com/title/tt0495212/"
       }
     ],
     "Science Fiction": [
@@ -680,7 +680,7 @@ window.WATCHLIST = {
         "lead": "Yoichi Isagi — Kazuki Ura",
         "summary": "Football strikers compete in a ruthless training programme.",
         "kind": "series",
-        "link": "https://www.imdb.com/title/tt13324670/"
+        "link": "https://www.imdb.com/title/tt15222080/"
       }
     ],
     "Thriller": [

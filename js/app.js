@@ -254,7 +254,7 @@
 
       if (bundledItem) {
         item.genre = bundledItem.genre;
-        if (!item.link && bundledItem.link) {
+        if (bundledItem.link) {
           item.link = bundledItem.link;
         }
       }
