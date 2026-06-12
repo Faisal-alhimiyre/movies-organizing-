@@ -105,14 +105,33 @@
     return null;
   }
 
-  function signIn(code) {
+  function emptyListKey(listId) {
+    return `watchlist-start-empty-${listId}`;
+  }
+
+  function signIn(code, options = {}) {
     const error = validateCode(code);
     if (error) return { ok: false, error };
 
     const listId = listIdFromCode(code);
+
+    if (options.create) {
+      localStorage.setItem(emptyListKey(listId), "1");
+    } else {
+      localStorage.removeItem(emptyListKey(listId));
+    }
+
     migrateLegacyData(listId);
     setSession(listId);
     return { ok: true, listId };
+  }
+
+  function isEmptyList(listId) {
+    return Boolean(localStorage.getItem(emptyListKey(listId || getProfile())));
+  }
+
+  function clearEmptyListFlag(listId) {
+    localStorage.removeItem(emptyListKey(listId || getProfile()));
   }
 
   function signOut() {
@@ -132,6 +151,8 @@
     codeHasList,
     signIn,
     signOut,
+    isEmptyList,
+    clearEmptyListFlag,
     storageKeys,
     migrateLegacyData(listId) {
       migrateLegacyData(listId || getProfile());

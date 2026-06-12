@@ -927,6 +927,18 @@ body {
   margin-left: auto;
 }
 
+.empty-state__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.empty-state__actions .empty-state__btn {
+  margin-top: 0;
+}
+
 .empty-state__btn {
   margin-top: 1rem;
 }

@@ -28,9 +28,18 @@
             <button type="button" class="btn btn--primary" id="addBtn">
               Add title
             </button>
+            <button type="button" class="btn btn--text" id="importBtn">
+              Import
+            </button>
             <button type="button" class="btn btn--text" id="exportBtn">
               Export
             </button>
+            <input
+              type="file"
+              id="importInput"
+              accept="application/json,.json"
+              hidden
+            />
             <button type="button" class="btn btn--text" id="signOutBtn">
               Sign out
             </button>
@@ -115,7 +124,7 @@
       </main>
 
       <footer class="footer">
-        <p>Add, edit, or remove titles — changes save in your browser. Export anytime for a backup.</p>
+        <p>Lists save on this device only until cloud sync is added. Export on one device, import on another to copy your list.</p>
       </footer>
     </div>
 

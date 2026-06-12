@@ -65,6 +65,7 @@
     genreFilterChips: document.getElementById("genreFilterChips"),
     watchedOnly: document.getElementById("watchedOnly"),
     exportBtn: document.getElementById("exportBtn"),
+    importInput: document.getElementById("importInput"),
     addBtn: document.getElementById("addBtn"),
     typeTabs: document.querySelectorAll(".type-tab"),
     modal: document.getElementById("itemModal"),
@@ -288,7 +289,22 @@
       const items = flattenWatchlist(merged);
       state.watched = migrateWatchedIds(state.watched, items);
       saveWatched();
+      window.WatchlistAuth?.clearEmptyListFlag();
       return merged;
+    }
+
+    if (window.WatchlistAuth?.isEmptyList()) {
+      return emptyWatchlist();
+    }
+
+    if (bundled) {
+      const seeded = applyBundledGenreCorrections(
+        structuredClone(bundled),
+        bundled
+      );
+      localStorage.setItem(data, JSON.stringify(seeded));
+      window.WatchlistAuth?.clearEmptyListFlag();
+      return seeded;
     }
 
     return emptyWatchlist();
@@ -761,10 +777,15 @@
       els.main.innerHTML = `
         <div class="empty-state">
           <p class="empty-state__title">Your watchlist is empty</p>
-          <p>Add your first movie, show, or anime.</p>
-          <button type="button" class="btn btn--primary empty-state__btn" data-action="add">
-            + Add title
-          </button>
+          <p>Add titles, or import a backup from another device.</p>
+          <div class="empty-state__actions">
+            <button type="button" class="btn btn--primary empty-state__btn" data-action="add">
+              Add title
+            </button>
+            <button type="button" class="btn btn--ghost empty-state__btn" data-action="import">
+              Import backup
+            </button>
+          </div>
         </div>
       `;
       return;
@@ -999,6 +1020,33 @@
     render();
   }
 
+  function importBackup(file) {
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const payload = JSON.parse(reader.result);
+        if (!payload?.watchlist) {
+          throw new Error("Invalid backup");
+        }
+
+        state.data = payload.watchlist;
+        state.watched = payload.watched || {};
+        state.items = flattenWatchlist(state.data);
+        state.data = itemsToNested(state.items);
+        window.WatchlistAuth?.clearEmptyListFlag();
+        saveData();
+        saveWatched();
+        updateGenreOptions();
+        render();
+      } catch {
+        alert("Could not read that backup file. Use a file exported from this app.");
+      }
+    };
+    reader.readAsText(file);
+  }
+
   function exportBackup() {
     const payload = {
       exportedAt: new Date().toISOString(),
@@ -1051,6 +1099,14 @@
     });
 
     els.exportBtn.addEventListener("click", exportBackup);
+    els.importInput?.addEventListener("change", () => {
+      const file = els.importInput.files?.[0];
+      importBackup(file);
+      els.importInput.value = "";
+    });
+    document.getElementById("importBtn")?.addEventListener("click", () => {
+      els.importInput?.click();
+    });
     els.addBtn.addEventListener("click", () => openModal("add"));
 
     document.getElementById("signOutBtn")?.addEventListener("click", () => {
@@ -1151,6 +1207,11 @@
 
       if (action === "add") {
         openModal("add");
+        return;
+      }
+
+      if (action === "import") {
+        els.importInput?.click();
       }
     });
   }

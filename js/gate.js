@@ -47,7 +47,7 @@
     event.preventDefault();
     showError("");
 
-    const result = auth.signIn(els.openCode?.value || "");
+    const result = auth.signIn(els.openCode?.value || "", { create: false });
     if (!result.ok) {
       showError(result.error);
       return;
@@ -73,7 +73,7 @@
       return;
     }
 
-    const result = auth.signIn(code);
+    const result = auth.signIn(code, { create: true });
     if (!result.ok) {
       showError(result.error);
       return;
