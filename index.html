@@ -7,7 +7,7 @@
       name="description"
       content="Personal watchlist of movies, TV series, and anime organized by genre."
     />
-    <title>Watchlist</title>
+    <title>Our Movie Nights</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -21,25 +21,13 @@
       <header class="header">
         <div class="header__main">
           <div>
-            <h1 class="header__title" id="headerTitle">Watchlist</h1>
+            <h1 class="header__title" id="headerTitle">Our Movie Nights</h1>
             <p class="header__meta" id="stats" aria-live="polite"></p>
           </div>
           <div class="header__actions">
             <button type="button" class="btn btn--primary" id="addBtn">
               Add title
             </button>
-            <button type="button" class="btn btn--text" id="importBtn">
-              Import
-            </button>
-            <button type="button" class="btn btn--text" id="exportBtn">
-              Export
-            </button>
-            <input
-              type="file"
-              id="importInput"
-              accept="application/json,.json"
-              hidden
-            />
             <button type="button" class="btn btn--text" id="signOutBtn">
               Sign out
             </button>
@@ -119,13 +107,129 @@
         </div>
       </section>
 
+      <div class="layout-bar" id="layoutToggles" role="toolbar" aria-label="Card layout">
+        <button
+          type="button"
+          class="layout-toggle"
+          data-layout="hover"
+          data-tip="Preview on hover"
+          aria-label="Preview on hover"
+        >
+          <svg class="layout-toggle__icon" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="5" y="14" width="14" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.75" />
+            <rect x="7" y="4" width="10" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.75" />
+            <path fill="currentColor" d="M11.25 10h1.5L12 12.25z" />
+            <path fill="currentColor" d="M9.25 6.25h1v1.25h-1zm3.5 0h1v1.25h-1z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="layout-toggle"
+          data-layout="poster"
+          data-tip="Show poster images"
+          aria-label="Show poster images"
+        >
+          <svg class="layout-toggle__icon" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="7" y="3" width="10" height="18" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.75" />
+            <circle cx="10" cy="8" r="1.25" fill="currentColor" />
+            <path
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.75"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M9 16.5 11 13l2 2.5 3-4.5"
+            />
+          </svg>
+        </button>
+      </div>
+
       <main class="main" id="mainContent">
         <div class="loading" id="loading">Loading watchlist…</div>
       </main>
 
       <footer class="footer">
-        <p>Lists save on this device only until cloud sync is added. Export on one device, import on another to copy your list.</p>
+        <p>Your list is saved on this device. Use Import or Export in the top-right corner to move it to another device.</p>
       </footer>
+    </div>
+
+    <aside class="backup-corner" aria-label="Backup">
+      <button type="button" class="btn btn--ghost backup-corner__btn" id="importBtn">
+        Import
+      </button>
+      <button type="button" class="btn btn--ghost backup-corner__btn" id="exportBtn">
+        Export
+      </button>
+      <input
+        type="file"
+        id="importInput"
+        accept="application/json,.json"
+        hidden
+      />
+    </aside>
+
+    <div class="link-preview-popover" id="linkPreviewPopover" hidden>
+      <div class="link-preview-popover__inner" id="linkPreviewPopoverInner">
+        <p class="link-preview-popover__loading">Loading preview…</p>
+      </div>
+    </div>
+
+    <div class="modal" id="backupModal" hidden>
+      <div class="modal__backdrop" data-action="close-backup-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="backupModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="backupModalTitle">Export list</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-backup-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+
+        <div class="modal__body" id="backupModalExport" hidden>
+          <p class="backup-modal__text">
+            Download a backup of your full watchlist — titles, genres, summaries,
+            links, and which ones you marked watched.
+          </p>
+          <p class="backup-modal__hint">
+            Save the file somewhere safe, then open it on your other device.
+          </p>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-backup-modal">
+              Cancel
+            </button>
+            <button type="button" class="btn btn--primary" id="backupExportConfirm">
+              Download backup
+            </button>
+          </footer>
+        </div>
+
+        <div class="modal__body" id="backupModalImport" hidden>
+          <p class="backup-modal__text">
+            Replace this device’s list with a backup file exported from this app.
+            Your current list on this device will be overwritten.
+          </p>
+          <p class="backup-modal__hint">
+            Only JSON files created by Export work here. Plain title lists are not supported yet.
+          </p>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-backup-modal">
+              Cancel
+            </button>
+            <button type="button" class="btn btn--primary" id="backupImportConfirm">
+              Choose file
+            </button>
+          </footer>
+        </div>
+      </div>
     </div>
 
     <div class="modal" id="itemModal" hidden>
@@ -252,6 +356,8 @@
       </div>
     </div>
 
+    <script src="js/config.js"></script>
+    <script src="js/metadata.js"></script>
     <script src="js/auth.js"></script>
     <script src="js/genres.js"></script>
     <script src="js/data.js"></script>

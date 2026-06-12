@@ -43,6 +43,9 @@
 
   const STANDARD_GENRES = window.STANDARD_GENRES || [];
 
+  const CARD_LAYOUT_KEY = "watchlist-card-layout-v2";
+  const CARD_LAYOUTS = ["hover", "poster"];
+
   const state = {
     type: "all",
     selectedGenres: [],
@@ -54,6 +57,10 @@
     editingId: null,
     formSecondary: [],
     formLeads: [],
+    cardLayout: "hover",
+    hoverCardId: null,
+    hoverHideTimer: null,
+    hoverShowTimer: null,
   };
 
   const els = {
@@ -65,7 +72,18 @@
     genreFilterChips: document.getElementById("genreFilterChips"),
     watchedOnly: document.getElementById("watchedOnly"),
     exportBtn: document.getElementById("exportBtn"),
+    importBtn: document.getElementById("importBtn"),
     importInput: document.getElementById("importInput"),
+    backupModal: document.getElementById("backupModal"),
+    backupModalTitle: document.getElementById("backupModalTitle"),
+    backupModalExport: document.getElementById("backupModalExport"),
+    backupModalImport: document.getElementById("backupModalImport"),
+    backupExportConfirm: document.getElementById("backupExportConfirm"),
+    backupImportConfirm: document.getElementById("backupImportConfirm"),
+    layoutToggles: document.getElementById("layoutToggles"),
+    linkPreviewPopover: document.getElementById("linkPreviewPopover"),
+    linkPreviewPopoverInner: document.getElementById("linkPreviewPopoverInner"),
+    app: document.getElementById("app"),
     addBtn: document.getElementById("addBtn"),
     typeTabs: document.querySelectorAll(".type-tab"),
     modal: document.getElementById("itemModal"),
@@ -374,6 +392,9 @@
 
       if (item.altTitle) entry.altTitle = item.altTitle;
       if (item.link) entry.link = item.link;
+      if (item.poster) entry.poster = item.poster;
+      if (item.imdbRating) entry.imdbRating = item.imdbRating;
+      if (item.year) entry.year = item.year;
       if (item.secondaryGenres?.length) {
         entry.secondaryGenres = item.secondaryGenres;
       }
@@ -708,6 +729,182 @@
     return div.innerHTML;
   }
 
+  function getImdbId(item) {
+    return window.WatchlistMetadata?.extractImdbId(item.link) || null;
+  }
+
+  function loadCardLayout() {
+    const saved = localStorage.getItem(CARD_LAYOUT_KEY);
+    return CARD_LAYOUTS.includes(saved) ? saved : "hover";
+  }
+
+  function saveCardLayout(layout) {
+    localStorage.setItem(CARD_LAYOUT_KEY, layout);
+  }
+
+  function applyCardLayout() {
+    if (els.app) {
+      els.app.dataset.layout = state.cardLayout;
+    }
+  }
+
+  function syncLayoutToggles() {
+    if (!els.layoutToggles) return;
+
+    els.layoutToggles.querySelectorAll("[data-layout]").forEach((button) => {
+      const active = button.dataset.layout === state.cardLayout;
+      button.classList.toggle("layout-toggle--active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+  }
+
+  function setCardLayout(layout) {
+    if (!CARD_LAYOUTS.includes(layout)) return;
+    state.cardLayout = layout;
+    saveCardLayout(layout);
+    applyCardLayout();
+    syncLayoutToggles();
+    hideLinkPreviewPopover();
+    render();
+  }
+
+  function buildPreviewDetails(meta, item) {
+    const title = meta?.title || item.title;
+    const year = meta?.year || item.year || "";
+    const rating = meta?.rating || item.imdbRating || "";
+    const plot = meta?.plot || item.summary || parseSummary(item) || "";
+    const poster = meta?.poster || item.poster || "";
+    const metaParts = [year, rating ? `IMDb ${rating}` : ""].filter(Boolean);
+
+    return { title, year, rating, plot, poster, metaParts };
+  }
+
+  function renderPreviewMarkup(meta, item) {
+    const details = buildPreviewDetails(meta, item);
+    const posterMarkup = details.poster
+      ? `<img class="link-preview-popover__poster" src="${escapeHtml(details.poster)}" alt="" loading="lazy" />`
+      : `<div class="link-preview-popover__poster link-preview-popover__poster--empty" aria-hidden="true">🎬</div>`;
+
+    return `
+      <div class="link-preview-popover__content">
+        ${posterMarkup}
+        <div>
+          <p class="link-preview-popover__title">${escapeHtml(details.title)}</p>
+          ${
+            details.metaParts.length
+              ? `<p class="link-preview-popover__meta">${escapeHtml(details.metaParts.join(" · "))}</p>`
+              : ""
+          }
+          ${
+            details.plot
+              ? `<p class="link-preview-popover__plot">${escapeHtml(details.plot)}</p>`
+              : ""
+          }
+        </div>
+      </div>
+    `;
+  }
+
+  async function fetchPreviewMeta(item) {
+    const imdbId = getImdbId(item);
+    if (!imdbId) return null;
+    if (item.poster && item.summary) {
+      return {
+        title: item.title,
+        poster: item.poster,
+        rating: item.imdbRating || "",
+        year: item.year || "",
+        plot: item.summary || parseSummary(item),
+      };
+    }
+    return window.WatchlistMetadata?.getMetadata(imdbId);
+  }
+
+  function hideLinkPreviewPopover() {
+    clearTimeout(state.hoverShowTimer);
+    clearTimeout(state.hoverHideTimer);
+    state.hoverCardId = null;
+    if (els.linkPreviewPopover) {
+      els.linkPreviewPopover.hidden = true;
+    }
+  }
+
+  function positionLinkPreviewPopover(card) {
+    if (!els.linkPreviewPopover || !card) return;
+
+    const rect = card.getBoundingClientRect();
+    const popoverWidth = Math.min(320, window.innerWidth - 32);
+    let left = rect.left + rect.width / 2 - popoverWidth / 2;
+    left = Math.max(16, Math.min(left, window.innerWidth - popoverWidth - 16));
+
+    let top = rect.bottom + 10;
+    const estimatedHeight = 180;
+    if (top + estimatedHeight > window.innerHeight - 16) {
+      top = Math.max(16, rect.top - estimatedHeight - 10);
+    }
+
+    els.linkPreviewPopover.style.width = `${popoverWidth}px`;
+    els.linkPreviewPopover.style.left = `${left}px`;
+    els.linkPreviewPopover.style.top = `${top}px`;
+  }
+
+  async function showLinkPreviewPopover(card, item) {
+    if (!els.linkPreviewPopover || !els.linkPreviewPopoverInner || !item?.link) {
+      return;
+    }
+
+    state.hoverCardId = item.id;
+    els.linkPreviewPopoverInner.innerHTML =
+      '<p class="link-preview-popover__loading">Loading preview…</p>';
+    els.linkPreviewPopover.hidden = false;
+    positionLinkPreviewPopover(card);
+
+    const meta = await fetchPreviewMeta(item);
+    if (state.hoverCardId !== item.id) return;
+
+    els.linkPreviewPopoverInner.innerHTML = renderPreviewMarkup(meta, item);
+    positionLinkPreviewPopover(card);
+  }
+
+  function setCardPoster(card, posterUrl) {
+    const slot = card.querySelector("[data-poster-slot]");
+    if (!slot || !posterUrl) return;
+
+    const img = document.createElement("img");
+    img.className = "card__poster";
+    img.loading = "lazy";
+    img.alt = "";
+    img.src = posterUrl;
+    slot.replaceWith(img);
+  }
+
+  async function hydratePosters() {
+    const cards = els.main.querySelectorAll(".card[data-imdb-id]");
+    for (const card of cards) {
+      const item = state.items.find((entry) => entry.id === card.dataset.id);
+      if (!item?.link) continue;
+
+      if (item.poster) {
+        setCardPoster(card, item.poster);
+        continue;
+      }
+
+      const imdbId = card.dataset.imdbId;
+      const meta = await window.WatchlistMetadata?.getMetadata(imdbId);
+      if (meta?.poster) {
+        item.poster = meta.poster;
+        setCardPoster(card, meta.poster);
+      }
+    }
+  }
+
+  function applyPostRender() {
+    applyCardLayout();
+    if (state.cardLayout === "poster") {
+      hydratePosters();
+    }
+  }
+
   function renderCard(item) {
     const badge = getKindBadge(item);
     const isWatched = Boolean(state.watched[item.id]);
@@ -721,13 +918,29 @@
       )
       .join("");
 
+    const imdbId = getImdbId(item);
     const linkedClass = item.link ? " card--linked" : "";
     const linkAttr = item.link
       ? ` data-link="${escapeHtml(item.link)}" title="Open link"`
       : "";
+    const imdbAttr = imdbId ? ` data-imdb-id="${escapeHtml(imdbId)}"` : "";
+
+    const posterBlock =
+      state.cardLayout === "poster" && item.link
+        ? `<div class="card__media">${
+            item.poster
+              ? `<img class="card__poster" src="${escapeHtml(item.poster)}" alt="" loading="lazy" />`
+              : `<div class="card__poster card__poster--placeholder" data-poster-slot aria-hidden="true">🎬</div>`
+          }</div>`
+        : "";
+
+    const bodyStart = state.cardLayout === "poster" ? '<div class="card__body">' : "";
+    const bodyEnd = state.cardLayout === "poster" ? "</div>" : "";
 
     return `
-      <article class="card${linkedClass}${isWatched ? " card--watched" : ""}" data-id="${escapeHtml(item.id)}"${linkAttr}>
+      <article class="card${linkedClass}${isWatched ? " card--watched" : ""}" data-id="${escapeHtml(item.id)}"${linkAttr}${imdbAttr}>
+        ${posterBlock}
+        ${bodyStart}
         <div class="card__top">
           <h3 class="card__title">
             ${escapeHtml(item.title)}
@@ -769,6 +982,7 @@
             </button>
           </div>
         </div>
+        ${bodyEnd}
       </article>
     `;
   }
@@ -832,6 +1046,7 @@
       .join("");
 
     els.main.innerHTML = html;
+    applyPostRender();
   }
 
   function syncFormFields() {
@@ -880,17 +1095,40 @@
     }
 
     els.modal.hidden = false;
-    document.body.style.overflow = "hidden";
+    updateBodyScrollLock();
     els.formTitle.focus();
   }
 
   function closeModal() {
     els.modal.hidden = true;
-    document.body.style.overflow = "";
+    updateBodyScrollLock();
     state.editingId = null;
     state.formSecondary = [];
     state.formLeads = [];
     els.form.reset();
+  }
+
+  function updateBodyScrollLock() {
+    const anyOpen = !els.modal.hidden || !els.backupModal?.hidden;
+    document.body.style.overflow = anyOpen ? "hidden" : "";
+  }
+
+  function openBackupModal(mode) {
+    if (!els.backupModal) return;
+
+    const isExport = mode === "export";
+    els.backupModalTitle.textContent = isExport ? "Export list" : "Import list";
+    els.backupModalExport.hidden = !isExport;
+    els.backupModalImport.hidden = isExport;
+    els.backupModal.hidden = false;
+    updateBodyScrollLock();
+    (isExport ? els.backupExportConfirm : els.backupImportConfirm)?.focus();
+  }
+
+  function closeBackupModal() {
+    if (!els.backupModal) return;
+    els.backupModal.hidden = true;
+    updateBodyScrollLock();
   }
 
   function formToItem() {
@@ -1045,6 +1283,7 @@
         saveWatched();
         updateGenreOptions();
         render();
+        closeBackupModal();
       } catch {
         alert("Could not read that backup file. Use a file exported from this app.");
       }
@@ -1103,14 +1342,29 @@
       render();
     });
 
-    els.exportBtn.addEventListener("click", exportBackup);
+    els.exportBtn?.addEventListener("click", () => openBackupModal("export"));
+    els.importBtn?.addEventListener("click", () => openBackupModal("import"));
+    els.backupExportConfirm?.addEventListener("click", () => {
+      exportBackup();
+      closeBackupModal();
+    });
+    els.backupImportConfirm?.addEventListener("click", () => {
+      els.importInput?.click();
+    });
     els.importInput?.addEventListener("change", () => {
       const file = els.importInput.files?.[0];
       importBackup(file);
       els.importInput.value = "";
     });
-    document.getElementById("importBtn")?.addEventListener("click", () => {
-      els.importInput?.click();
+    els.backupModal?.addEventListener("click", (event) => {
+      if (event.target.closest("[data-action='close-backup-modal']")) {
+        closeBackupModal();
+      }
+    });
+    els.layoutToggles?.addEventListener("click", (event) => {
+      const toggle = event.target.closest("[data-layout]");
+      if (!toggle) return;
+      setCardLayout(toggle.dataset.layout);
     });
     els.addBtn.addEventListener("click", () => openModal("add"));
 
@@ -1165,9 +1419,57 @@
     });
 
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !els.modal.hidden) {
+      if (event.key !== "Escape") return;
+      if (!els.backupModal?.hidden) {
+        closeBackupModal();
+        return;
+      }
+      if (!els.modal.hidden) {
         closeModal();
       }
+    });
+
+    document.addEventListener("scroll", hideLinkPreviewPopover, true);
+    window.addEventListener("resize", hideLinkPreviewPopover);
+
+    els.main.addEventListener("mouseover", (event) => {
+      if (state.cardLayout !== "hover") return;
+      const card = event.target.closest(".card--linked");
+      if (!card) return;
+
+      const related = event.relatedTarget?.closest?.(".card--linked");
+      if (related === card) return;
+
+      clearTimeout(state.hoverHideTimer);
+      clearTimeout(state.hoverShowTimer);
+
+      const item = state.items.find((entry) => entry.id === card.dataset.id);
+      if (!item) return;
+
+      state.hoverShowTimer = setTimeout(() => {
+        showLinkPreviewPopover(card, item);
+      }, 280);
+    });
+
+    els.main.addEventListener("mouseout", (event) => {
+      if (state.cardLayout !== "hover") return;
+      const card = event.target.closest(".card--linked");
+      if (!card) return;
+
+      const related = event.relatedTarget;
+      if (related && card.contains(related)) return;
+      if (related && els.linkPreviewPopover?.contains(related)) return;
+
+      clearTimeout(state.hoverShowTimer);
+      state.hoverHideTimer = setTimeout(hideLinkPreviewPopover, 120);
+    });
+
+    els.linkPreviewPopover?.addEventListener("mouseenter", () => {
+      clearTimeout(state.hoverHideTimer);
+    });
+
+    els.linkPreviewPopover?.addEventListener("mouseleave", () => {
+      state.hoverHideTimer = setTimeout(hideLinkPreviewPopover, 120);
     });
 
     els.main.addEventListener("click", (event) => {
@@ -1216,7 +1518,7 @@
       }
 
       if (action === "import") {
-        els.importInput?.click();
+        openBackupModal("import");
       }
     });
   }
@@ -1228,6 +1530,9 @@
     }
 
     state.watched = loadWatchedState();
+    state.cardLayout = loadCardLayout();
+    applyCardLayout();
+    syncLayoutToggles();
     state.data = loadWatchlist();
     state.items = flattenWatchlist(state.data);
     state.data = itemsToNested(state.items);
