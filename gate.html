@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Watchlist</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Playfair+Display:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <div class="gate">
+      <div class="gate__card">
+        <h1 class="gate__title">Watchlist</h1>
+
+        <div class="gate__modes" role="tablist" aria-label="List access">
+          <button
+            type="button"
+            class="gate__mode gate__mode--active"
+            role="tab"
+            aria-selected="true"
+            data-mode="open"
+          >
+            Open list
+          </button>
+          <button
+            type="button"
+            class="gate__mode"
+            role="tab"
+            aria-selected="false"
+            data-mode="create"
+          >
+            New list
+          </button>
+        </div>
+
+        <form id="openForm" class="gate__panel">
+          <p class="gate__hint">Enter the code you set for your list.</p>
+          <input
+            type="password"
+            id="openCode"
+            class="gate__input gate__input--block"
+            autocomplete="current-password"
+            placeholder="Your code"
+            minlength="3"
+            required
+          />
+          <button type="submit" class="btn btn--primary gate__submit">Open</button>
+        </form>
+
+        <form id="createForm" class="gate__panel" hidden>
+          <p class="gate__hint">Choose a code you will remember. This opens your list from now on.</p>
+          <input
+            type="password"
+            id="createCode"
+            class="gate__input gate__input--block"
+            autocomplete="new-password"
+            placeholder="Choose a code"
+            minlength="3"
+            required
+          />
+          <input
+            type="password"
+            id="confirmCode"
+            class="gate__input gate__input--block"
+            autocomplete="new-password"
+            placeholder="Confirm code"
+            minlength="3"
+            required
+          />
+          <button type="submit" class="btn btn--primary gate__submit">Create list</button>
+        </form>
+
+        <p class="gate__error" id="gateError" hidden></p>
+      </div>
+    </div>
+
+    <script src="js/auth.js"></script>
+    <script src="js/gate.js"></script>
+  </body>
+</html>
