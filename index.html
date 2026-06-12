@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <meta
       name="description"
       content="Personal watchlist of movies, TV series, and anime organized by genre."
@@ -107,41 +110,58 @@
         </div>
       </section>
 
-      <div class="layout-bar" id="layoutToggles" role="toolbar" aria-label="Card layout">
-        <button
-          type="button"
-          class="layout-toggle"
-          data-layout="hover"
-          data-tip="Preview on hover"
-          aria-label="Preview on hover"
-        >
-          <svg class="layout-toggle__icon" viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="5" y="14" width="14" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.75" />
-            <rect x="7" y="4" width="10" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.75" />
-            <path fill="currentColor" d="M11.25 10h1.5L12 12.25z" />
-            <path fill="currentColor" d="M9.25 6.25h1v1.25h-1zm3.5 0h1v1.25h-1z" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          class="layout-toggle"
-          data-layout="poster"
-          data-tip="Show poster images"
-          aria-label="Show poster images"
-        >
-          <svg class="layout-toggle__icon" viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="7" y="3" width="10" height="18" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.75" />
-            <circle cx="10" cy="8" r="1.25" fill="currentColor" />
-            <path
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.75"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M9 16.5 11 13l2 2.5 3-4.5"
-            />
-          </svg>
-        </button>
+      <div class="page-toolbar">
+        <div class="layout-bar" id="layoutToggles" role="toolbar" aria-label="Card layout">
+          <button
+            type="button"
+            class="layout-toggle"
+            data-layout="hover"
+            data-tip="Preview on hover"
+            aria-label="Preview on hover"
+          >
+            <svg class="layout-toggle__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="5" y="14" width="14" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.75" />
+              <rect x="7" y="4" width="10" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.75" />
+              <path fill="currentColor" d="M11.25 10h1.5L12 12.25z" />
+              <path fill="currentColor" d="M9.25 6.25h1v1.25h-1zm3.5 0h1v1.25h-1z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="layout-toggle"
+            data-layout="poster"
+            data-tip="Show poster images"
+            aria-label="Show poster images"
+          >
+            <svg class="layout-toggle__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="7" y="3" width="10" height="18" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.75" />
+              <circle cx="10" cy="8" r="1.25" fill="currentColor" />
+              <path
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M9 16.5 11 13l2 2.5 3-4.5"
+              />
+            </svg>
+          </button>
+        </div>
+
+        <div class="backup-bar" aria-label="Backup">
+          <button type="button" class="btn btn--ghost backup-bar__btn" id="importBtn">
+            Import
+          </button>
+          <button type="button" class="btn btn--ghost backup-bar__btn" id="exportBtn">
+            Export
+          </button>
+          <input
+            type="file"
+            id="importInput"
+            accept="application/json,.json"
+            hidden
+          />
+        </div>
       </div>
 
       <main class="main" id="mainContent">
@@ -149,24 +169,9 @@
       </main>
 
       <footer class="footer">
-        <p>Your list is saved on this device. Use Import or Export in the top-right corner to move it to another device.</p>
+        <p>Your list is saved on this device. Use Import or Export above the list to move it to another device.</p>
       </footer>
     </div>
-
-    <aside class="backup-corner" aria-label="Backup">
-      <button type="button" class="btn btn--ghost backup-corner__btn" id="importBtn">
-        Import
-      </button>
-      <button type="button" class="btn btn--ghost backup-corner__btn" id="exportBtn">
-        Export
-      </button>
-      <input
-        type="file"
-        id="importInput"
-        accept="application/json,.json"
-        hidden
-      />
-    </aside>
 
     <div class="link-preview-popover" id="linkPreviewPopover" hidden>
       <div class="link-preview-popover__inner" id="linkPreviewPopoverInner">

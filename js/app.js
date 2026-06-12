@@ -898,9 +898,13 @@
     }
   }
 
+  function shouldHydratePosters() {
+    return state.cardLayout === "poster";
+  }
+
   function applyPostRender() {
     applyCardLayout();
-    if (state.cardLayout === "poster") {
+    if (shouldHydratePosters()) {
       hydratePosters();
     }
   }
@@ -925,32 +929,40 @@
       : "";
     const imdbAttr = imdbId ? ` data-imdb-id="${escapeHtml(imdbId)}"` : "";
 
-    const posterBlock =
-      state.cardLayout === "poster" && item.link
-        ? `<div class="card__media">${
-            item.poster
-              ? `<img class="card__poster" src="${escapeHtml(item.poster)}" alt="" loading="lazy" />`
-              : `<div class="card__poster card__poster--placeholder" data-poster-slot aria-hidden="true">🎬</div>`
-          }</div>`
-        : "";
+    const hasLink = Boolean(item.link);
+    const titleBlock = `
+      <div class="card__top">
+        <h3 class="card__title">
+          ${escapeHtml(item.title)}
+          ${altTitle}
+        </h3>
+      </div>
+    `;
+    const badgesBlock = `
+      <div class="card__badges">
+        <span class="badge badge--${badge.className}">${escapeHtml(badge.label)}</span>
+        ${secondaryBadges}
+      </div>
+    `;
 
-    const bodyStart = state.cardLayout === "poster" ? '<div class="card__body">' : "";
-    const bodyEnd = state.cardLayout === "poster" ? "</div>" : "";
+    const posterBlock = hasLink
+      ? `<div class="card__media">${
+          item.poster
+            ? `<img class="card__poster" src="${escapeHtml(item.poster)}" alt="" loading="lazy" />`
+            : `<div class="card__poster card__poster--placeholder" data-poster-slot aria-hidden="true">🎬</div>`
+        }<div class="card__overlay">${badgesBlock}${titleBlock}</div></div>`
+      : "";
+
+    const useCardBody = state.cardLayout === "poster" || hasLink;
+    const bodyStart = useCardBody ? '<div class="card__body">' : "";
+    const bodyEnd = useCardBody ? "</div>" : "";
+    const bodyHeader = `<div class="card__head">${badgesBlock}${titleBlock}</div>`;
 
     return `
       <article class="card${linkedClass}${isWatched ? " card--watched" : ""}" data-id="${escapeHtml(item.id)}"${linkAttr}${imdbAttr}>
         ${posterBlock}
         ${bodyStart}
-        <div class="card__top">
-          <h3 class="card__title">
-            ${escapeHtml(item.title)}
-            ${altTitle}
-          </h3>
-        </div>
-        <div class="card__badges">
-          <span class="badge badge--${badge.className}">${escapeHtml(badge.label)}</span>
-          ${secondaryBadges}
-        </div>
+        ${bodyHeader}
         <p class="card__lead">${escapeHtml((item.leads || parseLeads(item)).join(", "))}</p>
         <p class="card__summary">${escapeHtml(item.summary || parseSummary(item))}</p>
         <div class="card__footer">
