@@ -20,7 +20,7 @@ window.WATCHLIST = {
         "lead": "Jamie Foxx",
         "summary": "A vampire hunter treats killing vampires like an ordinary job.",
         "kind": "movie",
-        "link": "https://www.imdb.com/title/tt13382234/"
+        "link": "https://www.imdb.com/title/tt13314558/"
       },
       {
         "title": "Head to Head",
@@ -157,7 +157,7 @@ window.WATCHLIST = {
         "lead": "Jack Black",
         "summary": "A monastery cook secretly becomes a masked wrestler.",
         "kind": "movie",
-        "link": "https://www.imdb.com/title/tt0456554/"
+        "link": "https://www.imdb.com/title/tt0457510/"
       },
       {
         "title": "Don't Look Up",
