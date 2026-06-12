@@ -3,9 +3,20 @@
 
   const SESSION_KEY = "watchlist-session-v1";
   const MIN_CODE_LENGTH = 3;
+  const CATALOG_CODE = "1234";
+
+  function normalizeCode(code) {
+    const lower = code.trim().toLowerCase();
+    if (lower === CATALOG_CODE || lower === "watchlist") return CATALOG_CODE;
+    return code.trim();
+  }
+
+  function isCatalogCode(code) {
+    return normalizeCode(code) === CATALOG_CODE;
+  }
 
   function listIdFromCode(code) {
-    const trimmed = code.trim();
+    const trimmed = normalizeCode(code);
     let hash = 5381;
 
     for (let i = 0; i < trimmed.length; i++) {
@@ -49,13 +60,52 @@
     };
   }
 
+  function isWatchlistEmpty(data) {
+    if (!data || typeof data !== "object") return true;
+
+    for (const genres of Object.values(data)) {
+      if (!genres || typeof genres !== "object") continue;
+      for (const titles of Object.values(genres)) {
+        if (Array.isArray(titles) && titles.length > 0) return false;
+      }
+    }
+
+    return true;
+  }
+
+  function readSavedWatchlist(listId) {
+    const raw = localStorage.getItem(storageKeys(listId).data);
+    if (!raw) return null;
+
+    try {
+      const data = JSON.parse(raw);
+      return isWatchlistEmpty(data) ? null : data;
+    } catch {
+      return null;
+    }
+  }
+
   function listHasData(listId) {
-    return Boolean(localStorage.getItem(storageKeys(listId).data));
+    return Boolean(readSavedWatchlist(listId));
+  }
+
+  function clearEmptySavedWatchlist(listId) {
+    const keys = storageKeys(listId);
+    const raw = localStorage.getItem(keys.data);
+    if (!raw) return;
+
+    try {
+      if (isWatchlistEmpty(JSON.parse(raw))) {
+        localStorage.removeItem(keys.data);
+      }
+    } catch {
+      localStorage.removeItem(keys.data);
+    }
   }
 
   function migrateLegacyData(listId) {
     const keys = storageKeys(listId);
-    if (localStorage.getItem(keys.data)) return;
+    if (listHasData(listId)) return;
 
     const migratedFlag = "watchlist-legacy-migrated-v1";
     if (localStorage.getItem(migratedFlag)) return;
@@ -110,15 +160,29 @@
   }
 
   function signIn(code, options = {}) {
-    const error = validateCode(code);
+    const normalized = normalizeCode(code);
+    const error = validateCode(normalized);
     if (error) return { ok: false, error };
 
-    const listId = listIdFromCode(code);
+    if (options.create && isCatalogCode(normalized)) {
+      return {
+        ok: false,
+        error: "That code is already in use. Use Open list instead.",
+      };
+    }
+
+    const listId = listIdFromCode(normalized);
 
     if (options.create) {
       localStorage.setItem(emptyListKey(listId), "1");
     } else {
       localStorage.removeItem(emptyListKey(listId));
+      clearEmptySavedWatchlist(listId);
+    }
+
+    if (isCatalogCode(normalized)) {
+      localStorage.removeItem(emptyListKey(listId));
+      clearEmptySavedWatchlist(listId);
     }
 
     migrateLegacyData(listId);
@@ -144,6 +208,7 @@
   }
 
   window.WatchlistAuth = {
+    CATALOG_CODE,
     MIN_CODE_LENGTH,
     getProfile,
     isAuthenticated,
@@ -152,6 +217,7 @@
     signIn,
     signOut,
     isEmptyList,
+    isWatchlistEmpty,
     clearEmptyListFlag,
     storageKeys,
     migrateLegacyData(listId) {

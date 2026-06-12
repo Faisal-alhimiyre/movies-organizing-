@@ -277,7 +277,12 @@
       ? structuredClone(window.WATCHLIST)
       : null;
     const saved = loadJson(data, null);
-    if (saved) return applyBundledGenreCorrections(saved, bundled);
+    const hasSavedTitles =
+      saved && !window.WatchlistAuth?.isWatchlistEmpty(saved);
+
+    if (hasSavedTitles) {
+      return applyBundledGenreCorrections(saved, bundled);
+    }
 
     const legacySaved = loadJson(legacy, null);
 
