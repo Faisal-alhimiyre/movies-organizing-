@@ -407,6 +407,37 @@
       </div>
     </div>
 
+    <div class="modal" id="moveListModal" hidden>
+      <div class="modal__backdrop" data-action="close-move-list-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="moveListModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="moveListModalTitle">Move to another list</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-move-list-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        <div class="modal__body">
+          <p class="backup-modal__text" id="moveListModalText"></p>
+          <ul class="move-list-picker" id="moveListPicker"></ul>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-move-list-modal">
+              Cancel
+            </button>
+          </footer>
+        </div>
+      </div>
+    </div>
+
     <div class="modal" id="importShareModal" hidden>
       <div class="modal__backdrop" data-action="close-import-share-modal"></div>
       <div

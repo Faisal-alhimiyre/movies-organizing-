@@ -49,6 +49,7 @@
 
   let pendingImportPayload = null;
   let editingListId = null;
+  let moveListItemId = null;
 
   const state = {
     type: "all",
@@ -92,6 +93,10 @@
     createListName: document.getElementById("createListName"),
     createListDescription: document.getElementById("createListDescription"),
     createListError: document.getElementById("createListError"),
+    moveListModal: document.getElementById("moveListModal"),
+    moveListModalTitle: document.getElementById("moveListModalTitle"),
+    moveListModalText: document.getElementById("moveListModalText"),
+    moveListPicker: document.getElementById("moveListPicker"),
     importInput: document.getElementById("importInput"),
     accountMenu: document.getElementById("accountMenu"),
     accountMenuBtn: document.getElementById("accountMenuBtn"),
@@ -174,12 +179,12 @@
     );
   }
 
-  function listSyncMeta() {
-    const listId = window.WatchlistAuth?.getProfile();
+  function listSyncMeta(listId) {
+    const id = listId || window.WatchlistAuth?.getProfile();
     return {
       accountId: window.WatchlistAuth?.getAccountId(),
-      name: window.WatchlistAuth?.getListLabel(listId),
-      description: window.WatchlistAuth?.getListDescription(listId),
+      name: window.WatchlistAuth?.getListLabel(id),
+      description: window.WatchlistAuth?.getListDescription(id),
     };
   }
 
@@ -680,6 +685,7 @@
 
     els.ratingModal.hidden = false;
     updateBodyScrollLock();
+    closeAllCardMenus();
     els.ratingPicker?.querySelector('[data-rating-star="5"]')?.focus();
   }
 
@@ -1435,15 +1441,23 @@
     const bodyStart = useCardBody ? '<div class="card__body">' : "";
     const bodyEnd = useCardBody ? "</div>" : "";
     const bodyHeader = `<div class="card__head">${badgesBlock}${titleBlock}</div>`;
-    const ratingBlock = rated
-      ? `<div class="card__rating">
+    const listIds = window.WatchlistAuth?.discoverListIds() || [];
+    const canMoveToList = listIds.length > 1;
+    const ratingFooter = rated
+      ? `<button
+          type="button"
+          class="card__rating card__rating--rated"
+          data-action="rate"
+          data-id="${escapeHtml(item.id)}"
+          aria-label="Edit rating"
+        >
           <span class="card__rating-score">${escapeHtml(formatWatchRating(watchEntry.rating))}/10</span>
           ${
             watchEntry.note
               ? `<p class="card__rating-note">${escapeHtml(watchEntry.note)}</p>`
               : ""
           }
-        </div>`
+        </button>`
       : isWatched
         ? `<div class="card__rating card__rating--pending">
             <button
@@ -1455,7 +1469,20 @@
               Rate
             </button>
           </div>`
-        : "";
+        : `<div class="card__rating card__rating--empty">
+            <span class="card__rating-placeholder">Not watched</span>
+          </div>`;
+    const moveToListItem = canMoveToList
+      ? `<button
+          type="button"
+          class="card-menu__item"
+          role="menuitem"
+          data-action="move-to-list"
+          data-id="${escapeHtml(item.id)}"
+        >
+          Move to another list
+        </button>`
+      : "";
 
     return `
       <article class="card${linkedClass}${isWatched ? " card--watched" : ""}" data-id="${escapeHtml(item.id)}"${linkAttr}${imdbAttr}>
@@ -1464,34 +1491,50 @@
         ${bodyHeader}
         <p class="card__lead">${escapeHtml((item.leads || parseLeads(item)).join(", "))}</p>
         <p class="card__summary">${escapeHtml(item.summary || parseSummary(item))}</p>
-        ${ratingBlock}
         <div class="card__footer">
-          <button
-            type="button"
-            class="watched-btn${isWatched ? " watched-btn--active" : ""}"
-            data-action="toggle-watched"
-            data-id="${escapeHtml(item.id)}"
-            aria-pressed="${isWatched}"
-          >
-            ${isWatched ? "✓ Watched" : "Mark watched"}
-          </button>
-          <div class="card__actions">
+          ${ratingFooter}
+          <div class="card-menu">
             <button
               type="button"
-              class="btn btn--ghost btn--sm"
-              data-action="edit"
+              class="card-menu__trigger"
+              data-action="toggle-card-menu"
               data-id="${escapeHtml(item.id)}"
+              aria-label="Title actions"
+              aria-haspopup="menu"
+              aria-expanded="false"
             >
-              Edit
+              <span aria-hidden="true">⋯</span>
             </button>
-            <button
-              type="button"
-              class="btn btn--danger btn--sm"
-              data-action="delete"
-              data-id="${escapeHtml(item.id)}"
-            >
-              Delete
-            </button>
+            <div class="card-menu__panel" hidden role="menu">
+              <button
+                type="button"
+                class="card-menu__item"
+                role="menuitem"
+                data-action="toggle-watched"
+                data-id="${escapeHtml(item.id)}"
+              >
+                ${isWatched ? "Mark unwatched" : "Mark watched"}
+              </button>
+              <button
+                type="button"
+                class="card-menu__item"
+                role="menuitem"
+                data-action="edit"
+                data-id="${escapeHtml(item.id)}"
+              >
+                Edit
+              </button>
+              ${moveToListItem}
+              <button
+                type="button"
+                class="card-menu__item card-menu__item--danger"
+                role="menuitem"
+                data-action="delete"
+                data-id="${escapeHtml(item.id)}"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         </div>
         ${bodyEnd}
@@ -1657,6 +1700,7 @@
 
     els.modal.hidden = false;
     updateBodyScrollLock();
+    closeAllCardMenus();
     if (state.addMode === "bulk") {
       els.bulkPasteInput?.focus();
     } else {
@@ -1685,7 +1729,8 @@
       !els.changeCodeModal?.hidden ||
       !els.importShareModal?.hidden ||
       !els.manageListsModal?.hidden ||
-      !els.createListModal?.hidden;
+      !els.createListModal?.hidden ||
+      !els.moveListModal?.hidden;
     document.body.style.overflow = anyOpen ? "hidden" : "";
   }
 
@@ -1898,6 +1943,168 @@
     if (!els.manageListsModal) return;
     els.manageListsModal.hidden = true;
     updateBodyScrollLock();
+  }
+
+  function closeAllCardMenus(exceptId) {
+    els.main?.querySelectorAll(".card-menu__panel:not([hidden])").forEach((panel) => {
+      const card = panel.closest(".card");
+      const cardId = card?.dataset.id;
+      if (exceptId && cardId === exceptId) return;
+      panel.hidden = true;
+      panel
+        .closest(".card-menu")
+        ?.querySelector(".card-menu__trigger")
+        ?.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function toggleCardMenu(cardId) {
+    const card = els.main?.querySelector(`.card[data-id="${CSS.escape(cardId)}"]`);
+    if (!card) return;
+
+    const panel = card.querySelector(".card-menu__panel");
+    const trigger = card.querySelector(".card-menu__trigger");
+    if (!panel || !trigger) return;
+
+    const willOpen = panel.hidden;
+    closeAllCardMenus(willOpen ? cardId : null);
+    panel.hidden = !willOpen;
+    trigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  }
+
+  function findDuplicateInItems(items, item) {
+    return items.find(
+      (entry) =>
+        entry.contentType === item.contentType && entry.title === item.title
+    );
+  }
+
+  async function duplicateItemToList(itemId, targetListId) {
+    const item = state.items.find((entry) => entry.id === itemId);
+    if (!item) return { ok: false, error: "Title not found." };
+
+    const currentListId = window.WatchlistAuth?.getProfile();
+    if (targetListId === currentListId) {
+      return { ok: false, error: "That title is already on this list." };
+    }
+
+    const payload = readLocalListPayload(targetListId);
+    const targetItems = flattenWatchlist(payload.watchlist);
+    const copy = structuredClone(item);
+    copy.id = makeId(copy.contentType, copy.genre, copy.title);
+
+    if (findDuplicateInItems(targetItems, copy)) {
+      return {
+        ok: false,
+        error: `"${item.title}" is already on ${window.WatchlistAuth.getListLabel(targetListId)}.`,
+      };
+    }
+
+    targetItems.push(copy);
+    const watchlist = itemsToNested(targetItems);
+    const watched = { ...payload.watched };
+    if (state.watched[itemId]) {
+      watched[copy.id] = structuredClone(state.watched[itemId]);
+    }
+
+    window.WatchlistAuth.writeListData(targetListId, watchlist, watched);
+    writeSyncMeta(targetListId, { localUpdated: Date.now() });
+
+    if (window.WatchlistSync?.isConfigured()) {
+      const result = await window.WatchlistSync.pushSnapshot(
+        targetListId,
+        watchlist,
+        watched,
+        listSyncMeta(targetListId)
+      );
+      if (result?.ok) {
+        writeSyncMeta(targetListId, { syncedAt: Date.now() });
+      }
+    }
+
+    return {
+      ok: true,
+      listName: window.WatchlistAuth.getListLabel(targetListId),
+    };
+  }
+
+  function renderMoveListPicker() {
+    if (!els.moveListPicker) return;
+
+    const currentListId = window.WatchlistAuth?.getProfile();
+    const library = window.WatchlistAuth?.getLibrary() || [];
+    const listIds = (window.WatchlistAuth?.discoverListIds() || []).filter(
+      (listId) => listId !== currentListId
+    );
+
+    if (!listIds.length) {
+      els.moveListPicker.innerHTML = `<li class="move-list-picker__empty">Create another list first.</li>`;
+      return;
+    }
+
+    els.moveListPicker.innerHTML = listIds
+      .map((listId) => {
+        const entry = library.find((item) => item.listId === listId);
+        const label = entry?.name || entry?.label || "Unnamed list";
+        const titleCount = window.WatchlistAuth.getListTitleCount(listId);
+        return `<li>
+          <button
+            type="button"
+            class="move-list-picker__item"
+            data-action="pick-move-list"
+            data-list-id="${escapeHtml(listId)}"
+          >
+            <span class="move-list-picker__name">${escapeHtml(label)}</span>
+            <span class="move-list-picker__meta">${titleCount} titles</span>
+          </button>
+        </li>`;
+      })
+      .join("");
+  }
+
+  function openMoveListModal(itemId) {
+    if (!els.moveListModal) return;
+
+    const item = state.items.find((entry) => entry.id === itemId);
+    if (!item) return;
+
+    moveListItemId = itemId;
+    if (els.moveListModalTitle) {
+      els.moveListModalTitle.textContent = "Move to another list";
+    }
+    if (els.moveListModalText) {
+      els.moveListModalText.textContent = `Copy “${item.title}” to another list. Your current list stays unchanged.`;
+    }
+    renderMoveListPicker();
+    closeAllCardMenus();
+    els.moveListModal.hidden = false;
+    updateBodyScrollLock();
+    els.moveListPicker?.querySelector("button")?.focus();
+  }
+
+  function closeMoveListModal() {
+    if (!els.moveListModal) return;
+    els.moveListModal.hidden = true;
+    moveListItemId = null;
+    updateBodyScrollLock();
+  }
+
+  async function handleMoveListPick(targetListId) {
+    if (!moveListItemId || !targetListId) return;
+
+    const item = state.items.find((entry) => entry.id === moveListItemId);
+    const result = await duplicateItemToList(moveListItemId, targetListId);
+    closeMoveListModal();
+
+    if (!result.ok) {
+      await window.WatchlistDialog.alert(result.error, { title: "Could not move" });
+      return;
+    }
+
+    await window.WatchlistDialog.alert(
+      `“${item?.title || "Title"}” was copied to ${result.listName}.`,
+      { title: "Copied to list" }
+    );
   }
 
   function setCreateListError(message) {
@@ -2811,6 +3018,26 @@
       }
     });
 
+    els.moveListModal?.addEventListener("click", async (event) => {
+      const target = event.target.closest("[data-action]");
+      if (!target) return;
+
+      const action = target.dataset.action;
+      if (action === "close-move-list-modal") {
+        closeMoveListModal();
+        return;
+      }
+
+      if (action === "pick-move-list") {
+        await handleMoveListPick(target.dataset.listId);
+      }
+    });
+
+    document.addEventListener("click", (event) => {
+      if (event.target.closest(".card-menu")) return;
+      closeAllCardMenus();
+    });
+
     els.importShareModal?.addEventListener("click", async (event) => {
       const action = event.target.closest("[data-action]")?.dataset.action;
       if (!action) return;
@@ -2983,6 +3210,10 @@
         closeManageListsModal();
         return;
       }
+      if (!els.moveListModal?.hidden) {
+        closeMoveListModal();
+        return;
+      }
       if (!els.importShareModal?.hidden) {
         closeImportShareModal();
         return;
@@ -3049,7 +3280,12 @@
 
     els.main.addEventListener("click", async (event) => {
       const card = event.target.closest(".card--linked");
-      if (card && !event.target.closest("button") && card.dataset.link) {
+      if (
+        card &&
+        !event.target.closest("button") &&
+        !event.target.closest(".card-menu__panel") &&
+        card.dataset.link
+      ) {
         window.open(card.dataset.link, "_blank", "noopener,noreferrer");
         return;
       }
@@ -3059,6 +3295,18 @@
 
       const action = target.dataset.action;
       const id = target.dataset.id;
+
+      if (action === "toggle-card-menu") {
+        event.stopPropagation();
+        toggleCardMenu(id);
+        return;
+      }
+
+      if (action === "move-to-list") {
+        closeAllCardMenus();
+        openMoveListModal(id);
+        return;
+      }
 
       if (action === "toggle-watched") {
         if (isItemWatched(id)) {
