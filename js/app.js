@@ -54,7 +54,7 @@
     type: "all",
     selectedGenres: [],
     search: "",
-    watchedOnly: false,
+    watchedFilter: "all",
     watched: {},
     data: null,
     items: [],
@@ -79,7 +79,7 @@
     search: document.getElementById("searchInput"),
     genre: document.getElementById("genreSelect"),
     genreFilterChips: document.getElementById("genreFilterChips"),
-    watchedOnly: document.getElementById("watchedOnly"),
+    watchedFilter: document.getElementById("watchedFilter"),
     exportBtn: null,
     importBtn: null,
     manageListsBtn: null,
@@ -109,6 +109,9 @@
     listSwitcher: document.getElementById("listSwitcher"),
     importShareModal: document.getElementById("importShareModal"),
     importShareModalText: document.getElementById("importShareModalText"),
+    importShareModalHint: document.getElementById("importShareModalHint"),
+    importMergeBtn: document.getElementById("importMergeBtn"),
+    importReplaceBtn: document.getElementById("importReplaceBtn"),
     layoutToggles: document.getElementById("layoutToggles"),
     linkPreviewPopover: document.getElementById("linkPreviewPopover"),
     linkPreviewPopoverInner: document.getElementById("linkPreviewPopoverInner"),
@@ -863,6 +866,12 @@
     return matching[0];
   }
 
+  function itemMatchesWatchedFilter(item) {
+    if (state.watchedFilter === "watched") return isItemWatched(item.id);
+    if (state.watchedFilter === "unwatched") return !isItemWatched(item.id);
+    return true;
+  }
+
   function getFilteredItems() {
     const query = state.search.trim().toLowerCase();
 
@@ -870,7 +879,7 @@
       if (state.type !== "all" && item.contentType !== state.type) return false;
       if (!itemMatchesGenreFilter(item)) return false;
       if (!matchesSearch(item, query)) return false;
-      if (state.watchedOnly && !isItemWatched(item.id)) return false;
+      if (!itemMatchesWatchedFilter(item)) return false;
       return true;
     });
   }
@@ -2372,6 +2381,21 @@
       .join("");
   }
 
+  function uniqueImportedListName(baseName) {
+    const trimmed = String(baseName || "Imported list").trim().slice(0, 48) || "Imported list";
+    const library = window.WatchlistAuth?.getLibrary() || [];
+    const taken = new Set(library.map((entry) => entry.name));
+
+    if (!taken.has(trimmed)) return trimmed;
+
+    for (let suffix = 2; suffix < 100; suffix += 1) {
+      const candidate = `${trimmed.slice(0, 44)} (${suffix})`;
+      if (!taken.has(candidate)) return candidate;
+    }
+
+    return `${trimmed.slice(0, 40)} ${Date.now()}`;
+  }
+
   function openImportShareModal(payload) {
     if (!els.importShareModal) return;
 
@@ -2379,12 +2403,80 @@
     const listName = payload.listName || "Shared list";
     const titleCount = countTitles(payload.watchlist);
     const currentCount = state.items.length;
+    const currentListName = window.WatchlistAuth?.getListLabel() || "My list";
 
-    els.importShareModalText.textContent = `"${listName}" has ${titleCount} titles. You have ${currentCount}. Add them to your list, or replace yours with this file.`;
+    if (currentCount > 0) {
+      els.importShareModalText.textContent = `"${listName}" has ${titleCount} titles. You're on "${currentListName}" with ${currentCount}.`;
+      if (els.importShareModalHint) {
+        els.importShareModalHint.textContent =
+          "Open as a new list to keep yours untouched, or add/replace titles on your current list.";
+      }
+      if (els.importMergeBtn) els.importMergeBtn.hidden = false;
+      if (els.importReplaceBtn) {
+        els.importReplaceBtn.hidden = false;
+        els.importReplaceBtn.textContent = "Replace my current list";
+        els.importReplaceBtn.classList.remove("btn--ghost");
+        els.importReplaceBtn.classList.add("btn--danger");
+      }
+    } else {
+      els.importShareModalText.textContent = `"${listName}" has ${titleCount} titles. Your current list is empty.`;
+      if (els.importShareModalHint) {
+        els.importShareModalHint.textContent =
+          "Open as a new list (recommended), or add these titles to your current list.";
+      }
+      if (els.importMergeBtn) els.importMergeBtn.hidden = true;
+      if (els.importReplaceBtn) {
+        els.importReplaceBtn.hidden = false;
+        els.importReplaceBtn.textContent = "Add to this list";
+        els.importReplaceBtn.classList.remove("btn--danger");
+        els.importReplaceBtn.classList.add("btn--ghost");
+      }
+    }
 
     els.importShareModal.hidden = false;
     closeShareModal();
     updateBodyScrollLock();
+    els.importShareModal.querySelector("[data-action='import-new-list']")?.focus();
+  }
+
+  async function importAsNewList(payload) {
+    const titleCount = countTitles(payload.watchlist);
+    const name = uniqueImportedListName(payload.listName);
+    const description = `Imported ${titleCount} title${titleCount === 1 ? "" : "s"}`;
+
+    const result = window.WatchlistAuth.createList(name, description);
+    if (!result.ok) {
+      await window.WatchlistDialog.alert(result.error || "Could not create a new list.", {
+        title: "Import failed",
+      });
+      return false;
+    }
+
+    if (window.WatchlistSync?.isConfigured()) {
+      const cloud = await window.WatchlistSync.createListRow(
+        result.accountId,
+        result.listId,
+        name,
+        description
+      );
+      if (!cloud.ok) {
+        await window.WatchlistDialog.alert(
+          "Created locally, but cloud sync failed. Your new list is on this device.",
+          { title: "Saved locally" }
+        );
+      }
+    }
+
+    applyImportToCurrentList(payload);
+    const cloud = await syncCurrentListToCloud();
+    return { ok: cloud.ok, listName: name };
+  }
+
+  function updateHeaderTitle() {
+    const headerTitle = document.getElementById("headerTitle");
+    if (headerTitle) {
+      headerTitle.textContent = window.WatchlistAuth?.getListLabel() || "My list";
+    }
   }
 
   async function syncCurrentListToCloud() {
@@ -2398,28 +2490,94 @@
     );
   }
 
-  function mergeImportIntoCurrentList(payload) {
-    const merged = mergeLegacyWithBundled(payload.watchlist, state.data);
-    state.data = applyBundledGenreCorrections(merged, null);
-    state.items = flattenWatchlist(state.data);
-    state.data = itemsToNested(state.items);
+  function findImportedWatchEntry(item, watchedMap) {
+    for (const [oldId, value] of Object.entries(watchedMap || {})) {
+      if (!value) continue;
+      const parts = oldId.split("::");
+      if (parts[0] === item.contentType && parts[parts.length - 1] === item.title) {
+        return normalizeWatchEntry(value);
+      }
+    }
+    return null;
+  }
 
-    const importedItems = flattenWatchlist(remapWatchlistGenres(payload.watchlist));
-    for (const item of importedItems) {
-      const wasWatched = Object.entries(payload.watched || {}).some(([oldId, value]) => {
-        if (!value) return false;
-        const parts = oldId.split("::");
-        return parts[0] === item.contentType && parts[parts.length - 1] === item.title;
-      });
-      if (wasWatched) {
-        state.watched[makeId(item.contentType, item.genre, item.title)] =
-          normalizeWatchEntry(value) || {};
+  function buildExportPayload() {
+    const watched = {};
+    for (const [id, value] of Object.entries(state.watched)) {
+      const entry = normalizeWatchEntry(value);
+      if (entry) watched[id] = entry;
+    }
+
+    let ratedCount = 0;
+    for (const entry of Object.values(watched)) {
+      if (hasWatchRating(entry)) ratedCount += 1;
+    }
+
+    return {
+      formatVersion: 2,
+      app: "Our Movie Nights",
+      exportedAt: new Date().toISOString(),
+      listName: window.WatchlistAuth?.getListLabel() || "My list",
+      watchlist: state.data,
+      watched,
+      stats: {
+        titles: state.items.length,
+        watched: Object.keys(watched).length,
+        rated: ratedCount,
+      },
+    };
+  }
+
+  function exportFilename(payload) {
+    const safeName = (payload.listName || "watchlist")
+      .replace(/[^\w\-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .toLowerCase();
+    return `${safeName || "watchlist"}-${new Date().toISOString().slice(0, 10)}.json`;
+  }
+
+  async function exportBackup() {
+    const payload = buildExportPayload();
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const filename = exportFilename(payload);
+    const file = new File([blob], filename, { type: "application/json" });
+
+    closeShareModal();
+
+    if (navigator.share) {
+      try {
+        const shareData = {
+          title: `${payload.listName} — Our Movie Nights`,
+          text: "My watchlist backup. Open Our Movie Nights → Share → Import a list.",
+          files: [file],
+        };
+
+        if (!navigator.canShare || navigator.canShare(shareData)) {
+          await navigator.share(shareData);
+          await window.WatchlistDialog.alert(
+            "If the share finished, your friend can import the file from Share → Import a list.",
+            { title: "List shared" }
+          );
+          return;
+        }
+      } catch (error) {
+        if (error?.name === "AbortError") return;
       }
     }
 
-    window.WatchlistAuth?.clearEmptyListFlag();
-    saveData();
-    saveWatched();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    await window.WatchlistDialog.alert(
+      "Your list file was downloaded. Send it by WhatsApp, email, or any chat app. Your friend opens the app → Share → Import a list.",
+      { title: "List ready to send" }
+    );
   }
 
   function applyImportToCurrentList(payload) {
@@ -2437,17 +2595,27 @@
   }
 
   async function finishImport(payload, mode) {
-    if (mode === "merge") {
+    let cloud = { ok: true };
+    let importedListName = "";
+
+    if (mode === "new-list") {
+      const result = await importAsNewList(payload);
+      if (!result) return;
+      cloud = result;
+      importedListName = result.listName;
+    } else if (mode === "merge") {
       mergeImportIntoCurrentList(payload);
+      cloud = await syncCurrentListToCloud();
     } else {
       applyImportToCurrentList(payload);
+      cloud = await syncCurrentListToCloud();
     }
 
-    const cloud = await syncCurrentListToCloud();
     pendingImportPayload = null;
     closeImportShareModal();
     updateGenreOptions();
     renderListSwitcher();
+    updateHeaderTitle();
     render();
 
     if (!cloud.ok) {
@@ -2459,10 +2627,14 @@
     }
 
     const message =
-      mode === "merge"
-        ? "New titles were added to your list."
-        : "Your list was replaced with your friend's list.";
-    await window.WatchlistDialog.alert(message, { title: "List added" });
+      mode === "new-list"
+        ? `Opened "${importedListName}" as a new list. Your previous list is unchanged.`
+        : mode === "merge"
+          ? "New titles were added to your current list."
+          : "Your current list was updated with the imported file.";
+    await window.WatchlistDialog.alert(message, {
+      title: mode === "new-list" ? "New list created" : "List updated",
+    });
   }
 
   async function importBackup(file) {
@@ -2477,21 +2649,7 @@
         }
 
         closeShareModal();
-
-        if (state.items.length > 0) {
-          openImportShareModal(payload);
-          return;
-        }
-
-        applyImportToCurrentList(payload);
-        await syncCurrentListToCloud();
-        updateGenreOptions();
-        renderListSwitcher();
-        render();
-        await window.WatchlistDialog.alert(
-          `"${payload.listName || "The list"}" was added to your list.`,
-          { title: "List added" }
-        );
+        openImportShareModal(payload);
       } catch {
         window.WatchlistDialog.alert(
           "Could not read that file. Ask your friend to send one downloaded from this app.",
@@ -2502,28 +2660,23 @@
     reader.readAsText(file);
   }
 
-  function exportBackup() {
-    const payload = {
-      exportedAt: new Date().toISOString(),
-      listName: window.WatchlistAuth?.getListLabel() || "My list",
-      watchlist: state.data,
-      watched: state.watched,
-    };
+  function mergeImportIntoCurrentList(payload) {
+    const merged = mergeLegacyWithBundled(payload.watchlist, state.data);
+    state.data = applyBundledGenreCorrections(merged, null);
+    state.items = flattenWatchlist(state.data);
+    state.data = itemsToNested(state.items);
 
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    const safeName = (payload.listName || "watchlist")
-      .replace(/[^\w\-]+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "")
-      .toLowerCase();
-    link.download = `${safeName || "watchlist"}-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+    const importedItems = flattenWatchlist(remapWatchlistGenres(payload.watchlist));
+    for (const item of importedItems) {
+      const watchEntry = findImportedWatchEntry(item, payload.watched);
+      if (!watchEntry) continue;
+
+      state.watched[makeId(item.contentType, item.genre, item.title)] = watchEntry;
+    }
+
+    window.WatchlistAuth?.clearEmptyListFlag();
+    saveData();
+    saveWatched();
   }
 
   function bindEvents() {
@@ -2553,8 +2706,8 @@
       render();
     });
 
-    els.watchedOnly.addEventListener("change", () => {
-      state.watchedOnly = els.watchedOnly.checked;
+    els.watchedFilter?.addEventListener("change", () => {
+      state.watchedFilter = els.watchedFilter.value || "all";
       render();
     });
 
@@ -2599,7 +2752,7 @@
       if (event.target.closest("#accountMenu")) return;
       closeAccountMenu();
     });
-    els.shareModal?.addEventListener("click", (event) => {
+    els.shareModal?.addEventListener("click", async (event) => {
       const action = event.target.closest("[data-action]")?.dataset.action;
       if (!action) return;
 
@@ -2609,8 +2762,7 @@
       }
 
       if (action === "share-send") {
-        exportBackup();
-        closeShareModal();
+        await exportBackup();
         return;
       }
 
@@ -2668,12 +2820,45 @@
         return;
       }
 
+      if (action === "import-new-list" && pendingImportPayload) {
+        await finishImport(pendingImportPayload, "new-list");
+        return;
+      }
+
       if (action === "import-merge" && pendingImportPayload) {
+        const listName = pendingImportPayload.listName || "Shared list";
+        const titleCount = countTitles(pendingImportPayload.watchlist);
+        const currentName = window.WatchlistAuth?.getListLabel() || "My list";
+        const confirmed = await window.WatchlistDialog.confirm(
+          `Add ${titleCount} titles from "${listName}" to "${currentName}"? Duplicates will be skipped.`,
+          {
+            title: "Add to current list?",
+            confirmLabel: "Add titles",
+            cancelLabel: "Cancel",
+          }
+        );
+        if (!confirmed) return;
         await finishImport(pendingImportPayload, "merge");
         return;
       }
 
       if (action === "import-replace" && pendingImportPayload) {
+        const listName = pendingImportPayload.listName || "Shared list";
+        const titleCount = countTitles(pendingImportPayload.watchlist);
+        const currentName = window.WatchlistAuth?.getListLabel() || "My list";
+        const replacing = state.items.length > 0;
+        const confirmed = await window.WatchlistDialog.confirm(
+          replacing
+            ? `Replace "${currentName}" with "${listName}" (${titleCount} titles)? Your current list will be lost.`
+            : `Add ${titleCount} titles from "${listName}" to your list?`,
+          {
+            title: replacing ? "Replace current list?" : "Add to this list?",
+            confirmLabel: replacing ? "Replace list" : "Add titles",
+            cancelLabel: "Cancel",
+            danger: replacing,
+          }
+        );
+        if (!confirmed) return;
         await finishImport(pendingImportPayload, "replace");
       }
     });

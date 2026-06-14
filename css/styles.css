@@ -356,6 +356,11 @@ body {
   box-shadow: 0 0 0 3px rgba(232, 184, 74, 0.12);
 }
 
+.watched-filter__select {
+  min-width: 132px;
+  flex: 0 0 auto;
+}
+
 .genre-filter__chips {
   display: flex;
   flex-wrap: wrap;
@@ -1286,7 +1291,7 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0;
+  gap: 0.25rem;
   width: 100%;
   min-height: 3.25rem;
   padding: 0.85rem 1rem;
@@ -1298,6 +1303,11 @@ body {
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
+}
+
+.share-modal__intro {
+  margin-top: 0.35rem;
+  text-align: center;
 }
 
 .share-option:hover,
@@ -1976,22 +1986,16 @@ body {
     width: auto;
   }
 
-  .filter-check {
+  .watched-filter__select {
     grid-column: 1 / -1;
     grid-row: 2;
-    width: auto;
-    justify-content: flex-start;
-    height: auto;
-    min-height: 0;
-    padding: 0;
-    font-size: 0.76rem;
-    background: transparent;
-    border: none;
-    border-radius: 0;
+    width: 100%;
+    min-width: 0;
   }
 
   .search__input,
   .genre-filter__select,
+  .watched-filter__select,
   .gate__input,
   .form-input,
   .form-textarea {

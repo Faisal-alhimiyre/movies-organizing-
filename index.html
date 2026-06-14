@@ -62,7 +62,7 @@
                   ></select>
                 </div>
                 <button type="button" class="account-menu__item" role="menuitem" data-action="manage-lists">
-                  My lists
+                  Manage lists
                 </button>
                 <button type="button" class="account-menu__item" role="menuitem" data-action="share">
                   Share
@@ -159,10 +159,11 @@
             <div class="genre-filter__chips" id="genreFilterChips"></div>
           </div>
 
-          <label class="filter-check">
-            <input type="checkbox" id="watchedOnly" />
-            <span>Watched only</span>
-          </label>
+          <select id="watchedFilter" class="genre-filter__select watched-filter__select" aria-label="Filter by watched status">
+            <option value="all">All</option>
+            <option value="watched">Watched</option>
+            <option value="unwatched">Not watched</option>
+          </select>
         </div>
       </section>
 
@@ -299,12 +300,17 @@
         </header>
         <div class="modal__body">
           <p class="share-modal__tagline">Share the fun!</p>
+          <p class="backup-modal__text share-modal__intro">
+            Lists are shared as a small backup file. On phones, use WhatsApp, email, or any chat app — then your friend imports it here.
+          </p>
           <div class="share-options">
             <button type="button" class="share-option" data-action="share-send">
               <span class="share-option__title">Send my list</span>
+              <span class="share-option__desc">Includes titles, watched state, ratings, and your notes</span>
             </button>
             <button type="button" class="share-option" data-action="share-receive">
               <span class="share-option__title">Import a list</span>
+              <span class="share-option__desc">Pick the file your friend sent (.json)</span>
             </button>
           </div>
           <footer class="modal__footer modal__footer--simple">
@@ -325,7 +331,7 @@
         aria-labelledby="manageListsModalTitle"
       >
         <header class="modal__header">
-          <h2 class="modal__title" id="manageListsModalTitle">My lists</h2>
+          <h2 class="modal__title" id="manageListsModalTitle">Manage lists</h2>
           <button
             type="button"
             class="modal__close"
@@ -422,15 +428,18 @@
         </header>
         <div class="modal__body">
           <p class="backup-modal__text" id="importShareModalText"></p>
-          <p class="backup-modal__hint">
-            This saves to the list you’re signed into now. Your friend’s list stays separate.
+          <p class="backup-modal__hint" id="importShareModalHint">
+            Choose how to import. Opening as a new list keeps your current list unchanged.
           </p>
           <footer class="modal__footer modal__footer--stacked">
-            <button type="button" class="btn btn--primary" data-action="import-merge">
-              Add to my list
+            <button type="button" class="btn btn--primary" data-action="import-new-list">
+              Open as new list
             </button>
-            <button type="button" class="btn btn--ghost" data-action="import-replace">
-              Replace my list
+            <button type="button" class="btn btn--ghost" data-action="import-merge" id="importMergeBtn">
+              Add to my current list
+            </button>
+            <button type="button" class="btn btn--danger" data-action="import-replace" id="importReplaceBtn">
+              Replace my current list
             </button>
             <button type="button" class="btn btn--text" data-action="close-import-share-modal">
               Cancel
