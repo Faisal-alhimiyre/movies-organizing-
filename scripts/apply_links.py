@@ -26,5 +26,10 @@ if missing:
 
 text = json.dumps(watchlist, indent=2, ensure_ascii=False) + "\n"
 watchlist_path.write_text(text, encoding="utf-8")
-(ROOT / "js" / "data.js").write_text(f"window.WATCHLIST = {text[:-1]};\n", encoding="utf-8")
-print(f"Linked {count} titles")
+    (ROOT / "js" / "data.js").write_text(
+        "// Data lives in Supabase. Re-seed with: python scripts/seed_supabase.py YOUR_CODE\n"
+        "window.WATCHLIST = null;\n",
+        encoding="utf-8",
+    )
+    print(f"Linked {count} titles")
+    print("Re-seed Supabase with: python scripts/seed_supabase.py YOUR_CODE")

@@ -41,29 +41,27 @@
           </button>
         </div>
 
-        <form id="openForm" class="gate__panel">
-          <p class="gate__hint">Enter your code.</p>
+        <form id="openForm" class="gate__panel" novalidate>
+          <p class="gate__hint">6+ characters, letters and numbers, no spaces. Capitals don't matter.</p>
           <input
             type="password"
             id="openCode"
             class="gate__input gate__input--block"
             autocomplete="current-password"
             placeholder="Your code"
-            minlength="3"
             required
           />
           <button type="submit" class="btn btn--primary gate__submit">Open</button>
         </form>
 
-        <form id="createForm" class="gate__panel" hidden>
-          <p class="gate__hint">Choose a code you will remember.</p>
+        <form id="createForm" class="gate__panel" hidden novalidate>
+          <p class="gate__hint">6+ characters, letters and numbers, no spaces. Capitals don't matter.</p>
           <input
             type="password"
             id="createCode"
             class="gate__input gate__input--block"
             autocomplete="new-password"
             placeholder="Choose a code"
-            minlength="3"
             required
           />
           <input
@@ -72,7 +70,6 @@
             class="gate__input gate__input--block"
             autocomplete="new-password"
             placeholder="Confirm code"
-            minlength="3"
             required
           />
           <button type="submit" class="btn btn--primary gate__submit">Create list</button>
@@ -82,7 +79,11 @@
       </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/dialog.js"></script>
     <script src="js/auth.js"></script>
+    <script src="js/sync.js"></script>
     <script src="js/gate.js"></script>
   </body>
 </html>

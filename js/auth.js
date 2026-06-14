@@ -1,21 +1,173 @@
 (function () {
   "use strict";
 
-  const SESSION_KEY = "watchlist-session-v1";
-  const MIN_CODE_LENGTH = 3;
-  const CATALOG_CODE = "1234";
+  const SESSION_KEY = "watchlist-session-v2";
+  const LEGACY_SESSION_KEY = "watchlist-session-v1";
+  const LEGACY_LIBRARY_KEY = "watchlist-library-v1";
+  const LIBRARY_PREFIX = "watchlist-library-v2-";
+  const MIN_CODE_LENGTH = 6;
+
+  function readJson(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function libraryKey(accountId) {
+    return `${LIBRARY_PREFIX}${accountId}`;
+  }
+
+  function getAccountId() {
+    return getSession()?.accountId || null;
+  }
+
+  function getLibrary(accountId) {
+    const id = accountId || getAccountId();
+    if (!id) return [];
+    return readJson(libraryKey(id), []);
+  }
+
+  function saveLibrary(accountId, entries) {
+    if (!accountId) return;
+    localStorage.setItem(libraryKey(accountId), JSON.stringify(entries));
+  }
+
+  function migrateLegacyLibrary(accountId) {
+    const existing = getLibrary(accountId);
+    if (existing.length) return;
+
+    const legacy = readJson(LEGACY_LIBRARY_KEY, []);
+    const relevant = legacy
+      .filter((entry) => entry.listId === accountId || entry.accountId === accountId)
+      .map((entry) => ({
+        listId: entry.listId,
+        accountId,
+        name: entry.name || entry.label || "My list",
+        description: entry.description || "",
+        addedAt: entry.addedAt || Date.now(),
+        updatedAt: Date.now(),
+      }));
+
+    if (relevant.length) {
+      saveLibrary(accountId, relevant);
+      return;
+    }
+
+    if (listHasData(accountId) || localStorage.getItem(emptyListKey(accountId))) {
+      saveLibrary(accountId, [
+        {
+          listId: accountId,
+          accountId,
+          name: "My list",
+          description: "",
+          addedAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      ]);
+    }
+  }
+
+  function registerList(listId, meta = {}) {
+    const accountId = meta.accountId || getAccountId();
+    if (!accountId || !listId) return;
+
+    const library = getLibrary(accountId);
+    const index = library.findIndex((entry) => entry.listId === listId);
+    const next = {
+      listId,
+      accountId,
+      name: meta.name || meta.label || "My list",
+      description: meta.description || "",
+      updatedAt: Date.now(),
+    };
+
+    if (index >= 0) {
+      library[index] = { ...library[index], ...next };
+    } else {
+      library.push({ ...next, addedAt: Date.now() });
+    }
+
+    saveLibrary(accountId, library);
+  }
+
+  function getListEntry(listId) {
+    const id = listId || getProfile();
+    return getLibrary().find((entry) => entry.listId === id) || null;
+  }
+
+  function getListLabel(listId) {
+    return getListEntry(listId)?.name || "My list";
+  }
+
+  function getListDescription(listId) {
+    return getListEntry(listId)?.description || "";
+  }
+
+  function lastListKey(accountId) {
+    return `watchlist-last-list-${accountId}`;
+  }
+
+  function switchList(listId) {
+    const accountId = getAccountId();
+    if (!accountId || !listId) return;
+    if (!getLibrary(accountId).some((entry) => entry.listId === listId)) return;
+    localStorage.setItem(lastListKey(accountId), listId);
+    setSession(accountId, listId);
+  }
+
+  function writeListData(listId, watchlist, watched) {
+    const keys = storageKeys(listId);
+    localStorage.setItem(keys.data, JSON.stringify(watchlist));
+    localStorage.setItem(keys.watched, JSON.stringify(watched || {}));
+    localStorage.removeItem(emptyListKey(listId));
+  }
+
+  function emptyWatchlist() {
+    return { movies: {}, tvSeries: {}, anime: {} };
+  }
 
   function normalizeCode(code) {
-    const lower = code.trim().toLowerCase();
-    if (lower === CATALOG_CODE || lower === "watchlist") return CATALOG_CODE;
-    return code.trim();
+    return String(code).trim().toLowerCase();
   }
 
-  function isCatalogCode(code) {
-    return normalizeCode(code) === CATALOG_CODE;
+  function isLegacyNumericCode(code) {
+    const normalized = normalizeCode(code);
+    return /^[0-9]{3,}$/.test(normalized);
   }
 
-  function listIdFromCode(code) {
+  function validateCode(code, options = {}) {
+    const forCreate = Boolean(options.forCreate);
+    const raw = String(code);
+
+    if (/\s/.test(raw)) {
+      return "Spaces are not allowed.";
+    }
+
+    const normalized = normalizeCode(code);
+
+    if (!forCreate && isLegacyNumericCode(code)) {
+      return null;
+    }
+
+    if (normalized.length < MIN_CODE_LENGTH) {
+      return `Use at least ${MIN_CODE_LENGTH} characters.`;
+    }
+
+    if (!/[a-z]/.test(normalized)) {
+      return "Use at least one letter.";
+    }
+
+    if (!/[0-9]/.test(normalized)) {
+      return "Use at least one number.";
+    }
+
+    return null;
+  }
+
+  function accountIdFromCode(code) {
     const trimmed = normalizeCode(code);
     let hash = 5381;
 
@@ -26,7 +178,39 @@
     return "l" + (hash >>> 0).toString(36);
   }
 
+  function listIdFromCode(code) {
+    return accountIdFromCode(code);
+  }
+
+  function generateListId() {
+    return `lst_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function migrateLegacySession() {
+    try {
+      const legacy = sessionStorage.getItem(LEGACY_SESSION_KEY);
+      if (!legacy || sessionStorage.getItem(SESSION_KEY)) return;
+
+      const parsed = JSON.parse(legacy);
+      if (!parsed?.listId) return;
+
+      const accountId = parsed.accountId || parsed.listId;
+      sessionStorage.setItem(
+        SESSION_KEY,
+        JSON.stringify({
+          accountId,
+          listId: parsed.listId,
+          needsCodeUpgrade: parsed.needsCodeUpgrade,
+        })
+      );
+      sessionStorage.removeItem(LEGACY_SESSION_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
   function getSession() {
+    migrateLegacySession();
     try {
       const raw = sessionStorage.getItem(SESSION_KEY);
       return raw ? JSON.parse(raw) : null;
@@ -35,16 +219,20 @@
     }
   }
 
-  function setSession(listId) {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ listId }));
+  function setSession(accountId, listId, extras = {}) {
+    sessionStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({ accountId, listId, ...extras })
+    );
   }
 
   function clearSession() {
     sessionStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(LEGACY_SESSION_KEY);
   }
 
   function isAuthenticated() {
-    return Boolean(getSession()?.listId);
+    return Boolean(getSession()?.accountId && getSession()?.listId);
   }
 
   function getProfile() {
@@ -58,6 +246,10 @@
       watched: `watchlist-watched-v1-${id}`,
       legacy: `watchlist-data-v1-${id}`,
     };
+  }
+
+  function syncMetaKey(listId) {
+    return `watchlist-sync-meta-${listId}`;
   }
 
   function isWatchlistEmpty(data) {
@@ -103,11 +295,12 @@
     }
   }
 
-  function migrateLegacyData(listId) {
-    const keys = storageKeys(listId);
-    if (listHasData(listId)) return;
+  function migrateLegacyData(accountId) {
+    const primaryListId = accountId;
+    const keys = storageKeys(primaryListId);
+    if (listHasData(primaryListId)) return;
 
-    const migratedFlag = "watchlist-legacy-migrated-v1";
+    const migratedFlag = `watchlist-legacy-migrated-v2-${accountId}`;
     if (localStorage.getItem(migratedFlag)) return;
 
     const dataSources = [
@@ -132,10 +325,7 @@
 
     if (!migrated) return;
 
-    const watchedSources = [
-      "watchlist-watched-v1-me",
-      "watchlist-watched-v1",
-    ];
+    const watchedSources = ["watchlist-watched-v1-me", "watchlist-watched-v1"];
 
     for (const source of watchedSources) {
       const value = localStorage.getItem(source);
@@ -147,47 +337,146 @@
     localStorage.setItem(migratedFlag, "1");
   }
 
-  function validateCode(code) {
-    const trimmed = code.trim();
-    if (trimmed.length < MIN_CODE_LENGTH) {
-      return `Use at least ${MIN_CODE_LENGTH} characters.`;
-    }
-    return null;
-  }
-
   function emptyListKey(listId) {
     return `watchlist-start-empty-${listId}`;
   }
 
+  function needsCodeUpgrade() {
+    return Boolean(getSession()?.needsCodeUpgrade);
+  }
+
+  function ensureDefaultList(accountId) {
+    migrateLegacyLibrary(accountId);
+    const library = getLibrary(accountId);
+
+    if (library.length) {
+      return library[0].listId;
+    }
+
+    const listId = accountId;
+    registerList(listId, { accountId, name: "My list", description: "" });
+    return listId;
+  }
+
   function signIn(code, options = {}) {
-    const normalized = normalizeCode(code);
-    const error = validateCode(normalized);
+    const error = validateCode(code, { forCreate: Boolean(options.create) });
     if (error) return { ok: false, error };
 
-    if (options.create && isCatalogCode(normalized)) {
-      return {
-        ok: false,
-        error: "That code is already in use. Use Open list instead.",
-      };
-    }
-
-    const listId = listIdFromCode(normalized);
+    const normalized = normalizeCode(code);
+    const accountId = accountIdFromCode(normalized);
+    migrateLegacyData(accountId);
+    migrateLegacyLibrary(accountId);
 
     if (options.create) {
+      const listId = accountId;
+      registerList(listId, {
+        accountId,
+        name: options.listName || "My list",
+        description: options.description || "",
+      });
       localStorage.setItem(emptyListKey(listId), "1");
-    } else {
-      localStorage.removeItem(emptyListKey(listId));
-      clearEmptySavedWatchlist(listId);
+      setSession(accountId, listId);
+      return { ok: true, accountId, listId };
     }
 
-    if (isCatalogCode(normalized)) {
-      localStorage.removeItem(emptyListKey(listId));
-      clearEmptySavedWatchlist(listId);
+    clearEmptySavedWatchlist(accountId);
+    const listId = ensureDefaultList(accountId);
+    const library = getLibrary(accountId);
+    const lastListId = localStorage.getItem(lastListKey(accountId));
+    const activeListId =
+      (lastListId && library.some((entry) => entry.listId === lastListId)
+        ? lastListId
+        : null) ||
+      library[0]?.listId ||
+      listId;
+    const needsUpgrade = isLegacyNumericCode(code);
+
+    setSession(accountId, activeListId, needsUpgrade ? { needsCodeUpgrade: true } : {});
+
+    return { ok: true, accountId, listId: activeListId };
+  }
+
+  function validateListName(name) {
+    const trimmed = String(name || "").trim();
+    if (!trimmed) return "Give your list a name.";
+    if (trimmed.length > 48) return "Keep the name under 48 characters.";
+    return null;
+  }
+
+  function createList(name, description) {
+    const accountId = getAccountId();
+    if (!accountId) return { ok: false, error: "Not signed in." };
+
+    const nameError = validateListName(name);
+    if (nameError) return { ok: false, error: nameError };
+
+    const listId = generateListId();
+    const trimmedDescription = String(description || "").trim().slice(0, 120);
+
+    registerList(listId, {
+      accountId,
+      name: String(name).trim(),
+      description: trimmedDescription,
+    });
+
+    writeListData(listId, emptyWatchlist(), {});
+    localStorage.setItem(emptyListKey(listId), "1");
+    setSession(accountId, listId);
+
+    return { ok: true, accountId, listId };
+  }
+
+  function updateList(listId, name, description) {
+    const accountId = getAccountId();
+    if (!accountId || !listId) return { ok: false, error: "Not signed in." };
+
+    const nameError = validateListName(name);
+    if (nameError) return { ok: false, error: nameError };
+
+    const library = getLibrary(accountId);
+    const index = library.findIndex((entry) => entry.listId === listId);
+    if (index < 0) return { ok: false, error: "List not found." };
+
+    library[index] = {
+      ...library[index],
+      name: String(name).trim(),
+      description: String(description || "").trim().slice(0, 120),
+      updatedAt: Date.now(),
+    };
+    saveLibrary(accountId, library);
+
+    return { ok: true, accountId, listId };
+  }
+
+  function prepareChangeCode(newCode) {
+    const error = validateCode(newCode, { forCreate: true });
+    if (error) return { ok: false, error };
+
+    const oldAccountId = getAccountId();
+    if (!oldAccountId) {
+      return { ok: false, error: "Not signed in." };
     }
 
-    migrateLegacyData(listId);
-    setSession(listId);
-    return { ok: true, listId };
+    const newAccountId = accountIdFromCode(normalizeCode(newCode));
+    if (newAccountId === oldAccountId) {
+      return { ok: false, error: "Choose a different code." };
+    }
+
+    return { ok: true, oldAccountId, newAccountId };
+  }
+
+  function migrateLocalAccount(oldAccountId, newAccountId) {
+    const library = getLibrary(oldAccountId).map((entry) => ({
+      ...entry,
+      accountId: newAccountId,
+      updatedAt: Date.now(),
+    }));
+
+    saveLibrary(newAccountId, library);
+    localStorage.removeItem(libraryKey(oldAccountId));
+
+    const currentListId = getProfile();
+    setSession(newAccountId, currentListId);
   }
 
   function isEmptyList(listId) {
@@ -198,30 +487,123 @@
     localStorage.removeItem(emptyListKey(listId || getProfile()));
   }
 
-  function signOut() {
+  function getListTitleCount(listId) {
+    const data = readSavedWatchlist(listId);
+    if (!data) return 0;
+
+    let count = 0;
+    for (const genres of Object.values(data)) {
+      if (!genres || typeof genres !== "object") continue;
+      for (const titles of Object.values(genres)) {
+        if (Array.isArray(titles)) count += titles.length;
+      }
+    }
+
+    return count;
+  }
+
+  async function accountExists(code) {
+    const accountId = accountIdFromCode(code);
+    const library = getLibrary(accountId);
+
+    if (library.length) return true;
+    if (listHasData(accountId)) return true;
+    if (localStorage.getItem(emptyListKey(accountId))) return true;
+
+    if (window.WatchlistSync?.isConfigured()) {
+      return window.WatchlistSync.accountExists(accountId);
+    }
+
+    return false;
+  }
+
+  function discoverListIds() {
+    const accountId = getAccountId();
+    if (!accountId) return [];
+
+    return getLibrary(accountId).map((entry) => entry.listId);
+  }
+
+  function purgeList(listId) {
+    if (!listId) return;
+
+    const keys = storageKeys(listId);
+    for (const key of ["data", "watched", "legacy"]) {
+      localStorage.removeItem(keys[key]);
+    }
+    localStorage.removeItem(syncMetaKey(listId));
+    localStorage.removeItem(emptyListKey(listId));
+
+    const accountId = getAccountId();
+    if (!accountId) return;
+
+    const library = getLibrary(accountId).filter((entry) => entry.listId !== listId);
+    saveLibrary(accountId, library);
+  }
+
+  function purgeAccount(accountId) {
+    if (!accountId) return;
+
+    const library = getLibrary(accountId);
+    for (const entry of library) {
+      const keys = storageKeys(entry.listId);
+      for (const key of ["data", "watched", "legacy"]) {
+        localStorage.removeItem(keys[key]);
+      }
+      localStorage.removeItem(syncMetaKey(entry.listId));
+      localStorage.removeItem(emptyListKey(entry.listId));
+    }
+
+    localStorage.removeItem(libraryKey(accountId));
+  }
+
+  function signOut(options = {}) {
     clearSession();
-    window.location.href = "gate.html";
+    window.location.href = options.deleted ? "gate.html?deleted=1" : "gate.html";
   }
 
   function codeHasList(code) {
-    return listHasData(listIdFromCode(code));
+    return listHasData(accountIdFromCode(code));
   }
 
   window.WatchlistAuth = {
-    CATALOG_CODE,
     MIN_CODE_LENGTH,
+    getAccountId,
     getProfile,
     isAuthenticated,
     listHasData,
     codeHasList,
+    accountExists,
     signIn,
     signOut,
+    createList,
+    updateList,
+    validateListName,
     isEmptyList,
     isWatchlistEmpty,
     clearEmptyListFlag,
     storageKeys,
-    migrateLegacyData(listId) {
-      migrateLegacyData(listId || getProfile());
+    accountIdFromCode,
+    listIdFromCode,
+    prepareChangeCode,
+    migrateLocalAccount,
+    migrateLocalList: migrateLocalAccount,
+    validateCode,
+    needsCodeUpgrade,
+    isLegacyNumericCode,
+    getLibrary,
+    registerList,
+    getListLabel,
+    getListDescription,
+    getListEntry,
+    getListTitleCount,
+    switchList,
+    writeListData,
+    purgeList,
+    purgeAccount,
+    discoverListIds,
+    migrateLegacyData(accountId) {
+      migrateLegacyData(accountId || getAccountId());
     },
   };
 })();

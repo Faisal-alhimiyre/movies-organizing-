@@ -68,8 +68,13 @@ def main() -> None:
 
     text = json.dumps(watchlist, indent=2, ensure_ascii=False) + "\n"
     WATCHLIST.write_text(text, encoding="utf-8")
-    (ROOT / "js" / "data.js").write_text(f"window.WATCHLIST = {text[:-1]};\n", encoding="utf-8")
+    (ROOT / "js" / "data.js").write_text(
+        "// Data lives in Supabase. Re-seed with: python scripts/seed_supabase.py YOUR_CODE\n"
+        "window.WATCHLIST = null;\n",
+        encoding="utf-8",
+    )
     print(f"Updated {updated} titles")
+    print("Re-seed Supabase with: python scripts/seed_supabase.py YOUR_CODE")
 
 
 if __name__ == "__main__":

@@ -33,7 +33,7 @@
         "title": "Mission: Impossible",
         "lead": "Tom Cruise",
         "summary": "Ethan Hunt completes dangerous spy missions and enormous stunts.",
-        "kind": "franchise",
+        "kind": "film series",
         "link": "https://www.imdb.com/title/tt0117060/"
       },
       {
@@ -281,7 +281,7 @@
         "title": "The Lord of the Rings",
         "lead": "Elijah Wood, Viggo Mortensen",
         "summary": "A fellowship journeys to destroy the One Ring.",
-        "kind": "franchise",
+        "kind": "film series",
         "link": "https://www.imdb.com/title/tt0120737/"
       }
     ],
@@ -290,7 +290,7 @@
         "title": "Knives Out",
         "lead": "Daniel Craig",
         "summary": "Detective Benoit Blanc solves complicated murders involving wealthy families.",
-        "kind": "franchise",
+        "kind": "film series",
         "link": "https://www.imdb.com/title/tt8946378/"
       }
     ],
@@ -329,7 +329,7 @@
         "title": "Creed",
         "lead": "Michael B. Jordan",
         "summary": "Apollo Creed's son becomes a boxer with Rocky's help.",
-        "kind": "franchise",
+        "kind": "film series",
         "link": "https://www.imdb.com/title/tt3076658/"
       }
     ],
