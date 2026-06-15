@@ -1,6 +1,29 @@
 (function () {
   "use strict";
 
+  function t(key, vars) {
+    return window.WatchlistI18n?.t(key, vars) ?? key;
+  }
+
+  function ltr(text) {
+    return window.WatchlistI18n?.isolateLtr?.(text) ?? text;
+  }
+
+  function listLabel(listId, fallbackKey = "list.myList") {
+    return window.WatchlistAuth?.getListLabel?.(listId) || t(fallbackKey);
+  }
+
+  function genreLabel(genre) {
+    return window.WatchlistI18n?.genreLabel?.(genre) ?? genre;
+  }
+
+  function typeSectionShort(contentType) {
+    if (contentType === "movies") return t("type.movie");
+    if (contentType === "tvSeries") return t("type.tvSeries");
+    if (contentType === "anime") return t("type.anime");
+    return "";
+  }
+
   const TYPE_META = {
     movies: { label: "Movies", short: "Movie", className: "movies" },
     tvSeries: { label: "TV Series", short: "TV Series", className: "tvSeries" },
@@ -48,14 +71,20 @@
   const SYNC_META_PREFIX = "watchlist-sync-meta-";
 
   let pendingImportPayload = null;
+  const PENDING_SHARE_KEY = "watchlist-pending-share";
   let editingListId = null;
   let moveListItemId = null;
+  let searchDebounceTimer = null;
+  let formLinkLookupTimer = null;
+  let ratingsBackfillRunning = false;
 
   const state = {
     type: "all",
     selectedGenres: [],
     search: "",
     watchedFilter: "all",
+    ratingFilterSource: "all",
+    ratingFilterMin: "any",
     watched: {},
     data: null,
     items: [],
@@ -67,7 +96,14 @@
     hoverHideTimer: null,
     hoverShowTimer: null,
     syncStatus: "local",
-    addMode: "single",
+    addMode: "search",
+    searchQuery: "",
+    searchPage: 1,
+    searchTotal: 0,
+    searchResults: [],
+    searchLoading: false,
+    searchPickDetails: null,
+    manualLinkMeta: null,
     ratingItemId: null,
     ratingPickerValue: null,
     ratingPickerChosen: false,
@@ -81,6 +117,8 @@
     genre: document.getElementById("genreSelect"),
     genreFilterChips: document.getElementById("genreFilterChips"),
     watchedFilter: document.getElementById("watchedFilter"),
+    ratingFilterSource: document.getElementById("ratingFilterSource"),
+    ratingFilterMin: document.getElementById("ratingFilterMin"),
     exportBtn: null,
     importBtn: null,
     manageListsBtn: null,
@@ -103,6 +141,7 @@
     accountMenuPanel: document.getElementById("accountMenuPanel"),
     accountMenuSwitchWrap: document.getElementById("accountMenuSwitchWrap"),
     shareModal: document.getElementById("shareModal"),
+    themeModal: document.getElementById("themeModal"),
     changeCodeBtn: null,
     deleteAccountBtn: null,
     changeCodeModal: document.getElementById("changeCodeModal"),
@@ -125,6 +164,19 @@
     typeTabs: document.querySelectorAll(".type-tab"),
     modal: document.getElementById("itemModal"),
     addModeTabs: document.getElementById("addModeTabs"),
+    searchAddPanel: document.getElementById("searchAddPanel"),
+    searchAddStep: document.getElementById("searchAddStep"),
+    titleSearchInput: document.getElementById("titleSearchInput"),
+    titleSearchType: document.getElementById("titleSearchType"),
+    titleSearchStatus: document.getElementById("titleSearchStatus"),
+    titleSearchResults: document.getElementById("titleSearchResults"),
+    titleSearchMore: document.getElementById("titleSearchMore"),
+    searchConfirmStep: document.getElementById("searchConfirmStep"),
+    searchConfirmBack: document.getElementById("searchConfirmBack"),
+    searchConfirmPreview: document.getElementById("searchConfirmPreview"),
+    searchConfirmType: document.getElementById("searchConfirmType"),
+    searchConfirmGenre: document.getElementById("searchConfirmGenre"),
+    searchConfirmAdd: document.getElementById("searchConfirmAdd"),
     bulkAddPanel: document.getElementById("bulkAddPanel"),
     bulkPasteInput: document.getElementById("bulkPasteInput"),
     bulkPasteError: document.getElementById("bulkPasteError"),
@@ -141,15 +193,14 @@
     modalTitle: document.getElementById("modalTitle"),
     deleteBtn: document.getElementById("deleteBtn"),
     formType: document.getElementById("formType"),
-    formKind: document.getElementById("formKind"),
     formGenre: document.getElementById("formGenre"),
     formTitle: document.getElementById("formTitle"),
     formLeadInput: document.getElementById("formLeadInput"),
     formLeadAdd: document.getElementById("formLeadAdd"),
     formLeadChips: document.getElementById("formLeadChips"),
     formLink: document.getElementById("formLink"),
+    formLinkStatus: document.getElementById("formLinkStatus"),
     formSummary: document.getElementById("formSummary"),
-    formatField: document.getElementById("formatField"),
     formSecondaryAdd: document.getElementById("formSecondaryAdd"),
     formSecondaryChips: document.getElementById("formSecondaryChips"),
   };
@@ -361,6 +412,94 @@
     } catch {
       return "";
     }
+  }
+
+  function setFormLinkStatus(message, { error = false } = {}) {
+    if (!els.formLinkStatus) return;
+    els.formLinkStatus.textContent = message || "";
+    els.formLinkStatus.classList.toggle("form-field__status--error", Boolean(error));
+  }
+
+  function applyMetadataToManualForm(meta) {
+    if (!meta) return;
+
+    if (meta.title) els.formTitle.value = meta.title;
+    if (meta.plot) els.formSummary.value = meta.plot;
+    if (meta.actors?.length) setFormLeads(meta.actors);
+
+    if (meta.contentType) {
+      els.formType.value = meta.contentType;
+    }
+
+    const suggested = window.WatchlistMetadata?.suggestGenres(
+      meta.genres,
+      STANDARD_GENRES
+    );
+    if (suggested?.[0]) {
+      els.formGenre.value = suggested[0];
+      updateSecondaryAddOptions();
+      setFormSecondary(suggested.slice(1));
+    }
+
+    state.manualLinkMeta = {
+      poster: meta.poster || "",
+      imdbRating: meta.anilistRating ? "" : meta.rating || "",
+      anilistRating: meta.anilistRating || "",
+      year: meta.year || "",
+      imdbId: meta.imdbId || "",
+    };
+  }
+
+  async function handleFormLinkLookup() {
+    const link = normalizeLink(els.formLink?.value);
+    if (!link) {
+      state.manualLinkMeta = null;
+      setFormLinkStatus("");
+      return;
+    }
+
+    if (!window.WatchlistMetadata?.isSupportedLink(link)) {
+      state.manualLinkMeta = null;
+      setFormLinkStatus("");
+      return;
+    }
+
+    const isAnimeLink =
+      window.WatchlistMetadata.isAnilistLink(link) ||
+      window.WatchlistMetadata.isMalLink(link);
+    if (
+      !isAnimeLink &&
+      !window.WatchlistMetadata.hasOmdbKey() &&
+      !window.WatchlistMetadata.hasTmdbKey()
+    ) {
+      setFormLinkStatus(
+        t("manual.needKey"),
+        { error: true }
+      );
+      return;
+    }
+
+    setFormLinkStatus(t("manual.lookingUp"));
+    const meta = await window.WatchlistMetadata.resolveMetadataFromLink(link);
+    if (!meta?.title) {
+      state.manualLinkMeta = null;
+      const isAnime =
+        window.WatchlistMetadata.isAnilistLink(link) ||
+        window.WatchlistMetadata.isMalLink(link);
+      setFormLinkStatus(
+        isAnime ? t("manual.animeFail") : t("manual.linkFail"),
+        { error: true }
+      );
+      return;
+    }
+
+    applyMetadataToManualForm(meta);
+    setFormLinkStatus(t("manual.filled"));
+  }
+
+  function queueFormLinkLookup() {
+    clearTimeout(formLinkLookupTimer);
+    formLinkLookupTimer = setTimeout(handleFormLinkLookup, 500);
   }
 
   function normalizeSecondaryGenres(primary, secondary) {
@@ -672,7 +811,7 @@
     if (!item || !els.ratingModal) return;
 
     state.ratingItemId = itemId;
-    els.ratingModalTitle.textContent = `Rate “${item.title}”`;
+    els.ratingModalTitle.textContent = t("rating.rateItem", { title: item.title });
     setRatingError("");
 
     const existing = getWatchEntry(itemId);
@@ -737,6 +876,20 @@
     return `${contentType}::${genre}::${title}`;
   }
 
+  function migrateLegacyAnilistRating(item) {
+    if (item.anilistRating || !item.imdbRating) return;
+    const hasAnilistLink =
+      window.WatchlistMetadata?.extractAnilistId?.(item.link) ||
+      window.WatchlistMetadata?.extractMalId?.(item.link);
+    if (!hasAnilistLink || getImdbId(item)) return;
+
+    const score = parseScoreValue(item.imdbRating);
+    if (score == null) return;
+
+    item.anilistRating = score <= 10 ? String(Math.round(score * 10)) : String(Math.round(score));
+    delete item.imdbRating;
+  }
+
   function flattenWatchlist(data) {
     const items = [];
 
@@ -762,6 +915,7 @@
             ),
             id: makeId(contentType, primaryGenre, entryClean.title),
           });
+          migrateLegacyAnilistRating(items[items.length - 1]);
         }
       }
     }
@@ -790,6 +944,7 @@
       if (item.link) entry.link = item.link;
       if (item.poster) entry.poster = item.poster;
       if (item.imdbRating) entry.imdbRating = item.imdbRating;
+      if (item.anilistRating) entry.anilistRating = item.anilistRating;
       if (item.year) entry.year = item.year;
       if (item.secondaryGenres?.length) {
         entry.secondaryGenres = item.secondaryGenres;
@@ -813,15 +968,15 @@
 
   function getTypeBadge(item) {
     if (item.contentType === "anime") {
-      return { label: "Anime", className: "anime" };
+      return { label: t("type.anime"), className: "anime" };
     }
     if (item.kind === "film series") {
-      return { label: "Film series", className: "franchise" };
+      return { label: t("type.filmSeries"), className: "franchise" };
     }
     if (item.contentType === "tvSeries") {
-      return { label: "TV Series", className: "tvSeries" };
+      return { label: t("type.tvSeries"), className: "tvSeries" };
     }
-    return { label: "Movie", className: "movie" };
+    return { label: t("type.movie"), className: "movie" };
   }
 
   function matchesSearch(item, query) {
@@ -878,15 +1033,141 @@
     return true;
   }
 
-  function getFilteredItems() {
-    const query = state.search.trim().toLowerCase();
+  function parseScoreValue(raw) {
+    if (raw == null || raw === "") return null;
+    const num = Number(String(raw).replace(",", ".").replace("%", "").trim());
+    return Number.isFinite(num) ? num : null;
+  }
 
+  function getItemImdbScore(item) {
+    return parseScoreValue(item.imdbRating);
+  }
+
+  function getItemPersonalScore(item) {
+    const entry = getWatchEntry(item.id);
+    if (!entry || !hasWatchRating(entry)) return null;
+    return parseScoreValue(entry.rating);
+  }
+
+  function getItemAnilistScore(item) {
+    const raw = parseScoreValue(item.anilistRating);
+    if (raw == null) return null;
+    return raw > 10 ? raw / 10 : raw;
+  }
+
+  function formatImdbDisplay(value) {
+    const score = parseScoreValue(value);
+    if (score == null) return "";
+    return Number.isInteger(score) ? String(score) : score.toFixed(1);
+  }
+
+  function formatAnilistDisplay(value) {
+    const score = parseScoreValue(value);
+    if (score == null) return "";
+    const pct = score > 10 ? Math.round(score) : Math.round(score * 10);
+    return `${pct}%`;
+  }
+
+  const BRAND_IMDB_LOGO = "assets/brand/imdb.svg";
+  const BRAND_ANILIST_LOGO = "assets/brand/anilist.svg";
+
+  function renderExternalRatings(item) {
+    const parts = [];
+    const imdb = formatImdbDisplay(item.imdbRating);
+    const anilist = formatAnilistDisplay(item.anilistRating);
+
+    if (imdb) {
+      parts.push(
+        `<span class="card__score card__score--imdb" title="IMDb ${escapeHtml(imdb)}">
+          <span class="card__score-value">${escapeHtml(imdb)}</span>
+          <img class="card__score-logo card__score-logo--imdb" src="${BRAND_IMDB_LOGO}" width="46" height="20" alt="" />
+        </span>`
+      );
+    }
+    if (anilist) {
+      parts.push(
+        `<span class="card__score card__score--anilist" title="AniList ${escapeHtml(anilist)}">
+          <span class="card__score-value">${escapeHtml(anilist)}</span>
+          <img class="card__score-logo card__score-logo--anilist" src="${BRAND_ANILIST_LOGO}" width="34" height="26" alt="" />
+        </span>`
+      );
+    }
+
+    if (!parts.length) return "";
+    return `<div class="card__rating-badges">${parts.join("")}</div>`;
+  }
+
+  function itemMatchesRatingFilter(item) {
+    const source = state.ratingFilterSource;
+    if (!source || source === "all") return true;
+
+    const min = state.ratingFilterMin;
+    const requireAny = !min || min === "any";
+
+    let score = null;
+    if (source === "imdb") score = getItemImdbScore(item);
+    else if (source === "anilist") score = getItemAnilistScore(item);
+    else if (source === "personal") score = getItemPersonalScore(item);
+
+    if (score == null) return false;
+    if (requireAny) return true;
+
+    const threshold = Number(min);
+    if (!Number.isFinite(threshold)) return true;
+    return score >= threshold;
+  }
+
+  function ratingMinOptionsForSource() {
+    return [
+      { value: "any", labelKey: "filter.ratingAny" },
+      { value: "6", labelKey: "filter.rating6" },
+      { value: "7", labelKey: "filter.rating7" },
+      { value: "8", labelKey: "filter.rating8" },
+      { value: "9", labelKey: "filter.rating9" },
+    ];
+  }
+
+  function updateRatingFilterOptions() {
+    if (!els.ratingFilterSource || !els.ratingFilterMin) return;
+
+    const source = state.ratingFilterSource || "all";
+    const active = source !== "all";
+    els.ratingFilterMin.disabled = !active;
+
+    if (!active) {
+      state.ratingFilterMin = "any";
+      els.ratingFilterMin.value = "any";
+      return;
+    }
+
+    const options = ratingMinOptionsForSource();
+    const current = state.ratingFilterMin;
+    const valid = options.some((opt) => opt.value === current);
+    const next = valid ? current : "any";
+
+    els.ratingFilterMin.innerHTML = options
+      .map(
+        (opt) =>
+          `<option value="${escapeHtml(opt.value)}">${escapeHtml(t(opt.labelKey))}</option>`
+      )
+      .join("");
+    els.ratingFilterMin.value = next;
+    state.ratingFilterMin = next;
+  }
+
+  function itemMatchesFiltersExceptType(item) {
+    const query = state.search.trim().toLowerCase();
+    if (!itemMatchesGenreFilter(item)) return false;
+    if (!matchesSearch(item, query)) return false;
+    if (!itemMatchesWatchedFilter(item)) return false;
+    if (!itemMatchesRatingFilter(item)) return false;
+    return true;
+  }
+
+  function getFilteredItems() {
     return state.items.filter((item) => {
       if (state.type !== "all" && item.contentType !== state.type) return false;
-      if (!itemMatchesGenreFilter(item)) return false;
-      if (!matchesSearch(item, query)) return false;
-      if (!itemMatchesWatchedFilter(item)) return false;
-      return true;
+      return itemMatchesFiltersExceptType(item);
     });
   }
 
@@ -1002,13 +1283,13 @@
       .map(
         (genre) => `
         <span class="genre-chip genre-chip--filter">
-          ${escapeHtml(genre)}
+          ${escapeHtml(genreLabel(genre))}
           <button
             type="button"
             class="genre-chip__remove"
             data-action="remove-filter-genre"
             data-genre="${escapeHtml(genre)}"
-            aria-label="Remove ${escapeHtml(genre)} filter"
+            aria-label="Remove ${escapeHtml(genreLabel(genre))} filter"
           >×</button>
         </span>`
       )
@@ -1023,7 +1304,9 @@
 
     renderGenreFilterChips();
 
-    const placeholder = state.selectedGenres.length ? "Add genre…" : "All genres";
+    const placeholder = state.selectedGenres.length
+      ? t("filter.addGenre")
+      : t("filter.allGenres");
     const remaining = [...available].filter(
       (genre) => !state.selectedGenres.includes(genre)
     );
@@ -1033,7 +1316,7 @@
       remaining
         .map(
           (genre) =>
-            `<option value="${escapeHtml(genre)}">${escapeHtml(genre)}</option>`
+            `<option value="${escapeHtml(genre)}">${escapeHtml(genreLabel(genre))}</option>`
         )
         .join("");
     els.genre.value = "";
@@ -1057,10 +1340,10 @@
 
   function populateFormGenreSelect(selected) {
     els.formGenre.innerHTML =
-      '<option value="" disabled>Choose genre</option>' +
+      `<option value="" disabled>${t("search.chooseGenre")}</option>` +
       STANDARD_GENRES.map(
         (genre) =>
-          `<option value="${escapeHtml(genre)}"${selected === genre ? " selected" : ""}>${escapeHtml(genre)}</option>`
+          `<option value="${escapeHtml(genre)}"${selected === genre ? " selected" : ""}>${escapeHtml(genreLabel(genre))}</option>`
       ).join("");
   }
 
@@ -1098,11 +1381,11 @@
     const available = STANDARD_GENRES.filter((g) => !taken.has(g));
 
     els.formSecondaryAdd.innerHTML =
-      '<option value="">Add another genre…</option>' +
+      `<option value="">${t("form.addGenre")}</option>` +
       available
         .map(
           (genre) =>
-            `<option value="${escapeHtml(genre)}">${escapeHtml(genre)}</option>`
+            `<option value="${escapeHtml(genre)}">${escapeHtml(genreLabel(genre))}</option>`
         )
         .join("");
 
@@ -1114,13 +1397,13 @@
       .map(
         (genre) => `
         <span class="genre-chip">
-          ${escapeHtml(genre)}
+          ${escapeHtml(genreLabel(genre))}
           <button
             type="button"
             class="genre-chip__remove"
             data-action="remove-secondary"
             data-genre="${escapeHtml(genre)}"
-            aria-label="Remove ${escapeHtml(genre)}"
+            aria-label="Remove ${escapeHtml(genreLabel(genre))}"
           >×</button>
         </span>
       `
@@ -1164,32 +1447,47 @@
       .join("");
   }
 
-  function syncStatusLabel() {
-    if (!window.WatchlistSync?.isConfigured()) return "";
-    if (state.syncStatus === "pending") return " · saving…";
-    if (state.syncStatus === "error") return " · save failed";
-    if (state.syncStatus === "saved") return " · saved";
-    return "";
+  function syncStatusMeta() {
+    if (!window.WatchlistSync?.isConfigured()) return null;
+    if (state.syncStatus === "pending") {
+      return { status: "pending", label: t("sync.savingShort") };
+    }
+    if (state.syncStatus === "error") {
+      return { status: "error", label: t("sync.failedShort") };
+    }
+    return null;
   }
 
   function updateStats() {
     const total = state.items.length;
     const watchedCount = state.items.filter((i) => isItemWatched(i.id)).length;
 
-    const byType = {
-      movies: state.items.filter((i) => i.contentType === "movies").length,
-      tvSeries: state.items.filter((i) => i.contentType === "tvSeries").length,
-      anime: state.items.filter((i) => i.contentType === "anime").length,
-    };
-
-    els.stats.textContent = `${total} total · ${watchedCount} watched${syncStatusLabel()}`;
-
+    const filteredForTabs = state.items.filter(itemMatchesFiltersExceptType);
     const tabCounts = {
-      all: total,
-      movies: byType.movies,
-      tvSeries: byType.tvSeries,
-      anime: byType.anime,
+      all: filteredForTabs.length,
+      movies: filteredForTabs.filter((i) => i.contentType === "movies").length,
+      tvSeries: filteredForTabs.filter((i) => i.contentType === "tvSeries").length,
+      anime: filteredForTabs.filter((i) => i.contentType === "anime").length,
     };
+
+    const syncMeta = syncStatusMeta();
+    const syncHtml = syncMeta
+      ? `<span class="header__stat-chip header__stat-chip--sync" data-status="${escapeHtml(syncMeta.status)}">
+           <span class="header__stat-label">${escapeHtml(syncMeta.label)}</span>
+         </span>`
+      : "";
+
+    els.stats.innerHTML = `
+      <span class="header__stat-chip">
+        <span class="header__stat-value">${total}</span>
+        <span class="header__stat-label">${escapeHtml(t("stats.totalWord"))}</span>
+      </span>
+      <span class="header__stat-chip">
+        <span class="header__stat-value">${watchedCount}</span>
+        <span class="header__stat-label">${escapeHtml(t("stats.watchedWord"))}</span>
+      </span>
+      ${syncHtml}
+    `;
 
     document.querySelectorAll(".type-tab__count").forEach((el) => {
       const key = el.dataset.count;
@@ -1205,6 +1503,143 @@
 
   function getImdbId(item) {
     return window.WatchlistMetadata?.extractImdbId(item.link) || null;
+  }
+
+  function getAnilistId(item) {
+    return window.WatchlistMetadata?.extractAnilistId?.(item.link) || null;
+  }
+
+  function itemNeedsImdbBackfill(item) {
+    const imdbId = getImdbId(item);
+    return Boolean(imdbId && !item.imdbRating);
+  }
+
+  function itemNeedsAnilistBackfill(item) {
+    if (item.contentType !== "anime" || item.anilistRating) return false;
+    if (getAnilistBackfillTarget(item)) return true;
+    return Boolean(item.title?.trim());
+  }
+
+  async function fetchAnilistMetaForItem(item) {
+    const target = getAnilistBackfillTarget(item);
+    if (target?.type === "mal") {
+      return window.WatchlistMetadata.fetchAnilistByMalId(target.id);
+    }
+    if (target?.type === "anilist") {
+      return window.WatchlistMetadata.fetchAnilistById(target.id);
+    }
+    if (item.contentType === "anime" && item.title) {
+      const score = await window.WatchlistMetadata.fetchAnilistScoreByTitle(
+        item.title,
+        item.year
+      );
+      return score ? { anilistRating: score } : null;
+    }
+    return null;
+  }
+
+  function getAnilistBackfillTarget(item) {
+    const anilistId = getAnilistId(item);
+    if (anilistId) return { type: "anilist", id: anilistId };
+    const malId = window.WatchlistMetadata?.extractMalId?.(item.link);
+    if (malId) return { type: "mal", id: malId };
+    return null;
+  }
+
+  function emptyStateRatingHint() {
+    const source = state.ratingFilterSource;
+    if (!source || source === "all" || source === "personal") return null;
+    if (ratingsBackfillRunning) {
+      return source === "anilist" ? t("empty.anilistRatingLoading") : t("empty.ratingLoading");
+    }
+
+    if (source === "anilist") {
+      const hasAnime = state.items.some(
+        (item) => item.contentType === "anime" && item.title?.trim()
+      );
+      if (!hasAnime) return null;
+    } else if (source === "imdb") {
+      const withLink = state.items.some((item) => getImdbId(item));
+      if (!withLink) return null;
+    }
+
+    const hasScores = state.items.some((item) => {
+      if (source === "imdb") return getItemImdbScore(item) != null;
+      if (source === "anilist") return getItemAnilistScore(item) != null;
+      return false;
+    });
+
+    if (!hasScores) {
+      return source === "anilist" ? t("empty.anilistRatingMissing") : t("empty.ratingMissing");
+    }
+    return null;
+  }
+
+  async function backfillMissingRatings() {
+    if (ratingsBackfillRunning) return;
+
+    const anilistQueue = state.items.filter(itemNeedsAnilistBackfill);
+    const imdbQueue = state.items.filter(itemNeedsImdbBackfill);
+    if (!anilistQueue.length && !imdbQueue.length) return;
+
+    ratingsBackfillRunning = true;
+    if (state.ratingFilterSource !== "all") render();
+
+    let updated = 0;
+
+    const applyAnilistBackfill = async (item) => {
+      const meta = await fetchAnilistMetaForItem(item);
+      if (meta?.anilistRating && !item.anilistRating) {
+        item.anilistRating = meta.anilistRating;
+        updated += 1;
+        state.data = itemsToNested(state.items);
+        saveData();
+        render();
+        return true;
+      }
+      return false;
+    };
+
+    for (const item of anilistQueue) {
+      try {
+        await applyAnilistBackfill(item);
+      } catch (error) {
+        console.warn("[ratings] anilist backfill failed:", item.title, error);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 320));
+    }
+
+    for (const item of imdbQueue) {
+      try {
+        if (!window.WatchlistMetadata?.hasOmdbKey?.()) break;
+
+        const imdbId = getImdbId(item);
+        const meta = await window.WatchlistMetadata.getMetadata(imdbId);
+        if (meta?.rating && !item.imdbRating) {
+          item.imdbRating = meta.rating;
+          updated += 1;
+          if (state.ratingFilterSource !== "all" && updated % 3 === 0) {
+            state.data = itemsToNested(state.items);
+            saveData();
+            render();
+          }
+        }
+      } catch (error) {
+        console.warn("[ratings] imdb backfill failed:", item.title, error);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 280));
+    }
+
+    ratingsBackfillRunning = false;
+
+    if (updated > 0) {
+      state.data = itemsToNested(state.items);
+      saveData();
+      render();
+    } else if (state.ratingFilterSource !== "all") {
+      render();
+    }
   }
 
   function loadCardLayout() {
@@ -1246,9 +1681,14 @@
     const title = meta?.title || item.title;
     const year = meta?.year || item.year || "";
     const rating = meta?.rating || item.imdbRating || "";
+    const anilistRating = meta?.anilistRating || item.anilistRating || "";
     const plot = meta?.plot || item.summary || parseSummary(item) || "";
     const poster = meta?.poster || item.poster || "";
-    const metaParts = [year, rating ? `IMDb ${rating}` : ""].filter(Boolean);
+    const metaParts = [
+      year,
+      rating ? `IMDb ${rating}` : "",
+      anilistRating ? `AniList ${formatAnilistDisplay(anilistRating)}` : "",
+    ].filter(Boolean);
 
     return { title, year, rating, plot, poster, metaParts };
   }
@@ -1281,17 +1721,33 @@
 
   async function fetchPreviewMeta(item) {
     const imdbId = getImdbId(item);
-    if (!imdbId) return null;
-    if (item.poster && item.summary) {
-      return {
-        title: item.title,
-        poster: item.poster,
-        rating: item.imdbRating || "",
-        year: item.year || "",
-        plot: item.summary || parseSummary(item),
-      };
+    if (imdbId) {
+      if (item.poster && item.summary) {
+        return {
+          title: item.title,
+          poster: item.poster,
+          rating: item.imdbRating || "",
+          year: item.year || "",
+          plot: item.summary || parseSummary(item),
+        };
+      }
+      return window.WatchlistMetadata?.getMetadata(imdbId);
     }
-    return window.WatchlistMetadata?.getMetadata(imdbId);
+
+    if (item.link && window.WatchlistMetadata?.isSupportedLink(item.link)) {
+      if (item.poster && item.summary) {
+        return {
+          title: item.title,
+          poster: item.poster,
+          rating: item.imdbRating || "",
+          year: item.year || "",
+          plot: item.summary || parseSummary(item),
+        };
+      }
+      return window.WatchlistMetadata?.resolveMetadataFromLink(item.link);
+    }
+
+    return null;
   }
 
   function hideLinkPreviewPopover() {
@@ -1353,7 +1809,7 @@
   }
 
   async function hydratePosters() {
-    const cards = els.main.querySelectorAll(".card[data-imdb-id]");
+    const cards = els.main.querySelectorAll(".card--linked");
     for (const card of cards) {
       const item = state.items.find((entry) => entry.id === card.dataset.id);
       if (!item?.link) continue;
@@ -1363,8 +1819,14 @@
         continue;
       }
 
-      const imdbId = card.dataset.imdbId;
-      const meta = await window.WatchlistMetadata?.getMetadata(imdbId);
+      const imdbId = getImdbId(item);
+      let meta = null;
+      if (imdbId) {
+        meta = await window.WatchlistMetadata?.getMetadata(imdbId);
+      } else if (window.WatchlistMetadata?.isSupportedLink(item.link)) {
+        meta = await window.WatchlistMetadata?.resolveMetadataFromLink(item.link);
+      }
+
       if (meta?.poster) {
         item.poster = meta.poster;
         setCardPoster(card, meta.poster);
@@ -1394,11 +1856,11 @@
     const secondaryBadges = (item.secondaryGenres || [])
       .map(
         (genre) =>
-          `<span class="badge badge--genre-secondary">${escapeHtml(genre)}</span>`
+          `<span class="badge badge--genre-secondary">${escapeHtml(genreLabel(genre))}</span>`
       )
       .join("");
     const mainGenreBadge = item.genre
-      ? `<span class="badge badge--genre-primary">${escapeHtml(item.genre)}</span>`
+      ? `<span class="badge badge--genre-primary">${escapeHtml(genreLabel(item.genre))}</span>`
       : "";
 
     const imdbId = getImdbId(item);
@@ -1407,7 +1869,7 @@
       ? ` data-link="${escapeHtml(item.link)}" title="Open link"`
       : "";
     const imdbAttr = imdbId ? ` data-imdb-id="${escapeHtml(imdbId)}"` : "";
-
+    const externalScores = renderExternalRatings(item);
     const hasLink = Boolean(item.link);
     const titleBlock = `
       <div class="card__top">
@@ -1449,9 +1911,12 @@
           class="card__rating card__rating--rated"
           data-action="rate"
           data-id="${escapeHtml(item.id)}"
-          aria-label="Edit rating"
+          aria-label="${escapeHtml(t("mobile.editRating"))}"
         >
-          <span class="card__rating-score">${escapeHtml(formatWatchRating(watchEntry.rating))}/10</span>
+          <div class="card__rating-top">
+            <span class="card__rating-label">${escapeHtml(t("card.yourRating"))}</span>
+            <span class="card__rating-score">${escapeHtml(formatWatchRating(watchEntry.rating))}/10</span>
+          </div>
           ${
             watchEntry.note
               ? `<p class="card__rating-note">${escapeHtml(watchEntry.note)}</p>`
@@ -1460,17 +1925,23 @@
         </button>`
       : isWatched
         ? `<div class="card__rating card__rating--pending">
-            <button
-              type="button"
-              class="btn btn--ghost btn--sm card__rate-btn"
-              data-action="rate"
-              data-id="${escapeHtml(item.id)}"
-            >
-              Rate
-            </button>
+            <div class="card__rating-top">
+              <span class="card__rating-label">${escapeHtml(t("card.yourRating"))}</span>
+              <button
+                type="button"
+                class="btn btn--ghost btn--sm card__rate-btn"
+                data-action="rate"
+                data-id="${escapeHtml(item.id)}"
+              >
+                ${escapeHtml(t("card.rate"))}
+              </button>
+            </div>
           </div>`
         : `<div class="card__rating card__rating--empty">
-            <span class="card__rating-placeholder">Not watched</span>
+            <div class="card__rating-top">
+              <span class="card__rating-label">${escapeHtml(t("card.yourRating"))}</span>
+              <span class="card__rating-placeholder">${escapeHtml(t("card.notWatched"))}</span>
+            </div>
           </div>`;
     const moveToListItem = canMoveToList
       ? `<button
@@ -1480,9 +1951,11 @@
           data-action="move-to-list"
           data-id="${escapeHtml(item.id)}"
         >
-          Move to another list
+          ${escapeHtml(t("card.moveToList"))}
         </button>`
       : "";
+
+    const watchedLabel = isWatched ? t("card.markUnwatched") : t("card.markWatched");
 
     return `
       <article class="card${linkedClass}${isWatched ? " card--watched" : ""}" data-id="${escapeHtml(item.id)}"${linkAttr}${imdbAttr}>
@@ -1491,6 +1964,7 @@
         ${bodyHeader}
         <p class="card__lead">${escapeHtml((item.leads || parseLeads(item)).join(", "))}</p>
         <p class="card__summary">${escapeHtml(item.summary || parseSummary(item))}</p>
+        ${externalScores}
         <div class="card__footer">
           ${ratingFooter}
           <div class="card-menu">
@@ -1499,7 +1973,7 @@
               class="card-menu__trigger"
               data-action="toggle-card-menu"
               data-id="${escapeHtml(item.id)}"
-              aria-label="Title actions"
+              aria-label="${escapeHtml(t("card.actions"))}"
               aria-haspopup="menu"
               aria-expanded="false"
             >
@@ -1513,7 +1987,7 @@
                 data-action="toggle-watched"
                 data-id="${escapeHtml(item.id)}"
               >
-                ${isWatched ? "Mark unwatched" : "Mark watched"}
+                ${escapeHtml(watchedLabel)}
               </button>
               <button
                 type="button"
@@ -1522,7 +1996,7 @@
                 data-action="edit"
                 data-id="${escapeHtml(item.id)}"
               >
-                Edit
+                ${escapeHtml(t("card.edit"))}
               </button>
               ${moveToListItem}
               <button
@@ -1532,7 +2006,7 @@
                 data-action="delete"
                 data-id="${escapeHtml(item.id)}"
               >
-                Delete
+                ${escapeHtml(t("card.delete"))}
               </button>
             </div>
           </div>
@@ -1550,14 +2024,14 @@
     if (state.items.length === 0) {
       els.main.innerHTML = `
         <div class="empty-state">
-          <p class="empty-state__title">Your watchlist is empty</p>
-          <p>Add titles one by one, or use <strong>Multiple titles</strong> with your AI to add many at once.</p>
+          <p class="empty-state__title">${escapeHtml(t("empty.noTitles"))}</p>
+          <p>${escapeHtml(t("empty.noTitlesHint"))}</p>
           <div class="empty-state__actions">
             <button type="button" class="btn btn--primary empty-state__btn" data-action="add">
-              Add title
+              ${escapeHtml(t("btn.addTitle"))}
             </button>
             <button type="button" class="btn btn--ghost empty-state__btn" data-action="share">
-              Share
+              ${escapeHtml(t("menu.share"))}
             </button>
           </div>
         </div>
@@ -1566,10 +2040,11 @@
     }
 
     if (filtered.length === 0) {
+      const ratingHint = emptyStateRatingHint();
       els.main.innerHTML = `
         <div class="empty-state">
-          <p class="empty-state__title">No titles match your filters</p>
-          <p>Try a different search, genre, or type tab.</p>
+          <p class="empty-state__title">${escapeHtml(t("empty.noMatch"))}</p>
+          <p>${escapeHtml(ratingHint || t("empty.noMatchHint"))}</p>
         </div>
       `;
       return;
@@ -1586,19 +2061,23 @@
             ? `${group.contentType}-${group.genre}`
             : group.genre;
         const typeBadge = meta
-          ? `<span class="genre-section__type genre-section__type--${meta.className}">${escapeHtml(meta.short)}</span>`
+          ? `<span class="genre-section__type genre-section__type--${meta.className}">${escapeHtml(typeSectionShort(group.contentType))}</span>`
           : "";
         const allMatchBadge = group.isAllMatch
-          ? `<span class="genre-section__match">All selected</span>`
+          ? `<span class="genre-section__match">${escapeHtml(t("genre.allSelected"))}</span>`
           : "";
 
         return `
           <section class="genre-section${group.isAllMatch ? " genre-section--all-match" : ""}" id="${escapeHtml(sectionId.replace(/\W+/g, "-"))}">
             <header class="genre-section__header">
-              ${typeBadge}
-              ${allMatchBadge}
-              <h2 class="genre-section__title">${escapeHtml(group.genre)}</h2>
-              <span class="genre-section__count">${group.items.length} title${group.items.length === 1 ? "" : "s"}</span>
+              <div class="genre-section__bar">
+                <div class="genre-section__badges">
+                  ${typeBadge}
+                  ${allMatchBadge}
+                </div>
+                <h2 class="genre-section__title">${escapeHtml(genreLabel(group.genre))}</h2>
+                <span class="genre-section__count">${escapeHtml(window.WatchlistI18n?.titleCount(group.items.length) || `${group.items.length} titles`)}</span>
+              </div>
             </header>
             <div class="cards">${cards}</div>
           </section>
@@ -1610,19 +2089,10 @@
     applyPostRender();
   }
 
-  function syncFormFields() {
-    const isMovie = els.formType.value === "movies";
-
-    els.formatField.hidden = !isMovie;
-
-    if (isMovie) {
-      els.formKind.innerHTML = `
-        <option value="movie">Single film</option>
-        <option value="film series">Film series</option>
-      `;
-    } else {
-      els.formKind.value = "series";
-    }
+  function formKindForItem(contentType, existingKind) {
+    if (contentType !== "movies") return "series";
+    if (existingKind === "film series") return "film series";
+    return "movie";
   }
 
   function setBulkPasteError(message) {
@@ -1632,9 +2102,365 @@
     els.bulkPasteError.classList.toggle("backup-modal__hint--error", Boolean(message));
   }
 
+  function populateSearchConfirmGenreSelect(selected) {
+    if (!els.searchConfirmGenre) return;
+    els.searchConfirmGenre.innerHTML =
+      `<option value="" disabled>${t("search.chooseGenre")}</option>` +
+      STANDARD_GENRES.map(
+        (genre) =>
+          `<option value="${escapeHtml(genre)}"${selected === genre ? " selected" : ""}>${escapeHtml(genreLabel(genre))}</option>`
+      ).join("");
+  }
+
+  function setTitleSearchStatus(message, { error = false } = {}) {
+    if (!els.titleSearchStatus) return;
+    els.titleSearchStatus.textContent = message || "";
+    els.titleSearchStatus.classList.toggle("title-search__status--error", Boolean(error));
+  }
+
+  function formatSearchResultType(type) {
+    const value = String(type || "").toLowerCase();
+    if (value === "movie") return t("searchResult.movie");
+    if (value === "series") return t("searchResult.series");
+    if (value === "anime") return t("searchResult.anime");
+    if (value === "episode") return t("searchResult.episode");
+    return type || t("searchResult.title");
+  }
+
+  function searchPickFromButton(button) {
+    if (!button) return null;
+    return {
+      source: button.dataset.pickSource || "omdb",
+      imdbId: button.dataset.imdbId || null,
+      anilistId: button.dataset.anilistId ? Number(button.dataset.anilistId) : null,
+      tmdbType: button.dataset.tmdbType || null,
+      tmdbId: button.dataset.tmdbId ? Number(button.dataset.tmdbId) : null,
+    };
+  }
+
+  function hasLookupId(pick) {
+    return Boolean(pick?.imdbId || pick?.anilistId || pick?.tmdbId);
+  }
+
+  function renderTitleSearchResults() {
+    if (!els.titleSearchResults) return;
+
+    if (!state.searchResults.length) {
+      els.titleSearchResults.innerHTML = "";
+      return;
+    }
+
+    els.titleSearchResults.innerHTML = state.searchResults
+      .map((result) => {
+        const poster = result.poster
+          ? `<img class="title-search__poster" src="${escapeHtml(result.poster)}" alt="" loading="lazy" />`
+          : `<div class="title-search__poster title-search__poster--empty" aria-hidden="true">🎬</div>`;
+        const meta = [result.year, formatSearchResultType(result.type)]
+          .filter(Boolean)
+          .join(" · ");
+        return `<li>
+          <button
+            type="button"
+            class="title-search__item"
+            data-action="pick-search-result"
+            data-pick-source="${escapeHtml(result.source || "omdb")}"
+            data-imdb-id="${escapeHtml(result.imdbId || "")}"
+            data-anilist-id="${result.anilistId || ""}"
+            data-tmdb-type="${escapeHtml(result.tmdbType || "")}"
+            data-tmdb-id="${result.tmdbId || ""}"
+          >
+            ${poster}
+            <span class="title-search__info">
+              <span class="title-search__title">${escapeHtml(result.title)}</span>
+              <span class="title-search__meta">${escapeHtml(meta)}</span>
+            </span>
+          </button>
+        </li>`;
+      })
+      .join("");
+
+    if (els.titleSearchMore) {
+      const hasMore = state.searchResults.length < state.searchTotal;
+      els.titleSearchMore.hidden = !hasMore || state.searchLoading;
+    }
+  }
+
+  function resetSearchAddState() {
+    clearTimeout(searchDebounceTimer);
+    state.searchQuery = "";
+    state.searchPage = 1;
+    state.searchTotal = 0;
+    state.searchResults = [];
+    state.searchLoading = false;
+    state.searchPickDetails = null;
+
+    if (els.titleSearchInput) els.titleSearchInput.value = "";
+    if (els.titleSearchType) {
+      const typeFilter =
+        state.type === "movies"
+          ? "movie"
+          : state.type === "tvSeries"
+            ? "series"
+            : state.type === "anime"
+              ? "anime"
+              : "all";
+      els.titleSearchType.value = typeFilter;
+    }
+    if (els.titleSearchResults) els.titleSearchResults.innerHTML = "";
+    if (els.titleSearchMore) els.titleSearchMore.hidden = true;
+    if (els.searchAddStep) els.searchAddStep.hidden = false;
+    if (els.searchConfirmStep) els.searchConfirmStep.hidden = true;
+    setTitleSearchStatus("");
+  }
+
+  function showSearchConfirmStep(details) {
+    if (!els.searchAddStep || !els.searchConfirmStep || !details) return;
+
+    state.searchPickDetails = details;
+    els.searchAddStep.hidden = true;
+    els.searchConfirmStep.hidden = false;
+
+    const suggested = window.WatchlistMetadata?.suggestGenres(
+      details.genres,
+      STANDARD_GENRES
+    );
+    const primaryGenre = suggested[0] || "";
+    const defaultType =
+      details.contentType ||
+      (state.type !== "all" ? state.type : "movies");
+
+    populateSearchConfirmGenreSelect(primaryGenre);
+    if (els.searchConfirmType) {
+      els.searchConfirmType.value = defaultType;
+    }
+
+    const poster = details.poster
+      ? `<img class="title-search-confirm__poster" src="${escapeHtml(details.poster)}" alt="" />`
+      : `<div class="title-search-confirm__poster title-search-confirm__poster--empty" aria-hidden="true">🎬</div>`;
+    const subParts = [
+      details.year,
+      details.rating ? `${details.rating}/10` : "",
+      details.actors?.length ? details.actors.slice(0, 3).join(", ") : "",
+    ].filter(Boolean);
+
+    if (els.searchConfirmPreview) {
+      els.searchConfirmPreview.innerHTML = `
+        ${poster}
+        <div class="title-search-confirm__body">
+          <h3 class="title-search-confirm__name">${escapeHtml(details.title)}</h3>
+          <p class="title-search-confirm__sub">${escapeHtml(subParts.join(" · "))}</p>
+          <p class="title-search-confirm__plot">${escapeHtml(details.plot || t("search.noSummary"))}</p>
+        </div>
+      `;
+    }
+
+    els.searchConfirmGenre?.focus();
+  }
+
+  function hideSearchConfirmStep() {
+    state.searchPickDetails = null;
+    if (els.searchAddStep) els.searchAddStep.hidden = false;
+    if (els.searchConfirmStep) els.searchConfirmStep.hidden = true;
+    els.titleSearchInput?.focus();
+  }
+
+  async function runTitleSearch({ append = false } = {}) {
+    const query = state.searchQuery.trim();
+    if (query.length < 2) {
+      state.searchResults = [];
+      state.searchTotal = 0;
+      renderTitleSearchResults();
+      setTitleSearchStatus(t("search.minChars"));
+      return;
+    }
+
+    if (!window.WatchlistMetadata?.hasSearchConfigured()) {
+      setTitleSearchStatus(t("search.unavailable"), { error: true });
+      return;
+    }
+
+    state.searchLoading = true;
+    setTitleSearchStatus(t("search.searching"));
+    if (els.titleSearchMore) els.titleSearchMore.hidden = true;
+
+    const result = await window.WatchlistMetadata.searchTitles(query, {
+      page: state.searchPage,
+      type: els.titleSearchType?.value || "all",
+    });
+
+    state.searchLoading = false;
+
+    if (!result.ok) {
+      if (!append) {
+        state.searchResults = [];
+        state.searchTotal = 0;
+        renderTitleSearchResults();
+      }
+      setTitleSearchStatus(result.error || t("search.failed"), { error: true });
+      return;
+    }
+
+    state.searchTotal = result.total || 0;
+    const merged = append
+      ? [...state.searchResults, ...(result.results || [])]
+      : result.results || [];
+    const seen = new Set();
+    state.searchResults = merged.filter((entry) => {
+      if (!entry?.title) return false;
+      const key = entry.resultKey || `${entry.title}::${entry.year || ""}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    renderTitleSearchResults();
+
+    if (els.titleSearchMore) {
+      els.titleSearchMore.hidden = true;
+    }
+
+    if (!state.searchResults.length) {
+      setTitleSearchStatus(result.message || t("search.noMatches"));
+      return;
+    }
+
+    const shown = state.searchResults.length;
+    const total = state.searchTotal;
+    setTitleSearchStatus(
+      total > shown
+        ? t("search.showing", { shown, total })
+        : shown === 1
+          ? t("search.foundOne")
+          : t("search.foundMany", { count: shown })
+    );
+  }
+
+  function queueTitleSearch() {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      state.searchPage = 1;
+      runTitleSearch();
+    }, 350);
+  }
+
+  async function handleSearchResultPick(pickButton) {
+    const pick = searchPickFromButton(pickButton);
+    if (!hasLookupId(pick)) return;
+
+    setTitleSearchStatus(t("search.loadingDetails"));
+    const details = await window.WatchlistMetadata.getDetailsForPick(pick);
+    if (!details?.title) {
+      setTitleSearchStatus(t("search.loadFailed"), { error: true });
+      return;
+    }
+
+    setTitleSearchStatus("");
+    showSearchConfirmStep(details);
+  }
+
+  function applyRatingsFromDetails(details, item) {
+    if (details.anilistRating || details.source === "anilist" || details.anilistId) {
+      if (details.anilistRating) {
+        item.anilistRating = details.anilistRating;
+      } else if (details.rating) {
+        const score = parseScoreValue(details.rating);
+        if (score != null) {
+          item.anilistRating =
+            score <= 10 ? String(Math.round(score * 10)) : String(Math.round(score));
+        }
+      }
+      return;
+    }
+    if (details.rating) item.imdbRating = details.rating;
+  }
+
+  function buildItemFromSearchDetails(details, options) {
+    const contentType = options.contentType;
+    const genre = normalizeGenre(options.genre);
+    const suggested = window.WatchlistMetadata?.suggestGenres(
+      details.genres,
+      STANDARD_GENRES
+    );
+    const secondaryGenres = normalizeSecondaryGenres(
+      genre,
+      suggested.filter((entry) => entry !== genre)
+    );
+    const leads =
+      details.actors?.length > 0
+        ? details.actors
+        : details.director
+          ? [details.director]
+          : [];
+
+    const item = {
+      contentType,
+      genre,
+      title: details.title.trim(),
+      leads,
+      lead: leads.join(", "),
+      link: window.WatchlistMetadata?.defaultLinkForDetails(details) || "",
+      summary: details.plot || "",
+      kind: contentType === "movies" ? "movie" : "series",
+      secondaryGenres,
+    };
+
+    if (details.poster) item.poster = details.poster;
+    applyRatingsFromDetails(details, item);
+    if (details.year) item.year = details.year;
+    item.id = makeId(contentType, genre, item.title);
+    return item;
+  }
+
+  async function handleSearchConfirmAdd() {
+    const details = state.searchPickDetails;
+    if (!details) return;
+
+    const genre = els.searchConfirmGenre?.value?.trim() || "";
+    const contentType = els.searchConfirmType?.value || "movies";
+
+    if (!genre) {
+      await window.WatchlistDialog.alert(t("alert.genreRequired"), {
+        title: t("alert.genreRequiredTitle"),
+      });
+      return;
+    }
+
+    const item = buildItemFromSearchDetails(details, { contentType, genre });
+
+    if (!item.title || !item.summary) {
+      await window.WatchlistDialog.alert(t("alert.incomplete"), {
+        title: t("alert.incompleteTitle"),
+      });
+      return;
+    }
+
+    if (!item.leads.length) {
+      await window.WatchlistDialog.alert(t("alert.missingActors"), {
+        title: t("alert.missingActorsTitle"),
+      });
+      return;
+    }
+
+    const duplicate = findDuplicate(item, null);
+    if (duplicate) {
+      await window.WatchlistDialog.alert(t("alert.duplicateOnList"), {
+        title: t("alert.nameExistsTitle"),
+      });
+      return;
+    }
+
+    state.items.push(item);
+    state.data = itemsToNested(state.items);
+    saveData();
+    updateGenreOptions();
+    closeModal();
+    render();
+  }
+
   function setAddMode(mode) {
     state.addMode = mode;
     const isBulk = mode === "bulk";
+    const isSearch = mode === "search";
+    const isManual = mode === "manual";
 
     els.addModeTabs?.querySelectorAll("[data-add-mode]").forEach((tab) => {
       const active = tab.dataset.addMode === mode;
@@ -1642,45 +2468,66 @@
       tab.setAttribute("aria-selected", String(active));
     });
 
-    if (els.form) els.form.hidden = isBulk;
+    if (els.searchAddPanel) els.searchAddPanel.hidden = !isSearch;
+    if (els.form) els.form.hidden = !isManual;
     if (els.bulkAddPanel) els.bulkAddPanel.hidden = !isBulk;
+
+    if (!isSearch) {
+      state.searchPickDetails = null;
+      if (els.searchAddStep) els.searchAddStep.hidden = false;
+      if (els.searchConfirmStep) els.searchConfirmStep.hidden = true;
+    }
 
     if (isBulk) {
       setBulkPasteError("");
       els.bulkPasteInput?.focus();
+    } else if (isSearch) {
+      hideSearchConfirmStep();
+      els.titleSearchInput?.focus();
     } else {
-      els.formTitle?.focus();
+      els.formLink?.focus();
     }
   }
 
   function openModal(mode, item) {
     state.editingId = mode === "edit" ? item.id : null;
-    els.modalTitle.textContent = mode === "edit" ? "Edit title" : "Add title";
+    els.modalTitle.textContent = mode === "edit" ? t("modal.editTitle") : t("modal.addTitle");
     els.deleteBtn.hidden = mode !== "edit";
 
     if (els.addModeTabs) {
-      els.addModeTabs.hidden = mode === "edit";
+      els.addModeTabs.hidden = mode !== "add";
     }
 
     if (mode === "add") {
-      setAddMode("single");
+      resetSearchAddState();
+      setAddMode("search");
       setBulkPasteError("");
       if (els.bulkPasteInput) els.bulkPasteInput.value = "";
     }
 
-    els.form.hidden = false;
-    if (els.bulkAddPanel) els.bulkAddPanel.hidden = true;
+    if (mode === "edit") {
+      if (els.searchAddPanel) els.searchAddPanel.hidden = true;
+      if (els.bulkAddPanel) els.bulkAddPanel.hidden = true;
+      if (els.form) els.form.hidden = false;
+    } else if (state.addMode === "bulk") {
+      if (els.form) els.form.hidden = true;
+      if (els.searchAddPanel) els.searchAddPanel.hidden = true;
+      if (els.bulkAddPanel) els.bulkAddPanel.hidden = false;
+    } else if (state.addMode === "search") {
+      if (els.form) els.form.hidden = true;
+      if (els.bulkAddPanel) els.bulkAddPanel.hidden = true;
+      if (els.searchAddPanel) els.searchAddPanel.hidden = false;
+    } else {
+      if (els.form) els.form.hidden = false;
+      if (els.bulkAddPanel) els.bulkAddPanel.hidden = true;
+      if (els.searchAddPanel) els.searchAddPanel.hidden = true;
+    }
+
     els.form.reset();
     populateFormGenreSelect();
 
     if (item) {
-      const kind = normalizeKind(
-        item.kind || (item.contentType === "movies" ? "movie" : "series"),
-        item.contentType
-      );
       els.formType.value = item.contentType;
-      syncFormFields();
-      els.formKind.value = kind;
       els.formGenre.value = item.genre;
       els.formTitle.value = item.title;
       setFormLeads(item.leads || parseLeads(item));
@@ -1690,7 +2537,6 @@
     } else {
       const defaultType = state.type !== "all" ? state.type : "movies";
       els.formType.value = defaultType;
-      syncFormFields();
       if (state.selectedGenres.length === 1) {
         els.formGenre.value = state.selectedGenres[0];
       }
@@ -1703,8 +2549,10 @@
     closeAllCardMenus();
     if (state.addMode === "bulk") {
       els.bulkPasteInput?.focus();
+    } else if (state.addMode === "search") {
+      els.titleSearchInput?.focus();
     } else {
-      els.formTitle.focus();
+      els.formLink?.focus();
     }
   }
 
@@ -1712,12 +2560,18 @@
     els.modal.hidden = true;
     updateBodyScrollLock();
     state.editingId = null;
-    state.addMode = "single";
+    state.addMode = "search";
     state.formSecondary = [];
     state.formLeads = [];
+    state.manualLinkMeta = null;
+    clearTimeout(searchDebounceTimer);
+    clearTimeout(formLinkLookupTimer);
+    setFormLinkStatus("");
+    resetSearchAddState();
     setBulkPasteError("");
-    if (els.form) els.form.hidden = false;
+    if (els.form) els.form.hidden = true;
     if (els.bulkAddPanel) els.bulkAddPanel.hidden = true;
+    if (els.searchAddPanel) els.searchAddPanel.hidden = true;
     els.form.reset();
   }
 
@@ -1726,6 +2580,7 @@
       !els.modal.hidden ||
       !els.ratingModal?.hidden ||
       !els.shareModal?.hidden ||
+      !els.themeModal?.hidden ||
       !els.changeCodeModal?.hidden ||
       !els.importShareModal?.hidden ||
       !els.manageListsModal?.hidden ||
@@ -1833,10 +2688,9 @@
 
       window.WatchlistAuth.migrateLocalAccount(prep.oldAccountId, prep.newAccountId);
       closeChangeCodeModal();
-      await window.WatchlistDialog.alert(
-        "Sign in with your new code from now on, and share it only with friends you trust.",
-        { title: "Code updated" }
-      );
+      await window.WatchlistDialog.alert(t("alert.codeUpdated"), {
+        title: t("alert.codeUpdatedTitle"),
+      });
     } finally {
       if (submitBtn) submitBtn.disabled = false;
     }
@@ -1852,6 +2706,20 @@
   function closeShareModal() {
     if (!els.shareModal) return;
     els.shareModal.hidden = true;
+    updateBodyScrollLock();
+  }
+
+  function openThemeModal() {
+    if (!els.themeModal) return;
+    els.themeModal.hidden = false;
+    updateBodyScrollLock();
+    window.WatchlistThemes?.applyThemeUi?.();
+    els.themeModal.querySelector(".theme-option")?.focus();
+  }
+
+  function closeThemeModal() {
+    if (!els.themeModal) return;
+    els.themeModal.hidden = true;
     updateBodyScrollLock();
   }
 
@@ -1981,11 +2849,11 @@
 
   async function duplicateItemToList(itemId, targetListId) {
     const item = state.items.find((entry) => entry.id === itemId);
-    if (!item) return { ok: false, error: "Title not found." };
+    if (!item) return { ok: false, error: t("alert.titleNotFound") };
 
     const currentListId = window.WatchlistAuth?.getProfile();
     if (targetListId === currentListId) {
-      return { ok: false, error: "That title is already on this list." };
+      return { ok: false, error: t("alert.alreadyOnThisList") };
     }
 
     const payload = readLocalListPayload(targetListId);
@@ -1996,7 +2864,10 @@
     if (findDuplicateInItems(targetItems, copy)) {
       return {
         ok: false,
-        error: `"${item.title}" is already on ${window.WatchlistAuth.getListLabel(targetListId)}.`,
+        error: t("alert.alreadyOnList", {
+          title: ltr(item.title),
+          listName: listLabel(targetListId),
+        }),
       };
     }
 
@@ -2038,7 +2909,7 @@
     );
 
     if (!listIds.length) {
-      els.moveListPicker.innerHTML = `<li class="move-list-picker__empty">Create another list first.</li>`;
+      els.moveListPicker.innerHTML = `<li class="move-list-picker__empty">${escapeHtml(t("move.empty"))}</li>`;
       return;
     }
 
@@ -2070,10 +2941,10 @@
 
     moveListItemId = itemId;
     if (els.moveListModalTitle) {
-      els.moveListModalTitle.textContent = "Move to another list";
+      els.moveListModalTitle.textContent = t("move.title");
     }
     if (els.moveListModalText) {
-      els.moveListModalText.textContent = `Copy “${item.title}” to another list. Your current list stays unchanged.`;
+      els.moveListModalText.textContent = t("move.text", { title: item.title });
     }
     renderMoveListPicker();
     closeAllCardMenus();
@@ -2097,13 +2968,18 @@
     closeMoveListModal();
 
     if (!result.ok) {
-      await window.WatchlistDialog.alert(result.error, { title: "Could not move" });
+      await window.WatchlistDialog.alert(result.error, {
+        title: t("alert.couldNotMoveTitle"),
+      });
       return;
     }
 
     await window.WatchlistDialog.alert(
-      `“${item?.title || "Title"}” was copied to ${result.listName}.`,
-      { title: "Copied to list" }
+      t("alert.titleCopied", {
+        title: ltr(item?.title || t("searchResult.title")),
+        listName: result.listName,
+      }),
+      { title: t("alert.titleCopiedTitle") }
     );
   }
 
@@ -2117,10 +2993,10 @@
   function setListFormMode(mode) {
     const isEdit = mode === "edit";
     if (els.createListModalTitle) {
-      els.createListModalTitle.textContent = isEdit ? "Edit list" : "New list";
+      els.createListModalTitle.textContent = isEdit ? t("create.editList") : t("create.newList");
     }
     if (els.createListSubmit) {
-      els.createListSubmit.textContent = isEdit ? "Save" : "Create list";
+      els.createListSubmit.textContent = isEdit ? t("btn.save") : t("btn.createList");
     }
   }
 
@@ -2235,11 +3111,13 @@
     const listCount = window.WatchlistAuth.getLibrary().length;
 
     const confirmed = await window.WatchlistDialog.confirm(
-      `Delete your account and all ${listCount} list${listCount === 1 ? "" : "s"}? Your sign-in code will be free to use again.`,
+      t("alert.deleteAccountConfirm", {
+        lists: window.WatchlistI18n?.listCountPhrase?.(listCount) || `${listCount}`,
+      }),
       {
-        title: "Delete account?",
-        confirmLabel: "Delete account",
-        cancelLabel: "Cancel",
+        title: t("alert.deleteAccountTitle"),
+        confirmLabel: t("menu.deleteAccount"),
+        cancelLabel: t("btn.cancel"),
         danger: true,
       }
     );
@@ -2256,10 +3134,9 @@
     window.WatchlistAuth.purgeAccount(accountId);
 
     if (!cloudOk) {
-      await window.WatchlistDialog.alert(
-        "Removed from this device, but cloud delete failed. Try Delete account once more.",
-        { title: "Partially deleted" }
-      );
+      await window.WatchlistDialog.alert(t("alert.partialDeleteAccount"), {
+        title: t("alert.partialDeleteAccountTitle"),
+      });
     }
 
     window.WatchlistAuth.signOut({ deleted: true });
@@ -2270,16 +3147,19 @@
 
     const library = window.WatchlistAuth.getLibrary();
     const entry = library.find((item) => item.listId === listId);
-    const label = entry?.name || entry?.label || "This list";
+    const label = entry?.name || entry?.label || t("list.thisList");
     const titleCount = window.WatchlistAuth.getListTitleCount(listId);
     const isCurrent = listId === window.WatchlistAuth.getProfile();
 
     const confirmed = await window.WatchlistDialog.confirm(
-      `Delete "${label}" (${titleCount} titles)? Your account and other lists stay.`,
+      t("alert.deleteListConfirm", {
+        label: ltr(label),
+        titles: window.WatchlistI18n?.titleCountPhrase?.(titleCount) || `${titleCount}`,
+      }),
       {
-        title: "Delete list?",
-        confirmLabel: "Delete",
-        cancelLabel: "Cancel",
+        title: t("alert.deleteListTitle"),
+        confirmLabel: t("btn.delete"),
+        cancelLabel: t("btn.cancel"),
         danger: true,
       }
     );
@@ -2312,10 +3192,9 @@
     renderListSwitcher();
 
     if (!cloudOk) {
-      await window.WatchlistDialog.alert(
-        "Removed from this device, but cloud delete failed. Try deleting again or check your connection.",
-        { title: "Partially deleted" }
-      );
+      await window.WatchlistDialog.alert(t("alert.partialDeleteList"), {
+        title: t("alert.partialDeleteListTitle"),
+      });
     }
   }
 
@@ -2326,13 +3205,10 @@
     const leads = [...state.formLeads];
     const link = normalizeLink(els.formLink.value);
     const summary = els.formSummary.value.trim();
-    let kind = els.formKind.value;
-
-    if (contentType !== "movies") {
-      kind = "series";
-    } else {
-      kind = normalizeKind(kind, contentType);
-    }
+    const existing = state.editingId
+      ? state.items.find((i) => i.id === state.editingId)
+      : null;
+    const kind = formKindForItem(contentType, existing?.kind);
 
     const secondaryGenres = normalizeSecondaryGenres(
       genre,
@@ -2357,6 +3233,16 @@
     }
 
     item.id = makeId(contentType, genre, title);
+
+    if (state.manualLinkMeta) {
+      if (state.manualLinkMeta.poster) item.poster = state.manualLinkMeta.poster;
+      if (state.manualLinkMeta.imdbRating) item.imdbRating = state.manualLinkMeta.imdbRating;
+      if (state.manualLinkMeta.anilistRating) {
+        item.anilistRating = state.manualLinkMeta.anilistRating;
+      }
+      if (state.manualLinkMeta.year) item.year = state.manualLinkMeta.year;
+    }
+
     return item;
   }
 
@@ -2405,15 +3291,13 @@
 
     try {
       await navigator.clipboard.writeText(template);
-      await window.WatchlistDialog.alert(
-        "Template copied. Paste it into your AI, add your title list, then paste the filled JSON back here.",
-        { title: "Copied" }
-      );
+      await window.WatchlistDialog.alert(t("alert.bulkTemplateCopied"), {
+        title: t("alert.bulkTemplateCopiedTitle"),
+      });
     } catch {
-      window.WatchlistDialog.alert(
-        "Could not copy automatically. Select the template text from the AI instructions and copy manually.",
-        { title: "Copy failed" }
-      );
+      window.WatchlistDialog.alert(t("alert.bulkCopyFailed"), {
+        title: t("alert.bulkCopyFailedTitle"),
+      });
     }
   }
 
@@ -2484,8 +3368,10 @@
         : "";
 
     await window.WatchlistDialog.alert(
-      `Added ${added} title${added === 1 ? "" : "s"} to your list.${warning}`,
-      { title: "Titles added" }
+      added === 1
+        ? t("alert.bulkAddedOne", { extra: warning })
+        : t("alert.bulkAddedMany", { added, extra: warning }),
+      { title: t("alert.bulkAddedTitle") }
     );
   }
 
@@ -2496,29 +3382,30 @@
 
     if (!item.genre || !item.title || !item.leads.length || !item.summary) {
       if (!item.leads.length) {
-        window.WatchlistDialog.alert("Add at least one lead actor.", {
-          title: "Missing actor",
+        window.WatchlistDialog.alert(t("alert.leadRequired"), {
+          title: t("alert.missingActorTitle"),
         });
       }
       return;
     }
 
     if (els.formLink.value.trim() && !item.link) {
-      window.WatchlistDialog.alert("Enter a valid link (IMDb or Rotten Tomatoes URL).", {
-        title: "Invalid link",
+      window.WatchlistDialog.alert(t("alert.invalidLink"), {
+        title: t("alert.invalidLinkTitle"),
       });
       return;
     }
 
     const duplicate = findDuplicate(item, state.editingId);
     if (duplicate) {
-      window.WatchlistDialog.alert("A title with this name already exists in this type.", {
-        title: "Duplicate title",
+      window.WatchlistDialog.alert(t("alert.nameExists"), {
+        title: t("alert.nameExistsTitle"),
       });
       return;
     }
 
     saveItem(item);
+    state.manualLinkMeta = null;
     updateGenreOptions();
     closeModal();
     render();
@@ -2528,13 +3415,14 @@
     if (!state.editingId) return;
 
     const item = state.items.find((i) => i.id === state.editingId);
-    const name = item ? item.title : "this title";
+    const name = item ? item.title : t("list.thisTitle");
 
     const confirmed = await window.WatchlistDialog.confirm(
-      `Remove "${name}" from your watchlist? This cannot be undone.`,
+      t("alert.deleteTitleConfirm", { name: ltr(name) }),
       {
-        title: "Delete title",
-        confirmLabel: "Delete",
+        title: t("alert.deleteTitleTitle"),
+        confirmLabel: t("btn.delete"),
+        cancelLabel: t("btn.cancel"),
         danger: true,
       }
     );
@@ -2613,10 +3501,14 @@
     const currentListName = window.WatchlistAuth?.getListLabel() || "My list";
 
     if (currentCount > 0) {
-      els.importShareModalText.textContent = `"${listName}" has ${titleCount} titles. You're on "${currentListName}" with ${currentCount}.`;
+      els.importShareModalText.textContent = t("import.summaryWithCurrent", {
+        listName,
+        count: titleCount,
+        currentName: currentListName,
+        currentCount,
+      });
       if (els.importShareModalHint) {
-        els.importShareModalHint.textContent =
-          "Open as a new list to keep yours untouched, or add/replace titles on your current list.";
+        els.importShareModalHint.textContent = t("import.hint");
       }
       if (els.importMergeBtn) els.importMergeBtn.hidden = false;
       if (els.importReplaceBtn) {
@@ -2626,10 +3518,12 @@
         els.importReplaceBtn.classList.add("btn--danger");
       }
     } else {
-      els.importShareModalText.textContent = `"${listName}" has ${titleCount} titles. Your current list is empty.`;
+      els.importShareModalText.textContent = t("import.summaryEmpty", {
+        listName,
+        count: titleCount,
+      });
       if (els.importShareModalHint) {
-        els.importShareModalHint.textContent =
-          "Open as a new list (recommended), or add these titles to your current list.";
+        els.importShareModalHint.textContent = t("import.hintEmpty");
       }
       if (els.importMergeBtn) els.importMergeBtn.hidden = true;
       if (els.importReplaceBtn) {
@@ -2653,9 +3547,12 @@
 
     const result = window.WatchlistAuth.createList(name, description);
     if (!result.ok) {
-      await window.WatchlistDialog.alert(result.error || "Could not create a new list.", {
-        title: "Import failed",
-      });
+      await window.WatchlistDialog.alert(
+        window.WatchlistI18n?.translateAuthError?.(result.error) ||
+          result.error ||
+          t("alert.couldNotCreateList"),
+        { title: t("alert.importFailedTitle") }
+      );
       return false;
     }
 
@@ -2667,10 +3564,9 @@
         description
       );
       if (!cloud.ok) {
-        await window.WatchlistDialog.alert(
-          "Created locally, but cloud sync failed. Your new list is on this device.",
-          { title: "Saved locally" }
-        );
+        await window.WatchlistDialog.alert(t("alert.savedLocallyCloudFail"), {
+          title: t("alert.savedLocallyTitle"),
+        });
       }
     }
 
@@ -2744,29 +3640,26 @@
     return `${safeName || "watchlist"}-${new Date().toISOString().slice(0, 10)}.json`;
   }
 
-  async function exportBackup() {
-    const payload = buildExportPayload();
-    const json = JSON.stringify(payload, null, 2);
+  async function exportBackupFile(payload = null) {
+    const exportData = payload || buildExportPayload();
+    const json = JSON.stringify(exportData, null, 2);
     const blob = new Blob([json], { type: "application/json" });
-    const filename = exportFilename(payload);
+    const filename = exportFilename(exportData);
     const file = new File([blob], filename, { type: "application/json" });
-
-    closeShareModal();
 
     if (navigator.share) {
       try {
         const shareData = {
-          title: `${payload.listName} — Our Movie Nights`,
-          text: "My watchlist backup. Open Our Movie Nights → Share → Import a list.",
+          title: `${exportData.listName} — Our Movie Nights`,
+          text: t("share.fileMessage"),
           files: [file],
         };
 
         if (!navigator.canShare || navigator.canShare(shareData)) {
           await navigator.share(shareData);
-          await window.WatchlistDialog.alert(
-            "If the share finished, your friend can import the file from Share → Import a list.",
-            { title: "List shared" }
-          );
+          await window.WatchlistDialog.alert(t("alert.listSharedFile"), {
+            title: t("alert.listSharedTitle"),
+          });
           return;
         }
       } catch (error) {
@@ -2781,10 +3674,150 @@
     link.click();
     URL.revokeObjectURL(url);
 
-    await window.WatchlistDialog.alert(
-      "Your list file was downloaded. Send it by WhatsApp, email, or any chat app. Your friend opens the app → Share → Import a list.",
-      { title: "List ready to send" }
-    );
+    await window.WatchlistDialog.alert(t("alert.listReadyToSend"), {
+      title: t("alert.listReadyToSendTitle"),
+    });
+  }
+
+  async function shareListLink() {
+    const payload = buildExportPayload();
+    closeShareModal();
+
+    if (!window.WatchlistSync?.isConfigured?.()) {
+      await exportBackupFile(payload);
+      return;
+    }
+
+    const published = await window.WatchlistSync.publishShareSnapshot(payload);
+    if (!published.ok) {
+      await window.WatchlistDialog.alert(t("alert.shareLinkFailed"), {
+        title: t("alert.shareLinkFailedTitle"),
+      });
+      await exportBackupFile(payload);
+      return;
+    }
+
+    const shareUrl = buildShareUrl(published.shareId);
+    if (!shareUrl) {
+      await window.WatchlistDialog.alert(t("alert.shareLocalhost"), {
+        title: t("alert.shareLocalhostTitle"),
+      });
+      await exportBackupFile(payload);
+      return;
+    }
+
+    if (navigator.share) {
+      try {
+        const shareData = {
+          title: `${payload.listName} — Our Movie Nights`,
+          text: t("share.linkMessage", { name: payload.listName }),
+          url: shareUrl,
+        };
+        if (!navigator.canShare || navigator.canShare(shareData)) {
+          await navigator.share(shareData);
+          await window.WatchlistDialog.alert(t("alert.listSharedLink"), {
+            title: t("alert.listSharedTitle"),
+          });
+          return;
+        }
+      } catch (error) {
+        if (error?.name === "AbortError") return;
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      await window.WatchlistDialog.alert(t("alert.linkCopied"), {
+        title: t("alert.listSharedTitle"),
+      });
+    } catch {
+      await window.WatchlistDialog.alert(shareUrl, {
+        title: t("alert.copyLinkManualTitle"),
+      });
+    }
+  }
+
+  function getShareBaseUrl() {
+    const configured = window.WATCHLIST_CONFIG?.publicAppUrl?.trim();
+    if (configured) {
+      try {
+        const url = new URL(configured);
+        return url.href.endsWith("/") ? url.href : `${url.href}/`;
+      } catch {
+        return null;
+      }
+    }
+
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") return null;
+    return new URL("./", window.location.href).href;
+  }
+
+  function buildShareUrl(shareId) {
+    const base = getShareBaseUrl();
+    if (!base) return "";
+    const url = new URL("gate.html", base);
+    url.search = "";
+    url.searchParams.set("share", shareId);
+    return url.toString();
+  }
+
+  function readPendingShareId() {
+    const fromUrl = new URLSearchParams(window.location.search).get("share")?.trim();
+    if (fromUrl) return fromUrl;
+    try {
+      return sessionStorage.getItem(PENDING_SHARE_KEY)?.trim() || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function clearPendingShareId() {
+    try {
+      sessionStorage.removeItem(PENDING_SHARE_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function stripShareFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("share")) return;
+    params.delete("share");
+    const qs = params.toString();
+    const next = `${window.location.pathname}${qs ? `?${qs}` : ""}`;
+    window.history.replaceState({}, "", next);
+  }
+
+  async function consumePendingShare() {
+    const shareId = readPendingShareId();
+    if (!shareId) return;
+
+    clearPendingShareId();
+    stripShareFromUrl();
+
+    if (!window.WatchlistSync?.isConfigured?.()) {
+      await window.WatchlistDialog.alert(t("alert.shareNeedsCloud"), {
+        title: t("alert.couldNotOpenFileTitle"),
+      });
+      return;
+    }
+
+    const result = await window.WatchlistSync.fetchShareSnapshot(shareId);
+    if (!result.ok) {
+      const message =
+        result.error === "expired" ? t("alert.shareLinkExpired") : t("alert.shareLinkInvalid");
+      await window.WatchlistDialog.alert(message, {
+        title: t("alert.couldNotOpenFileTitle"),
+      });
+      return;
+    }
+
+    openImportShareModal(result.payload);
+  }
+
+  async function exportBackup() {
+    await shareListLink();
   }
 
   function applyImportToCurrentList(payload) {
@@ -2826,21 +3859,21 @@
     render();
 
     if (!cloud.ok) {
-      await window.WatchlistDialog.alert(
-        "Saved on this device, but cloud sync failed. Your changes are still here locally.",
-        { title: "Saved locally" }
-      );
+      await window.WatchlistDialog.alert(t("alert.savedLocally"), {
+        title: t("alert.savedLocallyTitle"),
+      });
       return;
     }
 
     const message =
       mode === "new-list"
-        ? `Opened "${importedListName}" as a new list. Your previous list is unchanged.`
+        ? t("alert.importOpenedNewList", { name: ltr(importedListName) })
         : mode === "merge"
-          ? "New titles were added to your current list."
-          : "Your current list was updated with the imported file.";
+          ? t("alert.importMerged")
+          : t("alert.importReplaced");
     await window.WatchlistDialog.alert(message, {
-      title: mode === "new-list" ? "New list created" : "List updated",
+      title:
+        mode === "new-list" ? t("alert.newListCreatedTitle") : t("alert.listUpdatedTitle"),
     });
   }
 
@@ -2858,10 +3891,9 @@
         closeShareModal();
         openImportShareModal(payload);
       } catch {
-        window.WatchlistDialog.alert(
-          "Could not read that file. Ask your friend to send one downloaded from this app.",
-          { title: "Could not open file" }
-        );
+        window.WatchlistDialog.alert(t("alert.couldNotOpenFile"), {
+          title: t("alert.couldNotOpenFileTitle"),
+        });
       }
     };
     reader.readAsText(file);
@@ -2918,6 +3950,21 @@
       render();
     });
 
+    els.ratingFilterSource?.addEventListener("change", () => {
+      const value = els.ratingFilterSource.value || "all";
+      state.ratingFilterSource = value === "rt" ? "all" : value;
+      if (state.ratingFilterSource !== value) {
+        els.ratingFilterSource.value = "all";
+      }
+      updateRatingFilterOptions();
+      render();
+    });
+
+    els.ratingFilterMin?.addEventListener("change", () => {
+      state.ratingFilterMin = els.ratingFilterMin.value || "any";
+      render();
+    });
+
     els.accountMenuBtn?.addEventListener("click", (event) => {
       event.stopPropagation();
       toggleAccountMenu();
@@ -2927,7 +3974,18 @@
       const action = event.target.closest("[data-action]")?.dataset.action;
       if (!action) return;
 
+      if (action === "set-language") {
+        const lang = event.target.closest("[data-action='set-language']")?.dataset.lang;
+        if (lang) window.WatchlistI18n?.setLang(lang);
+        return;
+      }
+
       closeAccountMenu();
+
+      if (action === "open-theme") {
+        openThemeModal();
+        return;
+      }
 
       if (action === "manage-lists") {
         openManageListsModal();
@@ -2976,6 +4034,21 @@
       if (action === "share-receive") {
         closeShareModal();
         els.importInput?.click();
+      }
+    });
+
+    els.themeModal?.addEventListener("click", (event) => {
+      const action = event.target.closest("[data-action]")?.dataset.action;
+      if (!action) return;
+
+      if (action === "close-theme-modal") {
+        closeThemeModal();
+        return;
+      }
+
+      if (action === "set-theme") {
+        const theme = event.target.closest("[data-action='set-theme']")?.dataset.theme;
+        if (theme) window.WatchlistThemes?.setTheme(theme);
       }
     });
 
@@ -3053,15 +4126,19 @@
       }
 
       if (action === "import-merge" && pendingImportPayload) {
-        const listName = pendingImportPayload.listName || "Shared list";
+        const listName = pendingImportPayload.listName || t("list.sharedList");
         const titleCount = countTitles(pendingImportPayload.watchlist);
-        const currentName = window.WatchlistAuth?.getListLabel() || "My list";
+        const currentName = window.WatchlistAuth?.getListLabel() || t("list.myList");
         const confirmed = await window.WatchlistDialog.confirm(
-          `Add ${titleCount} titles from "${listName}" to "${currentName}"? Duplicates will be skipped.`,
+          t("alert.importMergeConfirm", {
+            count: titleCount,
+            listName: ltr(listName),
+            currentName: ltr(currentName),
+          }),
           {
-            title: "Add to current list?",
-            confirmLabel: "Add titles",
-            cancelLabel: "Cancel",
+            title: t("alert.importMergeTitle"),
+            confirmLabel: t("btn.addTitles"),
+            cancelLabel: t("btn.cancel"),
           }
         );
         if (!confirmed) return;
@@ -3070,18 +4147,25 @@
       }
 
       if (action === "import-replace" && pendingImportPayload) {
-        const listName = pendingImportPayload.listName || "Shared list";
+        const listName = pendingImportPayload.listName || t("list.sharedList");
         const titleCount = countTitles(pendingImportPayload.watchlist);
-        const currentName = window.WatchlistAuth?.getListLabel() || "My list";
+        const currentName = window.WatchlistAuth?.getListLabel() || t("list.myList");
         const replacing = state.items.length > 0;
         const confirmed = await window.WatchlistDialog.confirm(
           replacing
-            ? `Replace "${currentName}" with "${listName}" (${titleCount} titles)? Your current list will be lost.`
-            : `Add ${titleCount} titles from "${listName}" to your list?`,
+            ? t("alert.importReplaceConfirm", {
+                currentName: ltr(currentName),
+                listName: ltr(listName),
+                count: titleCount,
+              })
+            : t("alert.importAddConfirm", {
+                count: titleCount,
+                listName: ltr(listName),
+              }),
           {
-            title: replacing ? "Replace current list?" : "Add to this list?",
-            confirmLabel: replacing ? "Replace list" : "Add titles",
-            cancelLabel: "Cancel",
+            title: replacing ? t("alert.importReplaceTitle") : t("alert.importAddTitle"),
+            confirmLabel: replacing ? t("btn.replaceList") : t("btn.addTitles"),
+            cancelLabel: t("btn.cancel"),
             danger: replacing,
           }
         );
@@ -3111,8 +4195,6 @@
         closeChangeCodeModal();
       }
     });
-
-    els.formType.addEventListener("change", syncFormFields);
 
     els.formGenre.addEventListener("change", () => {
       setFormSecondary(state.formSecondary);
@@ -3149,12 +4231,50 @@
       removeFormLead(btn.dataset.name);
     });
 
+    els.formLink?.addEventListener("input", queueFormLinkLookup);
+    els.formLink?.addEventListener("blur", handleFormLinkLookup);
+
     els.form.addEventListener("submit", handleFormSubmit);
     els.addModeTabs?.addEventListener("click", (event) => {
       const tab = event.target.closest("[data-add-mode]");
       if (!tab) return;
       setAddMode(tab.dataset.addMode);
     });
+
+    els.titleSearchInput?.addEventListener("input", () => {
+      state.searchQuery = els.titleSearchInput.value;
+      queueTitleSearch();
+    });
+
+    els.titleSearchInput?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      clearTimeout(searchDebounceTimer);
+      state.searchPage = 1;
+      runTitleSearch();
+    });
+
+    els.titleSearchType?.addEventListener("change", () => {
+      state.searchPage = 1;
+      runTitleSearch();
+    });
+
+    els.titleSearchMore?.addEventListener("click", () => {
+      if (state.searchLoading) return;
+      state.searchPage += 1;
+      runTitleSearch({ append: true });
+    });
+
+    els.searchAddPanel?.addEventListener("click", async (event) => {
+      const pick = event.target.closest("[data-action='pick-search-result']");
+      if (pick) {
+        await handleSearchResultPick(pick);
+      }
+    });
+
+    els.searchConfirmBack?.addEventListener("click", hideSearchConfirmStep);
+    els.searchConfirmAdd?.addEventListener("click", handleSearchConfirmAdd);
+
     els.copyBulkTemplate?.addEventListener("click", copyBulkTemplate);
     els.bulkAddConfirm?.addEventListener("click", handleBulkAdd);
     els.deleteBtn.addEventListener("click", handleDelete);
@@ -3224,6 +4344,10 @@
       }
       if (!els.shareModal?.hidden) {
         closeShareModal();
+        return;
+      }
+      if (!els.themeModal?.hidden) {
+        closeThemeModal();
         return;
       }
       if (!els.ratingModal?.hidden) {
@@ -3335,12 +4459,13 @@
 
       if (action === "delete") {
         const item = state.items.find((i) => i.id === id);
-        const name = item ? item.title : "this title";
+        const name = item ? item.title : t("list.thisTitle");
         const confirmed = await window.WatchlistDialog.confirm(
-          `Remove "${name}" from your watchlist? This cannot be undone.`,
+          t("alert.deleteTitleConfirm", { name: ltr(name) }),
           {
-            title: "Delete title",
-            confirmLabel: "Delete",
+            title: t("alert.deleteTitleTitle"),
+            confirmLabel: t("btn.delete"),
+            cancelLabel: t("btn.cancel"),
             danger: true,
           }
         );
@@ -3364,7 +4489,10 @@
 
   async function init() {
     if (!window.WatchlistAuth?.isAuthenticated()) {
-      window.location.replace("gate.html");
+      const shareId = new URLSearchParams(window.location.search).get("share")?.trim();
+      window.location.replace(
+        shareId ? `gate.html?share=${encodeURIComponent(shareId)}` : "gate.html"
+      );
       return;
     }
 
@@ -3419,14 +4547,41 @@
     updateGenreOptions();
     bindEvents();
     renderListSwitcher();
+    if (els.ratingFilterSource?.value === "rt") {
+      els.ratingFilterSource.value = "all";
+      state.ratingFilterSource = "all";
+    }
+    updateRatingFilterOptions();
     updateStats();
     render();
+    backfillMissingRatings();
+    await consumePendingShare();
+
+    window.WatchlistI18n?.onChange(() => {
+      window.WatchlistI18n.applyDocument();
+      updateGenreOptions();
+      updateRatingFilterOptions();
+      renderListSwitcher();
+      updateStats();
+      render();
+      if (!els.modal.hidden) {
+        els.modalTitle.textContent = state.editingId
+          ? t("modal.editTitle")
+          : t("modal.addTitle");
+      }
+      if (!els.createListModal.hidden) {
+        const isEdit = Boolean(state.editingListId);
+        els.createListModalTitle.textContent = isEdit
+          ? t("create.editList")
+          : t("create.newList");
+        els.createListSubmit.textContent = isEdit ? t("btn.save") : t("btn.createList");
+      }
+    });
 
     if (window.WatchlistAuth.needsCodeUpgrade()) {
-      await window.WatchlistDialog.alert(
-        "Your old code (like 1234) no longer fits the new rules. Pick a new personal code with letters and numbers — at least 6 characters.",
-        { title: "Update your sign-in code" }
-      );
+      await window.WatchlistDialog.alert(t("alert.codeUpgrade"), {
+        title: t("alert.codeUpgradeTitle"),
+      });
       openChangeCodeModal();
     }
 

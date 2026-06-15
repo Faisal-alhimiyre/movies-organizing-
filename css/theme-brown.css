@@ -1,0 +1,235 @@
+/* Brown theme — warm cocoa & beige */
+
+html[data-theme="brown"] {
+  color-scheme: dark;
+  --bg: #1a1410;
+  --bg-elevated: #261e18;
+  --bg-card: #322618;
+  --bg-card-hover: #3d3020;
+  --border: rgba(212, 184, 150, 0.12);
+  --border-strong: rgba(212, 184, 150, 0.22);
+  --text: #f2ebe3;
+  --text-muted: #a8947e;
+  --accent: #d4b896;
+  --accent-dim: rgba(212, 184, 150, 0.14);
+  --movie: #7eb0d4;
+  --movie-dim: rgba(126, 176, 212, 0.12);
+  --tv: #b89ed4;
+  --tv-dim: rgba(184, 158, 212, 0.12);
+  --anime: #d48498;
+  --anime-dim: rgba(212, 132, 152, 0.12);
+  --franchise: #6ec4a4;
+  --franchise-dim: rgba(110, 196, 164, 0.12);
+  --watched: #6ed090;
+  --shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+html[data-theme="brown"] ::selection {
+  background: rgba(212, 184, 150, 0.3);
+  color: #fff;
+}
+
+html[data-theme="brown"] body {
+  background:
+    radial-gradient(ellipse 85% 50% at 50% -20%, rgba(180, 130, 80, 0.16), transparent 58%),
+    radial-gradient(ellipse 45% 35% at 0% 100%, rgba(120, 80, 50, 0.14), transparent),
+    radial-gradient(ellipse 40% 30% at 100% 80%, rgba(212, 184, 150, 0.08), transparent),
+    var(--bg);
+}
+
+html[data-theme="brown"] .header__stat-chip {
+  background: rgba(212, 184, 150, 0.1);
+  border-color: rgba(212, 184, 150, 0.18);
+}
+
+html[data-theme="brown"] .header__stat-value {
+  color: #f5efe8;
+}
+
+html[data-theme="brown"] .header__stat-label {
+  color: #b8a48e;
+}
+
+html[data-theme="brown"] .header__toolbar {
+  background: rgba(212, 184, 150, 0.08);
+  border-color: rgba(212, 184, 150, 0.16);
+}
+
+html[data-theme="brown"] .header__toolbar .btn--primary {
+  color: #2a1e12;
+  background: linear-gradient(180deg, #e8d4b8 0%, #d4b896 100%);
+}
+
+html[data-theme="brown"] .header__toolbar .account-menu__trigger:hover,
+html[data-theme="brown"] .header__toolbar .account-menu__trigger:focus-visible {
+  background: rgba(212, 184, 150, 0.12);
+  border-color: rgba(212, 184, 150, 0.2);
+}
+
+html[data-theme="brown"] .panel {
+  background: rgba(38, 30, 24, 0.88);
+  border-color: rgba(212, 184, 150, 0.12);
+  box-shadow: 0 1px 0 rgba(212, 184, 150, 0.05) inset;
+}
+
+html[data-theme="brown"] .type-tabs {
+  background: rgba(0, 0, 0, 0.28);
+  border-bottom-color: rgba(212, 184, 150, 0.1);
+}
+
+html[data-theme="brown"] .type-tab--active {
+  color: #2a1e12;
+  background: linear-gradient(180deg, #e8d4b8 0%, #d4b896 100%);
+}
+
+html[data-theme="brown"] .type-tab--active:hover {
+  color: #2a1e12;
+  background: linear-gradient(180deg, #f0e0c8 0%, #dcc0a0 100%);
+}
+
+html[data-theme="brown"] .search__input,
+html[data-theme="brown"] .filter,
+html[data-theme="brown"] .genre-filter__select,
+html[data-theme="brown"] .select,
+html[data-theme="brown"] .gate__input,
+html[data-theme="brown"] .form-input,
+html[data-theme="brown"] .form-textarea {
+  background: rgba(12, 8, 4, 0.45);
+  border-color: rgba(212, 184, 150, 0.14);
+}
+
+html[data-theme="brown"] .search__input:focus,
+html[data-theme="brown"] .filter:focus,
+html[data-theme="brown"] .select:focus,
+html[data-theme="brown"] .form-input:focus,
+html[data-theme="brown"] .form-textarea:focus {
+  border-color: rgba(212, 184, 150, 0.4);
+  box-shadow: 0 0 0 3px rgba(212, 184, 150, 0.1);
+}
+
+html[data-theme="brown"] select,
+html[data-theme="brown"] .select,
+html[data-theme="brown"] .account-menu__select {
+  accent-color: #d4b896;
+  background-color: #261e18;
+}
+
+html[data-theme="brown"] select option,
+html[data-theme="brown"] .select option {
+  background-color: #261e18;
+}
+
+html[data-theme="brown"] select option:checked,
+html[data-theme="brown"] .select option:checked {
+  background-color: #3d3020;
+  color: #e8d4b8;
+}
+
+html[data-theme="brown"] .btn--primary {
+  color: #2a1e12;
+  background: linear-gradient(180deg, #e8d4b8 0%, #d4b896 55%, #c4a882 100%);
+}
+
+html[data-theme="brown"] .btn--primary:hover {
+  background: linear-gradient(180deg, #f0e0c8 0%, #dcc0a0 55%, #ceb08a 100%);
+}
+
+html[data-theme="brown"] .layout-bar {
+  background: rgba(212, 184, 150, 0.08);
+  border-color: rgba(212, 184, 150, 0.14);
+}
+
+html[data-theme="brown"] .layout-toggle--active {
+  background: rgba(212, 184, 150, 0.14);
+  border-color: rgba(212, 184, 150, 0.28);
+}
+
+html[data-theme="brown"] .genre-section__bar {
+  background: linear-gradient(135deg, rgba(212, 184, 150, 0.08) 0%, rgba(38, 30, 24, 0.6) 100%);
+  border-color: rgba(212, 184, 150, 0.16);
+}
+
+html[data-theme="brown"] .genre-section--all-match .genre-section__bar {
+  border-color: rgba(212, 184, 150, 0.32);
+  background: rgba(212, 184, 150, 0.08);
+}
+
+html[data-theme="brown"] .genre-section__count {
+  background: rgba(0, 0, 0, 0.28);
+  border-color: rgba(212, 184, 150, 0.14);
+}
+
+html[data-theme="brown"] .card {
+  background: linear-gradient(165deg, #3d3020 0%, #2a2018 55%, #1f1812 100%);
+  border-color: rgba(212, 184, 150, 0.12);
+}
+
+html[data-theme="brown"] .card:hover {
+  border-color: rgba(212, 184, 150, 0.32);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35);
+}
+
+html[data-theme="brown"] .card--linked:hover .card__title {
+  color: #e8d4b8;
+}
+
+html[data-theme="brown"] .card__lead {
+  color: #d4b896;
+}
+
+html[data-theme="brown"] .card__rating,
+html[data-theme="brown"] .card-menu__trigger {
+  background: rgba(0, 0, 0, 0.28);
+  border-color: rgba(212, 184, 150, 0.12);
+}
+
+html[data-theme="brown"] .modal__panel,
+html[data-theme="brown"] .app-dialog__panel {
+  background: linear-gradient(180deg, #322618 0%, #261e18 100%);
+  border-color: rgba(212, 184, 150, 0.2);
+}
+
+html[data-theme="brown"] .add-mode-tabs {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+html[data-theme="brown"] .add-mode-tab--active {
+  color: #2a1e12;
+  background: linear-gradient(180deg, #e8d4b8 0%, #d4b896 100%);
+}
+
+html[data-theme="brown"] .add-panel-hint {
+  background: rgba(212, 184, 150, 0.08);
+  border-color: rgba(212, 184, 150, 0.14);
+}
+
+html[data-theme="brown"] .gate__card {
+  background: linear-gradient(180deg, #322618 0%, #261e18 100%);
+  border-color: rgba(212, 184, 150, 0.2);
+}
+
+html[data-theme="brown"] .gate__mode--active {
+  color: #2a1e12;
+  background: linear-gradient(180deg, #e8d4b8 0%, #d4b896 100%);
+}
+
+html[data-theme="brown"] .gate__lang-btn--active,
+html[data-theme="brown"] .account-menu__lang-btn--active,
+html[data-theme="brown"] .theme-option--active {
+  color: #2a1e12;
+  background: linear-gradient(180deg, #e8d4b8 0%, #d4b896 100%);
+  border-color: transparent;
+}
+
+html[data-theme="brown"] .account-menu__panel {
+  background: #261e18;
+  border-color: rgba(212, 184, 150, 0.18);
+}
+
+html[data-theme="brown"] .genre-chip--filter {
+  border-color: rgba(212, 184, 150, 0.26);
+}
+
+html[data-theme="brown"] .rating-picker__star--filled .rating-picker__star-icon {
+  color: #e8d4b8;
+}

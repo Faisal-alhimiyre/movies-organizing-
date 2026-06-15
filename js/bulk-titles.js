@@ -23,7 +23,7 @@ Rules:
 - lead: lead actors, comma-separated (required)
 - secondaryGenres: optional array of extra genres from the same list
 - summary: one short sentence (required)
-- link: plain URL only (https://www.imdb.com/... or rottentomatoes.com) — NOT markdown like [text](url). Use "" if unknown.
+- link: plain URL only (https://www.imdb.com/...) — NOT markdown like [text](url). Use "" if unknown.
 
 Example entry:
 {
@@ -227,7 +227,7 @@ Replace the example with one object per title the user gives you. Output the ful
         errors.push(
           looksMarkdown
             ? `Row ${line} (“${title}”): link is markdown — use a plain URL like https://www.imdb.com/title/tt1234567/`
-            : `Row ${line} (“${title}”): invalid link “${original}”. Use IMDb or Rotten Tomatoes.`
+            : `Row ${line} (“${title}”): invalid link “${original}”. Use IMDb.`
         );
         return;
       }

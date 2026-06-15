@@ -8,6 +8,18 @@
 
 drop table if exists public.list_snapshots;
 
+create table if not exists public.list_snapshots (
+  share_id text primary key,
+  list_name text not null default 'Shared list',
+  title_count integer not null default 0,
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '30 days')
+);
+
+create index if not exists list_snapshots_expires_at_idx
+  on public.list_snapshots (expires_at);
+
 -- One row per sign-in code
 create table if not exists public.accounts (
   account_id text primary key,
@@ -42,6 +54,7 @@ create table if not exists public.watchlist_items (
   secondary_genres jsonb not null default '[]'::jsonb,
   poster text not null default '',
   imdb_rating text not null default '',
+  anilist_rating text not null default '',
   year text not null default '',
   watched boolean not null default false,
   watch_rating numeric,          -- user's score 0-10 when watched (null = not rated yet)
@@ -62,6 +75,7 @@ create index if not exists watchlist_items_title_idx
 alter table public.accounts enable row level security;
 alter table public.lists enable row level security;
 alter table public.watchlist_items enable row level security;
+alter table public.list_snapshots enable row level security;
 
 -- Accounts
 create policy "accounts_select"
@@ -93,6 +107,13 @@ create policy "watchlist_items_update"
 create policy "watchlist_items_delete"
   on public.watchlist_items for delete to anon, authenticated using (true);
 
+-- Share snapshots (read-only copies for import links)
+create policy "list_snapshots_select"
+  on public.list_snapshots for select to anon, authenticated
+  using (expires_at > now());
+create policy "list_snapshots_insert"
+  on public.list_snapshots for insert to anon, authenticated with check (true);
+
 -- Already on the OLD single-list schema? Run this once to upgrade:
 --
 -- create table if not exists public.accounts (
@@ -114,6 +135,9 @@ create policy "watchlist_items_delete"
 
 -- Already have watchlist_items but no watch_rating / watch_note? Run once:
 --   supabase/migrate-watch-ratings.sql
+--
+-- Already have watchlist_items but no anilist_rating? Run once:
+--   supabase/migrate-anilist-rating.sql
 
 -- Wipe all cloud data (run ONLY after migrate-to-accounts.sql or full schema.sql):
 -- delete from public.watchlist_items;

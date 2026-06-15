@@ -76,19 +76,35 @@
         resolve(true);
       }
     });
+
+    refreshDialogLabels();
+  }
+
+  function refreshDialogLabels() {
+    if (!cancelBtn || !confirmBtn) return;
+    cancelBtn.textContent = window.WatchlistI18n?.t("btn.cancel") || "Cancel";
+    if (!confirmBtn.hidden) {
+      confirmBtn.textContent = window.WatchlistI18n?.t("btn.ok") || "OK";
+    }
   }
 
   function open(options) {
     ensureDialog();
 
     const {
-      title = "Notice",
+      title = window.WatchlistI18n?.t("dialog.notice") || "Notice",
       message = "",
       mode = "alert",
-      confirmLabel = "OK",
-      cancelLabel = "Cancel",
+      confirmLabel = window.WatchlistI18n?.t("btn.ok") || "OK",
+      cancelLabel = window.WatchlistI18n?.t("btn.cancel") || "Cancel",
       danger = false,
     } = options;
+
+    const panel = root.querySelector(".app-dialog__panel");
+    const rtl = window.WatchlistI18n?.isRtl?.();
+    if (panel) {
+      panel.dir = rtl ? "rtl" : "ltr";
+    }
 
     titleEl.textContent = title;
     messageEl.textContent = message;
@@ -125,20 +141,20 @@
 
   function alert(message, options = {}) {
     return open({
-      title: options.title || "Notice",
+      title: options.title || window.WatchlistI18n?.t("dialog.notice") || "Notice",
       message,
       mode: "alert",
-      confirmLabel: options.confirmLabel || "OK",
+      confirmLabel: options.confirmLabel || window.WatchlistI18n?.t("btn.ok") || "OK",
     });
   }
 
   function confirm(message, options = {}) {
     return open({
-      title: options.title || "Are you sure?",
+      title: options.title || window.WatchlistI18n?.t("dialog.sure") || "Are you sure?",
       message,
       mode: "confirm",
-      confirmLabel: options.confirmLabel || "Confirm",
-      cancelLabel: options.cancelLabel || "Cancel",
+      confirmLabel: options.confirmLabel || window.WatchlistI18n?.t("btn.confirm") || "Confirm",
+      cancelLabel: options.cancelLabel || window.WatchlistI18n?.t("btn.cancel") || "Cancel",
       danger: Boolean(options.danger),
     });
   }
@@ -147,4 +163,7 @@
     alert,
     confirm,
   };
+
+  window.WatchlistI18n?.onChange?.(() => refreshDialogLabels());
+  refreshDialogLabels();
 })();

@@ -4,6 +4,7 @@
   const ACCOUNTS_TABLE = "accounts";
   const LISTS_TABLE = "lists";
   const ITEMS_TABLE = "watchlist_items";
+  const SNAPSHOTS_TABLE = "list_snapshots";
   const DEBOUNCE_MS = 900;
 
   let client = null;
@@ -104,6 +105,7 @@
             secondary_genres: entry.secondaryGenres || [],
             poster: entry.poster || "",
             imdb_rating: entry.imdbRating || "",
+            anilist_rating: entry.anilistRating || "",
             year: entry.year || "",
             watched: watchMeta.watched,
             watch_rating: watchMeta.rating,
@@ -145,6 +147,7 @@
       }
       if (row.poster) entry.poster = row.poster;
       if (row.imdb_rating) entry.imdbRating = row.imdb_rating;
+      if (row.anilist_rating) entry.anilistRating = row.anilist_rating;
       if (row.year) entry.year = row.year;
 
       watchlist[contentType][genre].push(entry);
@@ -539,6 +542,68 @@
     return { ok: true };
   }
 
+  function countTitlesInWatchlist(watchlist) {
+    let count = 0;
+    for (const genres of Object.values(watchlist || {})) {
+      if (!genres || typeof genres !== "object") continue;
+      for (const titles of Object.values(genres)) {
+        if (!titles || typeof titles !== "object") continue;
+        count += Object.keys(titles).length;
+      }
+    }
+    return count;
+  }
+
+  async function publishShareSnapshot(payload) {
+    const sb = getClient();
+    if (!sb || !payload?.watchlist) return { ok: false, error: "not_configured" };
+
+    const shareId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `share-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+    const { error } = await sb.from(SNAPSHOTS_TABLE).insert({
+      share_id: shareId,
+      list_name: payload.listName || "Shared list",
+      title_count: payload.stats?.titles ?? countTitlesInWatchlist(payload.watchlist),
+      payload,
+    });
+
+    if (error) {
+      console.warn("[sync] publish share failed:", error.message);
+      return { ok: false, error };
+    }
+
+    return { ok: true, shareId };
+  }
+
+  async function fetchShareSnapshot(shareId) {
+    const sb = getClient();
+    if (!sb || !shareId) return { ok: false, error: "not_configured" };
+
+    const { data, error } = await sb
+      .from(SNAPSHOTS_TABLE)
+      .select("payload, expires_at")
+      .eq("share_id", shareId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("[sync] fetch share failed:", error.message);
+      return { ok: false, error };
+    }
+
+    if (!data?.payload?.watchlist) {
+      return { ok: false, error: "not_found" };
+    }
+
+    if (data.expires_at && new Date(data.expires_at) < new Date()) {
+      return { ok: false, error: "expired" };
+    }
+
+    return { ok: true, payload: data.payload };
+  }
+
   window.WatchlistSync = {
     isConfigured,
     listExists,
@@ -555,5 +620,7 @@
     schedulePush,
     cancelScheduledPush,
     isSyncing,
+    publishShareSnapshot,
+    fetchShareSnapshot,
   };
 })();

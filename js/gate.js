@@ -2,6 +2,11 @@
   "use strict";
 
   const auth = window.WatchlistAuth;
+  const i18n = () => window.WatchlistI18n;
+
+  function t(key, vars) {
+    return i18n()?.t(key, vars) ?? key;
+  }
 
   const els = {
     modes: document.querySelectorAll(".gate__mode"),
@@ -11,12 +16,28 @@
     createCode: document.getElementById("createCode"),
     confirmCode: document.getElementById("confirmCode"),
     error: document.getElementById("gateError"),
+    themeModal: document.getElementById("themeModal"),
   };
 
+  function openGateThemeModal() {
+    if (!els.themeModal) return;
+    els.themeModal.hidden = false;
+    document.body.style.overflow = "hidden";
+    window.WatchlistThemes?.applyThemeUi?.();
+    els.themeModal.querySelector(".theme-option")?.focus();
+  }
+
+  function closeGateThemeModal() {
+    if (!els.themeModal) return;
+    els.themeModal.hidden = true;
+    document.body.style.overflow = "";
+  }
+
   function showError(message, fields = []) {
+    const text = i18n()?.translateAuthError(message) || message || "";
     if (els.error) {
-      els.error.hidden = !message;
-      els.error.textContent = message || "";
+      els.error.hidden = !text;
+      els.error.textContent = text;
     }
 
     const targets = fields.length
@@ -25,7 +46,7 @@
 
     targets.forEach((field) => {
       if (!field) return;
-      field.classList.toggle("gate__input--invalid", Boolean(message));
+      field.classList.toggle("gate__input--invalid", Boolean(text));
     });
   }
 
@@ -33,8 +54,37 @@
     showError("");
   }
 
+  const PENDING_SHARE_KEY = "watchlist-pending-share";
+
+  function getShareIdFromLocation() {
+    return new URLSearchParams(window.location.search).get("share")?.trim() || "";
+  }
+
+  function persistPendingShareId(shareId) {
+    if (!shareId) return;
+    try {
+      sessionStorage.setItem(PENDING_SHARE_KEY, shareId);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function readPendingShareId() {
+    const fromUrl = getShareIdFromLocation();
+    if (fromUrl) return fromUrl;
+    try {
+      return sessionStorage.getItem(PENDING_SHARE_KEY)?.trim() || "";
+    } catch {
+      return "";
+    }
+  }
+
   function goToApp() {
-    window.location.href = "index.html";
+    const shareId = readPendingShareId();
+    if (shareId) persistPendingShareId(shareId);
+    window.location.href = shareId
+      ? `index.html?share=${encodeURIComponent(shareId)}`
+      : "index.html";
   }
 
   function setMode(mode) {
@@ -69,7 +119,7 @@
     }
 
     if (!(await auth.accountExists(code))) {
-      showError("No list found with this code. Use New list to create one.", [els.openCode]);
+      showError(t("gate.noList"), [els.openCode]);
       return;
     }
 
@@ -100,14 +150,12 @@
     }
 
     if (code !== confirm) {
-      showError("Codes do not match.", [els.createCode, els.confirmCode]);
+      showError(t("gate.codesMismatch"), [els.createCode, els.confirmCode]);
       return;
     }
 
     if (await codeIsTaken(code)) {
-      showError("A list with this code already exists. Use Open list instead.", [
-        els.createCode,
-      ]);
+      showError(t("gate.codeExists"), [els.createCode]);
       return;
     }
 
@@ -131,10 +179,35 @@
 
     els.openForm?.addEventListener("submit", handleOpen);
     els.createForm?.addEventListener("submit", handleCreate);
+
+    document.addEventListener("click", (event) => {
+      const lang = event.target.closest("[data-action='set-language']")?.dataset.lang;
+      if (lang) {
+        i18n()?.setLang(lang);
+        return;
+      }
+
+      const action = event.target.closest("[data-action]")?.dataset.action;
+      if (action === "open-theme") {
+        openGateThemeModal();
+        return;
+      }
+
+      if (action === "close-theme-modal") {
+        closeGateThemeModal();
+        return;
+      }
+
+      const theme = event.target.closest("[data-action='set-theme']")?.dataset.theme;
+      if (theme) window.WatchlistThemes?.setTheme(theme);
+    });
   }
 
   function boot() {
     const params = new URLSearchParams(window.location.search);
+    const shareId = params.get("share")?.trim();
+    if (shareId) persistPendingShareId(shareId);
+
     const startMode = params.get("mode") === "create" ? "create" : "open";
 
     if (auth.isAuthenticated()) {
@@ -144,10 +217,32 @@
 
     bindEvents();
     setMode(startMode);
+    i18n()?.applyGateDocument();
+
+    i18n()?.onChange(() => {
+      i18n().applyGateDocument();
+      document.querySelectorAll("[data-action='set-language']").forEach((btn) => {
+        btn.classList.toggle(
+          "gate__lang-btn--active",
+          btn.dataset.lang === i18n().getLang()
+        );
+      });
+    });
+
+    document.querySelectorAll("[data-action='set-language']").forEach((btn) => {
+      btn.classList.toggle("gate__lang-btn--active", btn.dataset.lang === i18n()?.getLang());
+    });
+
+    window.WatchlistThemes?.applyThemeUi?.();
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      if (!els.themeModal?.hidden) closeGateThemeModal();
+    });
 
     if (params.get("deleted") === "1") {
       setMode("create");
-      showError("Account deleted. You can create a new list with the same code.");
+      showError(t("gate.deleted"));
     }
   }
 

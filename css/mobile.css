@@ -1,0 +1,213 @@
+/* ==========================================================================
+   Mobile — Our Movie Nights (phone only)
+   Desktop css/styles.css is frozen. All phone-only UI lives here.
+   ========================================================================== */
+
+@media (max-width: 640px) {
+  /* Keep compact grid cards — only tame long review text in the small card */
+  .card__rating-note {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-clamp: 2;
+    word-break: break-word;
+  }
+
+  .card__rating--rated {
+    overflow: hidden;
+    min-width: 0;
+  }
+
+  /* Hint that cards open a detail view (not an external link) */
+  .card {
+    cursor: pointer;
+  }
+
+  .card--linked:hover .card__title {
+    color: inherit;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Expanded card focus (tap a grid card on phone)
+   -------------------------------------------------------------------------- */
+
+.mobile-card-focus {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  display: grid;
+  place-items: center;
+  padding: max(0.75rem, env(safe-area-inset-top))
+    max(0.75rem, env(safe-area-inset-right))
+    max(0.75rem, env(safe-area-inset-bottom))
+    max(0.75rem, env(safe-area-inset-left));
+}
+
+.mobile-card-focus[hidden] {
+  display: none !important;
+}
+
+.mobile-card-focus__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.mobile-card-focus__panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 22rem);
+  max-height: min(88vh, 40rem);
+  overflow: hidden;
+  background: var(--bg-card, #1a1d24);
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.12));
+  border-radius: 14px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+}
+
+.mobile-card-focus__close {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  font-size: 1.35rem;
+  line-height: 1;
+  color: var(--text, #f3f4f6);
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.mobile-card-focus__scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.85rem 0.85rem 0.5rem;
+}
+
+.mobile-card-focus__poster {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  max-height: 42vh;
+  object-fit: cover;
+  display: block;
+  border-radius: 10px;
+  margin-bottom: 0.75rem;
+  background: var(--bg-elevated, #252932);
+}
+
+.mobile-card-focus__poster--empty {
+  display: grid;
+  place-items: center;
+  font-size: 2.5rem;
+  color: var(--text-muted, #9ca3af);
+  background: linear-gradient(180deg, var(--bg-card, #1a1d24) 0%, var(--bg-elevated, #252932) 100%);
+}
+
+.mobile-card-focus__badges {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+
+.mobile-card-focus__badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.mobile-card-focus__title {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 1.2rem;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--text, #f3f4f6);
+}
+
+.mobile-card-focus__alt {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--text-muted, #9ca3af);
+}
+
+.mobile-card-focus__lead {
+  margin: 0 0 0.55rem;
+  font-size: 0.82rem;
+  color: #d9b96a;
+  line-height: 1.4;
+}
+
+.mobile-card-focus__summary {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text-muted, #9ca3af);
+}
+
+.mobile-card-focus__rating {
+  margin-bottom: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+}
+
+.mobile-card-focus__rating-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--accent, #d9b96a);
+}
+
+.mobile-card-focus__rating-score::before {
+  content: "★";
+  font-size: 0.85rem;
+}
+
+.mobile-card-focus__rating-note {
+  margin: 0.45rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--text-muted, #9ca3af);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.mobile-card-focus__unwatched {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--text-muted, #9ca3af);
+}
+
+.mobile-card-focus__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.55rem 0.85rem 0.85rem;
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+}
+
+.mobile-card-focus__link-btn {
+  width: 100%;
+  min-height: 2.75rem;
+}
+
+.mobile-card-focus__rate-btn {
+  width: 100%;
+}

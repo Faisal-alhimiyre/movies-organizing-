@@ -168,6 +168,7 @@ def watchlist_to_rows(list_id: str, watchlist: dict) -> list[dict]:
                         "secondary_genres": entry.get("secondaryGenres") or [],
                         "poster": entry.get("poster") or "",
                         "imdb_rating": entry.get("imdbRating") or "",
+                        "anilist_rating": entry.get("anilistRating") or "",
                         "year": entry.get("year") or "",
                         "watched": False,
                         "watch_rating": None,

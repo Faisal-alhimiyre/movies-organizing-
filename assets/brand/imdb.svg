@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 24" role="img" aria-label="IMDb">
+  <text
+    x="28"
+    y="17.5"
+    text-anchor="middle"
+    font-family="Arial Black, Helvetica Neue, Arial, sans-serif"
+    font-size="15.5"
+    font-weight="900"
+    letter-spacing="-0.04em"
+    fill="#000000"
+  >IMDb</text>
+</svg>

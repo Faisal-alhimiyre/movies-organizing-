@@ -10,10 +10,16 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Playfair+Display:wght@600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/theme.css" />
+    <link rel="stylesheet" href="css/theme-light.css" />
+    <link rel="stylesheet" href="css/theme-purple.css" />
+    <link rel="stylesheet" href="css/theme-brown.css" />
+    <link rel="stylesheet" href="css/rtl.css" />
+    <script src="js/themes.js"></script>
   </head>
   <body>
     <div class="gate">
@@ -76,11 +82,75 @@
         </form>
 
         <p class="gate__error" id="gateError" hidden></p>
+
+        <button type="button" class="btn btn--ghost gate__theme-open" data-action="open-theme">
+          Theme
+        </button>
+
+        <div class="gate__lang">
+          <button type="button" class="gate__lang-btn" data-action="set-language" data-lang="en">
+            English
+          </button>
+          <button type="button" class="gate__lang-btn" data-action="set-language" data-lang="ar">
+            العربية
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="themeModal" hidden>
+      <div class="modal__backdrop" data-action="close-theme-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="themeModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="themeModalTitle">Theme</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-theme-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        <div class="modal__body">
+          <p class="backup-modal__text theme-modal__intro" id="themeModalIntro">
+            Pick how the app looks. Your choice is saved on this device.
+          </p>
+          <div class="theme-options">
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="dark">
+              <span class="theme-option__preview theme-option__preview--dark" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="dark">Dark</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="light">
+              <span class="theme-option__preview theme-option__preview--light" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="light">Light</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="purple">
+              <span class="theme-option__preview theme-option__preview--purple" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="purple">Purple</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="brown">
+              <span class="theme-option__preview theme-option__preview--brown" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="brown">Brown</span>
+            </button>
+          </div>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-theme-modal">
+              Close
+            </button>
+          </footer>
+        </div>
       </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <script src="js/config.js"></script>
+    <script src="js/i18n.js"></script>
     <script src="js/dialog.js"></script>
     <script src="js/auth.js"></script>
     <script src="js/sync.js"></script>

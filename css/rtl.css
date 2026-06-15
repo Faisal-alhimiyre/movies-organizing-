@@ -1,0 +1,133 @@
+/* RTL layout adjustments for Arabic */
+
+html[dir="rtl"] {
+  direction: rtl;
+}
+
+html[dir="rtl"] body {
+  text-align: right;
+}
+
+html[dir="rtl"] .header__main,
+html[dir="rtl"] .header__toolbar,
+html[dir="rtl"] .header__stats,
+html[dir="rtl"] .genre-section__bar,
+html[dir="rtl"] .card__footer,
+html[dir="rtl"] .card__rating-badges,
+html[dir="rtl"] .modal__header,
+html[dir="rtl"] .modal__footer,
+html[dir="rtl"] .modal__footer-right,
+html[dir="rtl"] .app-dialog__actions,
+html[dir="rtl"] .panel__filters,
+html[dir="rtl"] .account-menu__lang-row,
+html[dir="rtl"] .theme-option {
+  direction: rtl;
+}
+
+html[dir="rtl"] .account-menu__panel {
+  right: auto;
+  left: 0;
+  direction: rtl;
+  text-align: right;
+}
+
+html[dir="rtl"] .account-menu__item,
+html[dir="rtl"] .account-menu__label,
+html[dir="rtl"] .account-menu__select {
+  text-align: right;
+}
+
+html[dir="rtl"] .account-menu__select {
+  padding: 0.4rem 0.55rem 0.4rem 1.65rem;
+  background-position: left 0.65rem center;
+}
+
+html[dir="rtl"] .app-dialog__panel {
+  direction: rtl;
+  text-align: right;
+}
+
+html[dir="rtl"] .app-dialog__title,
+html[dir="rtl"] .app-dialog__message {
+  text-align: right;
+}
+
+html[dir="rtl"] .app-dialog__actions {
+  justify-content: flex-start;
+}
+
+html[dir="rtl"] .header__stat-value {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+html[dir="rtl"] .genre-section__count {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+html[dir="rtl"] .genre-filter__select,
+html[dir="rtl"] .select,
+html[dir="rtl"] .filter {
+  background-position: left 0.65rem center;
+  padding-left: 2rem;
+  padding-right: 0.75rem;
+}
+
+html[dir="rtl"] .add-panel-hint {
+  border-left: none;
+  border-right: 3px solid var(--accent);
+}
+
+html[dir="rtl"] .mobile-card-focus__close {
+  right: auto;
+  left: 0.45rem;
+}
+
+html[dir="rtl"] .layout-toggle::after {
+  left: auto;
+  right: 0;
+}
+
+html[dir="rtl"] .card-menu__panel {
+  right: auto;
+  left: 0;
+}
+
+html[dir="rtl"] .inline-add {
+  direction: rtl;
+}
+
+html[dir="rtl"] .type-tab__count {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+html[dir="rtl"] .card__rating-score,
+html[dir="rtl"] .card__rating-placeholder,
+html[dir="rtl"] .card__rate-btn {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+html[dir="rtl"] .card__rating-placeholder {
+  text-align: left;
+}
+
+html[dir="rtl"] .card__rating-label {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+html[dir="rtl"] .card__rating-score,
+html[dir="rtl"] .card__score-value,
+html[dir="rtl"] .rating-picker__value {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+html[dir="rtl"] .card__rating-badges {
+  justify-content: flex-start;
+}

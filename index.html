@@ -14,20 +14,32 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Playfair+Display:wght@600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/theme.css" />
+    <link rel="stylesheet" href="css/theme-light.css" />
+    <link rel="stylesheet" href="css/theme-purple.css" />
+    <link rel="stylesheet" href="css/theme-brown.css" />
+    <link rel="stylesheet" href="css/rtl.css" />
+    <script src="js/themes.js"></script>
+    <link
+      rel="stylesheet"
+      href="css/mobile.css"
+      media="(max-width: 640px)"
+    />
   </head>
   <body>
     <div class="app" id="app">
       <header class="header">
         <div class="header__main">
-          <div>
+          <div class="header__brand">
             <h1 class="header__title" id="headerTitle">Our Movie Nights</h1>
-            <p class="header__meta" id="stats" aria-live="polite"></p>
+            <div class="header__stats" id="stats" aria-live="polite"></div>
           </div>
           <div class="header__actions">
+            <div class="header__toolbar">
             <button type="button" class="btn btn--primary" id="addBtn">
               Add title
             </button>
@@ -67,6 +79,30 @@
                 <button type="button" class="account-menu__item" role="menuitem" data-action="share">
                   Share
                 </button>
+                <button type="button" class="account-menu__item" role="menuitem" data-action="open-theme">
+                  Theme
+                </button>
+                <div class="account-menu__lang" id="accountMenuLang">
+                  <span class="account-menu__label" id="accountMenuLangLabel">Language</span>
+                  <div class="account-menu__lang-row">
+                    <button
+                      type="button"
+                      class="account-menu__lang-btn"
+                      data-action="set-language"
+                      data-lang="en"
+                    >
+                      English
+                    </button>
+                    <button
+                      type="button"
+                      class="account-menu__lang-btn"
+                      data-action="set-language"
+                      data-lang="ar"
+                    >
+                      العربية
+                    </button>
+                  </div>
+                </div>
                 <hr class="account-menu__divider" />
                 <button type="button" class="account-menu__item" role="menuitem" data-action="change-code">
                   Change code
@@ -90,6 +126,7 @@
               accept="application/json,.json"
               hidden
             />
+            </div>
           </div>
         </div>
       </header>
@@ -164,6 +201,18 @@
             <option value="watched">Watched</option>
             <option value="unwatched">Not watched</option>
           </select>
+
+          <div class="rating-filter">
+            <select id="ratingFilterSource" class="genre-filter__select rating-filter__select" aria-label="Filter by rating type">
+              <option value="all">All ratings</option>
+              <option value="imdb">IMDb</option>
+              <option value="anilist">AniList</option>
+              <option value="personal">My rating</option>
+            </select>
+            <select id="ratingFilterMin" class="genre-filter__select rating-filter__min" aria-label="Minimum rating" disabled>
+              <option value="any">Any score</option>
+            </select>
+          </div>
         </div>
       </section>
 
@@ -301,7 +350,7 @@
         <div class="modal__body">
           <p class="share-modal__tagline">Share the fun!</p>
           <p class="backup-modal__text share-modal__intro">
-            Lists are shared as a small backup file. On phones, use WhatsApp, email, or any chat app — then your friend imports it here.
+            Lists are shared as a link. Your friend signs in, then picks how to import your titles, ratings, and notes. You can still import a .json file below.
           </p>
           <div class="share-options">
             <button type="button" class="share-option" data-action="share-send">
@@ -316,6 +365,56 @@
           <footer class="modal__footer modal__footer--simple">
             <button type="button" class="btn btn--ghost" data-action="close-share-modal">
               Cancel
+            </button>
+          </footer>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="themeModal" hidden>
+      <div class="modal__backdrop" data-action="close-theme-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="themeModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="themeModalTitle">Theme</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-theme-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        <div class="modal__body">
+          <p class="backup-modal__text theme-modal__intro" id="themeModalIntro">
+            Pick how the app looks. Your choice is saved on this device.
+          </p>
+          <div class="theme-options">
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="dark">
+              <span class="theme-option__preview theme-option__preview--dark" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="dark">Dark</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="light">
+              <span class="theme-option__preview theme-option__preview--light" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="light">Light</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="purple">
+              <span class="theme-option__preview theme-option__preview--purple" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="purple">Purple</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="brown">
+              <span class="theme-option__preview theme-option__preview--brown" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="brown">Brown</span>
+            </button>
+          </div>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-theme-modal">
+              Close
             </button>
           </footer>
         </div>
@@ -506,9 +605,18 @@
             class="add-mode-tab add-mode-tab--active"
             role="tab"
             aria-selected="true"
-            data-add-mode="single"
+            data-add-mode="search"
           >
-            One title
+            Search
+          </button>
+          <button
+            type="button"
+            class="add-mode-tab"
+            role="tab"
+            aria-selected="false"
+            data-add-mode="manual"
+          >
+            Manual
           </button>
           <button
             type="button"
@@ -521,22 +629,94 @@
           </button>
         </nav>
 
-        <form class="modal__form" id="itemForm" novalidate>
+        <div class="modal__search" id="searchAddPanel" hidden>
+          <div class="title-search" id="searchAddStep">
+            <p class="add-panel-hint">
+              <strong>Can't find your title?</strong> Tap <strong>Manual</strong> at the top and add it yourself.
+            </p>
+            <label class="form-field form-field--full">
+              <span class="form-field__label">Search movies &amp; shows</span>
+              <input
+                type="search"
+                id="titleSearchInput"
+                class="form-input"
+                placeholder="e.g. Avengers, Demon Slayer…"
+                autocomplete="off"
+              />
+            </label>
+            <div class="title-search__filters">
+              <label class="title-search__filter">
+                <span class="title-search__filter-label">Type</span>
+                <select id="titleSearchType" class="select">
+                  <option value="all">All</option>
+                  <option value="movie">Movies</option>
+                  <option value="series">TV Series</option>
+                  <option value="anime">Anime</option>
+                </select>
+              </label>
+            </div>
+            <p class="title-search__status" id="titleSearchStatus" aria-live="polite"></p>
+            <ul class="title-search__results" id="titleSearchResults"></ul>
+            <button type="button" class="btn btn--ghost title-search__more" id="titleSearchMore" hidden>
+              Load more
+            </button>
+          </div>
+
+          <div class="title-search-confirm" id="searchConfirmStep" hidden>
+            <button type="button" class="btn btn--text title-search-confirm__back" id="searchConfirmBack">
+              ← Back to results
+            </button>
+            <div class="title-search-confirm__preview" id="searchConfirmPreview"></div>
+            <div class="form-grid title-search-confirm__fields">
+              <label class="form-field">
+                <span class="form-field__label">Type</span>
+                <select id="searchConfirmType" class="select">
+                  <option value="movies">Movie</option>
+                  <option value="tvSeries">TV Series</option>
+                  <option value="anime">Anime</option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span class="form-field__label">Main genre</span>
+                <select id="searchConfirmGenre" class="select" required>
+                  <option value="" disabled selected>Choose genre</option>
+                </select>
+              </label>
+            </div>
+            <footer class="modal__footer modal__footer--simple">
+              <button type="button" class="btn btn--ghost" data-action="close-modal">
+                Cancel
+              </button>
+              <button type="button" class="btn btn--primary" id="searchConfirmAdd">
+                Add to list
+              </button>
+            </footer>
+          </div>
+        </div>
+
+        <form class="modal__form" id="itemForm" novalidate hidden>
+          <p class="add-panel-hint add-panel-hint--manual">
+            <strong>Step 1: Paste your link.</strong> IMDb, AniList, or MyAnimeList. We'll fill in the details for you.
+          </p>
           <div class="form-grid">
-            <label class="form-field">
+            <label class="form-field form-field--full">
+              <span class="form-field__label">Link</span>
+              <input
+                type="url"
+                name="link"
+                id="formLink"
+                class="form-input"
+                placeholder="https://www.imdb.com/title/…, anilist.co/anime/…, or myanimelist.net/anime/…"
+              />
+              <p class="form-field__status" id="formLinkStatus" aria-live="polite"></p>
+            </label>
+
+            <label class="form-field form-field--full">
               <span class="form-field__label">Type</span>
               <select name="contentType" id="formType" class="select" required>
                 <option value="movies">Movie</option>
                 <option value="tvSeries">TV Series</option>
                 <option value="anime">Anime</option>
-              </select>
-            </label>
-
-            <label class="form-field" id="formatField">
-              <span class="form-field__label">Format</span>
-              <select name="kind" id="formKind" class="select">
-                <option value="movie">Single film</option>
-                <option value="film series">Film series</option>
               </select>
             </label>
 
@@ -581,17 +761,6 @@
               </div>
               <div class="genre-chips" id="formLeadChips"></div>
             </div>
-
-            <label class="form-field form-field--full">
-              <span class="form-field__label">Link</span>
-              <input
-                type="url"
-                name="link"
-                id="formLink"
-                class="form-input"
-                placeholder="IMDb or Rotten Tomatoes URL"
-              />
-            </label>
 
             <label class="form-field form-field--full">
               <span class="form-field__label">Summary</span>
@@ -695,10 +864,6 @@
         </header>
 
         <form class="modal__form" id="ratingForm" novalidate>
-          <p class="backup-modal__text">
-            How was it for you? Tap a star to score it, fine-tune if you want, then add a short note — only you see this.
-          </p>
-
           <div class="form-field form-field--full">
             <span class="form-field__label">Your rating (out of 10)</span>
             <div class="rating-picker rating-picker--idle" id="ratingPicker">
@@ -784,6 +949,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <script src="js/config.js"></script>
+    <script src="js/i18n.js"></script>
     <script src="js/dialog.js"></script>
     <script src="js/metadata.js"></script>
     <script src="js/auth.js"></script>
@@ -791,6 +957,7 @@
     <script src="js/genres.js"></script>
     <script src="js/bulk-titles.js"></script>
     <script src="js/data.js"></script>
+    <script src="js/mobile.js"></script>
     <script src="js/app.js"></script>
   </body>
 </html>
