@@ -14,6 +14,9 @@ html[dir="rtl"] .header__stats,
 html[dir="rtl"] .genre-section__bar,
 html[dir="rtl"] .card__footer,
 html[dir="rtl"] .card__rating-badges,
+html[dir="rtl"] .card__badges,
+html[dir="rtl"] .card__overlay .card__badges,
+html[dir="rtl"] .card__head .card__badges,
 html[dir="rtl"] .modal__header,
 html[dir="rtl"] .modal__footer,
 html[dir="rtl"] .modal__footer-right,
@@ -22,6 +25,10 @@ html[dir="rtl"] .panel__filters,
 html[dir="rtl"] .account-menu__lang-row,
 html[dir="rtl"] .theme-option {
   direction: rtl;
+}
+
+html[dir="rtl"] .card__rating-badges {
+  justify-content: flex-start;
 }
 
 html[dir="rtl"] .account-menu__panel {
@@ -74,6 +81,10 @@ html[dir="rtl"] .filter {
   padding-right: 0.75rem;
 }
 
+html[dir="rtl"] .title-search-confirm__back::before {
+  content: "→";
+}
+
 html[dir="rtl"] .add-panel-hint {
   border-left: none;
   border-right: 3px solid var(--accent);
@@ -113,8 +124,14 @@ html[dir="rtl"] .layout-toggle::after {
 }
 
 html[dir="rtl"] .card-menu__panel {
+  inset-inline-end: 0;
+  inset-inline-start: auto;
   right: auto;
-  left: 0;
+  left: auto;
+}
+
+html[dir="rtl"] .card-menu__item {
+  text-align: right;
 }
 
 html[dir="rtl"] .inline-add {
@@ -154,8 +171,4 @@ html[dir="rtl"] .rating-picker__value {
 html[dir="rtl"] .mobile-card-focus__rating-label {
   text-transform: none;
   letter-spacing: 0;
-}
-
-html[dir="rtl"] .card__rating-badges {
-  justify-content: flex-start;
 }

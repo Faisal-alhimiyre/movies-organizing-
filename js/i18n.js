@@ -57,15 +57,14 @@
       "filter.unwatched": "Not watched",
       "filter.byGenre": "Filter by genre",
       "filter.byWatched": "Filter by watched status",
-      "filter.byRating": "Filter by rating type",
-      "filter.ratingSort": "Sort by rating",
-      "filter.ratingSortDefault": "Default order",
-      "filter.ratingSortBest": "Highest rating",
-      "filter.ratingSortWorst": "Lowest rating",
-      "filter.allRatings": "All ratings",
-      "filter.ratingImdb": "IMDb",
-      "filter.ratingAnilist": "AniList",
-      "filter.ratingPersonal": "My rating",
+      "filter.byRating": "Sort by rating",
+      "filter.ratingOptionAll": "All ratings",
+      "filter.ratingOptionImdbBest": "IMDb — highest first",
+      "filter.ratingOptionImdbWorst": "IMDb — lowest first",
+      "filter.ratingOptionAnilistBest": "AniList — highest first",
+      "filter.ratingOptionAnilistWorst": "AniList — lowest first",
+      "filter.ratingOptionPersonalBest": "My rating — highest first",
+      "filter.ratingOptionPersonalWorst": "My rating — lowest first",
       "layout.hover": "Preview on hover",
       "layout.poster": "Show poster images",
       "layout.toolbar": "Card layout",
@@ -155,7 +154,7 @@
       "search.foundMany": "{count} matches found.",
       "search.loadingDetails": "Loading details…",
       "search.loadFailed": "Could not load that title. Try again.",
-      "search.back": "← Back to results",
+      "search.back": "Back to results",
       "search.chooseGenre": "Choose genre",
       "search.mainGenre": "Main genre",
       "search.noSummary": "No summary available.",
@@ -165,7 +164,8 @@
       "manual.linkPlaceholder":
         "https://www.imdb.com/title/…, anilist.co/anime/…, or myanimelist.net/anime/…",
       "manual.lookingUp": "Looking up link…",
-      "manual.filled": "Details filled — check them, then save.",
+      "manual.filled":
+        "<strong>Review before you save.</strong> We filled the form from your link. Check type, genre, title, and summary.",
       "manual.needKey":
         "Add an OMDb or TMDB key in config.js for IMDb links. AniList links work without a key.",
       "manual.animeFail": "Couldn't read that anime link. Check the URL and try again.",
@@ -457,15 +457,14 @@
       "filter.unwatched": "لم تُشاهد",
       "filter.byGenre": "تصفية حسب التصنيف",
       "filter.byWatched": "تصفية حسب حالة المشاهدة",
-      "filter.byRating": "تصفية حسب نوع التقييم",
-      "filter.ratingSort": "ترتيب حسب التقييم",
-      "filter.ratingSortDefault": "الترتيب الافتراضي",
-      "filter.ratingSortBest": "أعلى تقييم",
-      "filter.ratingSortWorst": "أقل تقييم",
-      "filter.allRatings": "كل التقييمات",
-      "filter.ratingImdb": "IMDb",
-      "filter.ratingAnilist": "AniList",
-      "filter.ratingPersonal": "تقييمي",
+      "filter.byRating": "ترتيب حسب التقييم",
+      "filter.ratingOptionAll": "كل التقييمات",
+      "filter.ratingOptionImdbBest": "IMDb — الأعلى أولاً",
+      "filter.ratingOptionImdbWorst": "IMDb — الأقل أولاً",
+      "filter.ratingOptionAnilistBest": "AniList — الأعلى أولاً",
+      "filter.ratingOptionAnilistWorst": "AniList — الأقل أولاً",
+      "filter.ratingOptionPersonalBest": "تقييمي — الأعلى أولاً",
+      "filter.ratingOptionPersonalWorst": "تقييمي — الأقل أولاً",
       "layout.hover": "معاينة عند التمرير",
       "layout.poster": "عرض صور الغلاف",
       "layout.toolbar": "شكل البطاقات",
@@ -555,7 +554,7 @@
       "search.foundMany": "{count} نتائج.",
       "search.loadingDetails": "جاري تحميل التفاصيل…",
       "search.loadFailed": "تعذر تحميل هذا العنوان. حاول مرة أخرى.",
-      "search.back": "→ العودة للنتائج",
+      "search.back": "العودة للنتائج",
       "search.chooseGenre": "اختر التصنيف",
       "search.mainGenre": "التصنيف الرئيسي",
       "search.noSummary": "لا يوجد ملخص.",
@@ -565,7 +564,8 @@
       "manual.linkPlaceholder":
         "https://www.imdb.com/title/… أو anilist.co/anime/… أو myanimelist.net/anime/…",
       "manual.lookingUp": "جاري البحث عن الرابط…",
-      "manual.filled": "تم ملء التفاصيل — راجعها ثم احفظ.",
+      "manual.filled":
+        "<strong>راجع قبل الحفظ.</strong> ملأنا النموذج من رابطك. تحقق من النوع والتصنيف والعنوان والملخص.",
       "manual.needKey":
         "أضف مفتاح OMDb أو TMDB في config.js لروابط IMDb. روابط AniList تعمل بدون مفتاح.",
       "manual.animeFail": "تعذر قراءة رابط الأنمي. تحقق من الرابط وحاول مرة أخرى.",
@@ -950,23 +950,7 @@
     setPlaceholder("#searchInput", "filter.searchPlaceholder");
     setAria("#genreSelect", "filter.byGenre");
     setAria("#watchedFilter", "filter.byWatched");
-    setAria("#ratingFilterSource", "filter.byRating");
-    setAria("#ratingFilterSort", "filter.ratingSort");
-
-    const ratingSource = document.getElementById("ratingFilterSource");
-    if (ratingSource?.options?.length >= 4) {
-      ratingSource.options[0].textContent = t("filter.allRatings");
-      ratingSource.options[1].textContent = t("filter.ratingImdb");
-      ratingSource.options[2].textContent = t("filter.ratingAnilist");
-      ratingSource.options[3].textContent = t("filter.ratingPersonal");
-    }
-
-    const ratingSort = document.getElementById("ratingFilterSort");
-    if (ratingSort?.options?.length >= 3) {
-      ratingSort.options[0].textContent = t("filter.ratingSortDefault");
-      ratingSort.options[1].textContent = t("filter.ratingSortBest");
-      ratingSort.options[2].textContent = t("filter.ratingSortWorst");
-    }
+    setAria("#ratingFilter", "filter.byRating");
 
     const watched = document.getElementById("watchedFilter");
     if (watched?.options?.length >= 3) {
@@ -985,14 +969,11 @@
       });
     }
 
-    ["#searchConfirmType", "#formType"].forEach((sel) => {
-      const el = document.querySelector(sel);
-      if (!el) return;
-      [...el.options].forEach((opt) => {
-        if (opt.value === "movies") opt.textContent = t("type.movie");
-        if (opt.value === "tvSeries") opt.textContent = t("type.tvSeries");
-        if (opt.value === "anime") opt.textContent = t("type.anime");
-      });
+    document.querySelectorAll(".content-type-picker [data-type]").forEach((btn) => {
+      const type = btn.dataset.type;
+      if (type === "movies") btn.textContent = t("type.movie");
+      if (type === "tvSeries") btn.textContent = t("type.tvSeries");
+      if (type === "anime") btn.textContent = t("type.anime");
     });
 
     document.querySelectorAll("[data-layout]").forEach((btn) => {
@@ -1017,8 +998,12 @@
     setText(".title-search__filter-label", "search.typeLabel");
     setText("#titleSearchMore", "btn.loadMore");
     setText("#searchConfirmBack", "search.back");
-    setText("#searchConfirmStep .form-field__label", "search.typeLabel");
-    setText("#searchConfirmStep .form-field:nth-child(2) .form-field__label", "search.mainGenre");
+    setText("#searchConfirmStep .form-field:nth-child(1) .form-field__label", "form.type");
+    setText("#searchConfirmStep label.form-field .form-field__label", "search.mainGenre");
+    setText(
+      "#searchConfirmStep .form-field:has(#searchConfirmSecondaryAdd) .form-field__label",
+      "form.secondaryGenres"
+    );
     setText("#searchConfirmAdd", "btn.addToList");
 
     setHtml(".add-panel-hint--manual", "manual.hint");
@@ -1026,7 +1011,7 @@
     setPlaceholder("#formLink", "manual.linkPlaceholder");
 
     const formLabels = {
-      "#formType": "form.type",
+      "#itemForm .form-field:has(#formTypePicker) .form-field__label": "form.type",
       "#itemForm label:has(#formGenre) .form-field__label": "form.mainGenre",
       "#itemForm .form-field:has(#formSecondaryAdd) .form-field__label": "form.secondaryGenres",
       "#itemForm label:has(#formTitle) .form-field__label": "form.title",

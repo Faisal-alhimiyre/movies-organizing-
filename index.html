@@ -203,16 +203,14 @@
           </select>
 
           <div class="rating-filter">
-            <select id="ratingFilterSource" class="genre-filter__select rating-filter__select" aria-label="Filter by rating type">
+            <select id="ratingFilter" class="genre-filter__select rating-filter__select" aria-label="Sort by rating">
               <option value="all">All ratings</option>
-              <option value="imdb">IMDb</option>
-              <option value="anilist">AniList</option>
-              <option value="personal">My rating</option>
-            </select>
-            <select id="ratingFilterSort" class="genre-filter__select rating-filter__sort" aria-label="Sort by rating" disabled>
-              <option value="default">Default order</option>
-              <option value="best">Highest rating</option>
-              <option value="worst">Lowest rating</option>
+              <option value="imdb-best">IMDb — highest first</option>
+              <option value="imdb-worst">IMDb — lowest first</option>
+              <option value="anilist-best">AniList — highest first</option>
+              <option value="anilist-worst">AniList — lowest first</option>
+              <option value="personal-best">My rating — highest first</option>
+              <option value="personal-worst">My rating — lowest first</option>
             </select>
           </div>
         </div>
@@ -665,29 +663,39 @@
           </div>
 
           <div class="title-search-confirm" id="searchConfirmStep" hidden>
-            <button type="button" class="btn btn--text title-search-confirm__back" id="searchConfirmBack">
-              ← Back to results
-            </button>
             <div class="title-search-confirm__preview" id="searchConfirmPreview"></div>
             <div class="form-grid title-search-confirm__fields">
-              <label class="form-field">
+              <div class="form-field">
                 <span class="form-field__label">Type</span>
-                <select id="searchConfirmType" class="select">
-                  <option value="movies">Movie</option>
-                  <option value="tvSeries">TV Series</option>
-                  <option value="anime">Anime</option>
-                </select>
-              </label>
+                <div
+                  class="content-type-picker"
+                  id="searchConfirmTypePicker"
+                  role="radiogroup"
+                  aria-label="Type"
+                >
+                  <button type="button" class="content-type-picker__btn" data-type="movies">Movie</button>
+                  <button type="button" class="content-type-picker__btn" data-type="tvSeries">TV Series</button>
+                  <button type="button" class="content-type-picker__btn" data-type="anime">Anime</button>
+                </div>
+                <input type="hidden" id="searchConfirmType" value="movies" />
+              </div>
               <label class="form-field">
                 <span class="form-field__label">Main genre</span>
                 <select id="searchConfirmGenre" class="select" required>
                   <option value="" disabled selected>Choose genre</option>
                 </select>
               </label>
+              <div class="form-field form-field--full">
+                <span class="form-field__label">Secondary genres</span>
+                <select id="searchConfirmSecondaryAdd" class="select">
+                  <option value="">Add another genre…</option>
+                </select>
+                <div class="genre-chips" id="searchConfirmSecondaryChips"></div>
+              </div>
             </div>
-            <footer class="modal__footer modal__footer--simple">
-              <button type="button" class="btn btn--ghost" data-action="close-modal">
-                Cancel
+            <footer class="modal__footer">
+              <button type="button" class="btn btn--ghost btn--back title-search-confirm__back" id="searchConfirmBack">
+                Back to results
               </button>
               <button type="button" class="btn btn--primary" id="searchConfirmAdd">
                 Add to list
@@ -713,13 +721,16 @@
               <p class="form-field__status" id="formLinkStatus" aria-live="polite"></p>
             </label>
 
+            <p class="form-filled-banner" id="formFilledBanner" hidden role="status" aria-live="polite"></p>
+
             <label class="form-field form-field--full">
               <span class="form-field__label">Type</span>
-              <select name="contentType" id="formType" class="select" required>
-                <option value="movies">Movie</option>
-                <option value="tvSeries">TV Series</option>
-                <option value="anime">Anime</option>
-              </select>
+              <div class="content-type-picker" id="formTypePicker" role="radiogroup" aria-label="Type">
+                <button type="button" class="content-type-picker__btn" data-type="movies">Movie</button>
+                <button type="button" class="content-type-picker__btn" data-type="tvSeries">TV Series</button>
+                <button type="button" class="content-type-picker__btn" data-type="anime">Anime</button>
+              </div>
+              <input type="hidden" name="contentType" id="formType" value="movies" />
             </label>
 
             <label class="form-field form-field--full">

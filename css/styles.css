@@ -267,7 +267,7 @@ body {
 }
 
 .search {
-  flex: 1;
+  flex: 1 1 0;
   min-width: 180px;
 }
 
@@ -365,19 +365,15 @@ body {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  flex: 1 1 16rem;
+  flex: 0 0 auto;
+  width: clamp(9.5rem, 18vw, 13rem);
   min-width: 0;
 }
 
-.rating-filter__select,
-.rating-filter__sort {
+.rating-filter__select {
   flex: 1;
+  width: 100%;
   min-width: 0;
-}
-
-.rating-filter__sort:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 .genre-filter__chips {
@@ -1059,7 +1055,7 @@ body {
 
 .card-menu__panel {
   position: absolute;
-  right: 0;
+  inset-inline-end: 0;
   bottom: calc(100% + 0.35rem);
   z-index: 30;
   min-width: 10.5rem;
@@ -1068,6 +1064,15 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+
+.card:has(.card-menu__panel:not([hidden])) {
+  overflow: visible;
+  z-index: 25;
+}
+
+.app[data-layout="poster"] .card:has(.card-menu__panel:not([hidden])) {
+  overflow: visible;
 }
 
 .card-menu__panel[hidden] {
@@ -2128,9 +2133,27 @@ body {
   margin-top: 0.65rem;
 }
 
+.title-search-confirm .modal__footer {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
 .title-search-confirm__back {
-  margin-bottom: 0.75rem;
-  padding-left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.5rem;
+  padding-inline: 0.85rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.title-search-confirm__back::before {
+  content: "←";
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .title-search-confirm__preview {
@@ -2164,9 +2187,47 @@ body {
 }
 
 .title-search-confirm__name {
-  margin: 0 0 0.25rem;
+  margin: 0 0 0.35rem;
   font-size: 1rem;
   font-weight: 700;
+}
+
+.title-search-confirm__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.55rem;
+  margin: 0 0 0.5rem;
+}
+
+.title-search-confirm__year {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #9aa3b5;
+}
+
+.title-search-confirm__rating {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.title-search-confirm__actors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  width: 100%;
+}
+
+.title-search-confirm__actor {
+  padding: 0.14rem 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #e8ecf4;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
 }
 
 .title-search-confirm__sub {
@@ -2184,6 +2245,45 @@ body {
 
 .title-search-confirm__fields {
   margin-bottom: 0.25rem;
+}
+
+.content-type-picker {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.content-type-picker__btn {
+  flex: 1;
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.35rem;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-muted);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.content-type-picker__btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.content-type-picker__btn--active {
+  color: #14120c;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.content-type-picker__btn--active:hover {
+  color: #14120c;
+  background: #ecc55a;
+  border-color: #ecc55a;
 }
 
 .modal__bulk {
@@ -2571,6 +2671,27 @@ body {
   color: var(--text);
 }
 
+.form-filled-banner {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0.9rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.55;
+  color: var(--text);
+  background: rgba(217, 185, 106, 0.18);
+  border: 1px solid rgba(217, 185, 106, 0.45);
+  border-radius: var(--radius-sm);
+}
+
+.form-filled-banner strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
 .form-field__status--error {
   color: #f87171;
 }
@@ -2604,6 +2725,12 @@ body {
 .modal .select {
   width: 100%;
   min-width: 0;
+  min-height: 2.75rem;
+  line-height: 1.35;
+  appearance: auto;
+  -webkit-appearance: menulist;
+  background-image: none;
+  padding-inline-end: 0.85rem;
 }
 
 .modal__footer {
@@ -2788,7 +2915,6 @@ body {
   .genre-filter__select,
   .watched-filter__select,
   .rating-filter__select,
-  .rating-filter__sort,
   .gate__input,
   .form-input,
   .form-textarea {
@@ -2973,7 +3099,7 @@ body {
   .card__overlay .card__badges {
     position: absolute;
     top: 0.25rem;
-    left: 0.25rem;
+    inset-inline-start: 0.25rem;
     margin: 0;
     gap: 0.2rem;
   }
@@ -3108,7 +3234,7 @@ body {
     content: "✓";
     position: absolute;
     top: 0.3rem;
-    right: 0.3rem;
+    inset-inline-end: 0.3rem;
     z-index: 3;
     display: grid;
     place-items: center;

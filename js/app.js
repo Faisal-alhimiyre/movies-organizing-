@@ -76,6 +76,7 @@
   let moveListItemId = null;
   let searchDebounceTimer = null;
   let formLinkLookupTimer = null;
+  let addSaveInFlight = false;
   let ratingsBackfillRunning = false;
 
   const state = {
@@ -103,6 +104,7 @@
     searchResults: [],
     searchLoading: false,
     searchPickDetails: null,
+    searchConfirmSecondary: [],
     manualLinkMeta: null,
     ratingItemId: null,
     ratingPickerValue: null,
@@ -117,8 +119,7 @@
     genre: document.getElementById("genreSelect"),
     genreFilterChips: document.getElementById("genreFilterChips"),
     watchedFilter: document.getElementById("watchedFilter"),
-    ratingFilterSource: document.getElementById("ratingFilterSource"),
-    ratingFilterSort: document.getElementById("ratingFilterSort"),
+    ratingFilter: document.getElementById("ratingFilter"),
     exportBtn: null,
     importBtn: null,
     manageListsBtn: null,
@@ -175,7 +176,10 @@
     searchConfirmBack: document.getElementById("searchConfirmBack"),
     searchConfirmPreview: document.getElementById("searchConfirmPreview"),
     searchConfirmType: document.getElementById("searchConfirmType"),
+    searchConfirmTypePicker: document.getElementById("searchConfirmTypePicker"),
     searchConfirmGenre: document.getElementById("searchConfirmGenre"),
+    searchConfirmSecondaryAdd: document.getElementById("searchConfirmSecondaryAdd"),
+    searchConfirmSecondaryChips: document.getElementById("searchConfirmSecondaryChips"),
     searchConfirmAdd: document.getElementById("searchConfirmAdd"),
     bulkAddPanel: document.getElementById("bulkAddPanel"),
     bulkPasteInput: document.getElementById("bulkPasteInput"),
@@ -193,6 +197,7 @@
     modalTitle: document.getElementById("modalTitle"),
     deleteBtn: document.getElementById("deleteBtn"),
     formType: document.getElementById("formType"),
+    formTypePicker: document.getElementById("formTypePicker"),
     formGenre: document.getElementById("formGenre"),
     formTitle: document.getElementById("formTitle"),
     formLeadInput: document.getElementById("formLeadInput"),
@@ -200,6 +205,7 @@
     formLeadChips: document.getElementById("formLeadChips"),
     formLink: document.getElementById("formLink"),
     formLinkStatus: document.getElementById("formLinkStatus"),
+    formFilledBanner: document.getElementById("formFilledBanner"),
     formSummary: document.getElementById("formSummary"),
     formSecondaryAdd: document.getElementById("formSecondaryAdd"),
     formSecondaryChips: document.getElementById("formSecondaryChips"),
@@ -414,10 +420,49 @@
     }
   }
 
+  function normalizeContentType(value) {
+    if (value === "movies" || value === "tvSeries" || value === "anime") {
+      return value;
+    }
+    return "movies";
+  }
+
+  function syncContentTypePicker(picker, hiddenInput, value) {
+    if (!picker || !hiddenInput) return;
+    const normalized = normalizeContentType(value);
+    hiddenInput.value = normalized;
+    picker.querySelectorAll("[data-type]").forEach((btn) => {
+      const active = btn.dataset.type === normalized;
+      btn.classList.toggle("content-type-picker__btn--active", active);
+      btn.setAttribute("aria-pressed", String(active));
+    });
+  }
+
+  function initContentTypePicker(picker, hiddenInput) {
+    if (!picker || !hiddenInput || picker.dataset.bound === "true") return;
+    picker.dataset.bound = "true";
+    picker.addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-type]");
+      if (!btn) return;
+      syncContentTypePicker(picker, hiddenInput, btn.dataset.type);
+    });
+  }
+
   function setFormLinkStatus(message, { error = false } = {}) {
     if (!els.formLinkStatus) return;
     els.formLinkStatus.textContent = message || "";
     els.formLinkStatus.classList.toggle("form-field__status--error", Boolean(error));
+  }
+
+  function setFormFilledBanner(visible) {
+    if (!els.formFilledBanner) return;
+    if (!visible) {
+      els.formFilledBanner.hidden = true;
+      els.formFilledBanner.innerHTML = "";
+      return;
+    }
+    els.formFilledBanner.innerHTML = t("manual.filled");
+    els.formFilledBanner.hidden = false;
   }
 
   function applyMetadataToManualForm(meta) {
@@ -428,7 +473,11 @@
     if (meta.actors?.length) setFormLeads(meta.actors);
 
     if (meta.contentType) {
-      els.formType.value = meta.contentType;
+      syncContentTypePicker(
+        els.formTypePicker,
+        els.formType,
+        normalizeContentType(meta.contentType)
+      );
     }
 
     const suggested = window.WatchlistMetadata?.suggestGenres(
@@ -455,12 +504,14 @@
     if (!link) {
       state.manualLinkMeta = null;
       setFormLinkStatus("");
+      setFormFilledBanner(false);
       return;
     }
 
     if (!window.WatchlistMetadata?.isSupportedLink(link)) {
       state.manualLinkMeta = null;
       setFormLinkStatus("");
+      setFormFilledBanner(false);
       return;
     }
 
@@ -479,6 +530,7 @@
       return;
     }
 
+    setFormFilledBanner(false);
     setFormLinkStatus(t("manual.lookingUp"));
     const meta = await window.WatchlistMetadata.resolveMetadataFromLink(link);
     if (!meta?.title) {
@@ -494,7 +546,8 @@
     }
 
     applyMetadataToManualForm(meta);
-    setFormLinkStatus(t("manual.filled"));
+    setFormLinkStatus("");
+    setFormFilledBanner(true);
   }
 
   function queueFormLinkLookup() {
@@ -1140,40 +1193,60 @@
     return getRatingSortScore(item) != null;
   }
 
-  function ratingSortOptions() {
+  function ratingFilterOptions() {
     return [
-      { value: "default", labelKey: "filter.ratingSortDefault" },
-      { value: "best", labelKey: "filter.ratingSortBest" },
-      { value: "worst", labelKey: "filter.ratingSortWorst" },
+      { value: "all", labelKey: "filter.ratingOptionAll" },
+      { value: "imdb-best", labelKey: "filter.ratingOptionImdbBest" },
+      { value: "imdb-worst", labelKey: "filter.ratingOptionImdbWorst" },
+      { value: "anilist-best", labelKey: "filter.ratingOptionAnilistBest" },
+      { value: "anilist-worst", labelKey: "filter.ratingOptionAnilistWorst" },
+      { value: "personal-best", labelKey: "filter.ratingOptionPersonalBest" },
+      { value: "personal-worst", labelKey: "filter.ratingOptionPersonalWorst" },
     ];
   }
 
-  function updateRatingFilterOptions() {
-    if (!els.ratingFilterSource || !els.ratingFilterSort) return;
-
-    const source = state.ratingFilterSource || "all";
-    const active = source !== "all";
-    els.ratingFilterSort.disabled = !active;
-
-    if (!active) {
-      state.ratingFilterSort = "default";
-      els.ratingFilterSort.value = "default";
-      return;
+  function parseRatingFilter(value) {
+    if (!value || value === "all") {
+      return { source: "all", sort: "default" };
     }
+    const [source, sort] = String(value).split("-");
+    if (!source || source === "rt") {
+      return { source: "all", sort: "default" };
+    }
+    return {
+      source,
+      sort: sort === "worst" ? "worst" : "best",
+    };
+  }
 
-    const options = ratingSortOptions();
-    const current = state.ratingFilterSort;
+  function getRatingFilterValue() {
+    if (state.ratingFilterSource === "all") return "all";
+    const sort = state.ratingFilterSort === "worst" ? "worst" : "best";
+    return `${state.ratingFilterSource}-${sort}`;
+  }
+
+  function applyRatingFilter(value) {
+    const parsed = parseRatingFilter(value);
+    state.ratingFilterSource = parsed.source;
+    state.ratingFilterSort = parsed.sort;
+  }
+
+  function updateRatingFilterOptions() {
+    if (!els.ratingFilter) return;
+
+    const options = ratingFilterOptions();
+    const current = getRatingFilterValue();
     const valid = options.some((opt) => opt.value === current);
-    const next = valid ? current : "default";
+    const next = valid ? current : "all";
 
-    els.ratingFilterSort.innerHTML = options
+    els.ratingFilter.innerHTML = options
       .map(
         (opt) =>
           `<option value="${escapeHtml(opt.value)}">${escapeHtml(t(opt.labelKey))}</option>`
       )
       .join("");
-    els.ratingFilterSort.value = next;
-    state.ratingFilterSort = next;
+    els.ratingFilter.value = next;
+    applyRatingFilter(next);
   }
 
   function itemMatchesFiltersExceptType(item) {
@@ -2166,6 +2239,125 @@
     els.bulkPasteError.classList.toggle("backup-modal__hint--error", Boolean(message));
   }
 
+  function getSearchConfirmPrimaryGenre() {
+    return normalizeGenre(els.searchConfirmGenre?.value?.trim() || "");
+  }
+
+  function setSearchConfirmSecondary(genres) {
+    const primary = getSearchConfirmPrimaryGenre();
+    state.searchConfirmSecondary = normalizeSecondaryGenres(primary, genres);
+    renderSearchConfirmSecondaryChips();
+    updateSearchConfirmSecondaryOptions();
+  }
+
+  function addSearchConfirmSecondary(genre) {
+    const primary = getSearchConfirmPrimaryGenre();
+    if (!genre || genre === primary) return;
+    state.searchConfirmSecondary = normalizeSecondaryGenres(primary, [
+      ...state.searchConfirmSecondary,
+      genre,
+    ]);
+    renderSearchConfirmSecondaryChips();
+    updateSearchConfirmSecondaryOptions();
+  }
+
+  function removeSearchConfirmSecondary(genre) {
+    state.searchConfirmSecondary = state.searchConfirmSecondary.filter(
+      (g) => g !== genre
+    );
+    renderSearchConfirmSecondaryChips();
+    updateSearchConfirmSecondaryOptions();
+  }
+
+  function updateSearchConfirmSecondaryOptions() {
+    if (!els.searchConfirmSecondaryAdd) return;
+    const primary = getSearchConfirmPrimaryGenre();
+    const taken = new Set([primary, ...state.searchConfirmSecondary]);
+    const available = STANDARD_GENRES.filter((g) => !taken.has(g));
+
+    els.searchConfirmSecondaryAdd.innerHTML =
+      `<option value="">${t("form.addGenre")}</option>` +
+      available
+        .map(
+          (genre) =>
+            `<option value="${escapeHtml(genre)}">${escapeHtml(genreLabel(genre))}</option>`
+        )
+        .join("");
+
+    els.searchConfirmSecondaryAdd.disabled = available.length === 0;
+  }
+
+  function renderSearchConfirmSecondaryChips() {
+    if (!els.searchConfirmSecondaryChips) return;
+    els.searchConfirmSecondaryChips.innerHTML = state.searchConfirmSecondary
+      .map(
+        (genre) => `
+        <span class="genre-chip">
+          ${escapeHtml(genreLabel(genre))}
+          <button
+            type="button"
+            class="genre-chip__remove"
+            data-action="remove-search-secondary"
+            data-genre="${escapeHtml(genre)}"
+            aria-label="Remove ${escapeHtml(genreLabel(genre))}"
+          >×</button>
+        </span>
+      `
+      )
+      .join("");
+  }
+
+  function formatSearchConfirmRating(details) {
+    if (!details) return "";
+    if (details.anilistRating || details.source === "anilist") {
+      const pct = formatAnilistDisplay(details.anilistRating || details.rating);
+      if (pct) return pct;
+    }
+    const score = formatImdbDisplay(details.rating);
+    return score ? `${score}/10` : "";
+  }
+
+  function renderSearchConfirmPreview(details) {
+    if (!els.searchConfirmPreview || !details) return;
+
+    const poster = details.poster
+      ? `<img class="title-search-confirm__poster" src="${escapeHtml(details.poster)}" alt="" />`
+      : `<div class="title-search-confirm__poster title-search-confirm__poster--empty" aria-hidden="true">🎬</div>`;
+    const yearHtml = details.year
+      ? `<span class="title-search-confirm__year">${escapeHtml(String(details.year))}</span>`
+      : "";
+    const rating = formatSearchConfirmRating(details);
+    const ratingHtml = rating
+      ? `<span class="title-search-confirm__rating">${escapeHtml(rating)}</span>`
+      : "";
+    const actors = details.actors?.length
+      ? details.actors.slice(0, 4)
+      : details.director
+        ? [details.director]
+        : [];
+    const actorsHtml = actors.length
+      ? `<span class="title-search-confirm__actors">${actors
+          .map(
+            (name) =>
+              `<span class="title-search-confirm__actor">${escapeHtml(name)}</span>`
+          )
+          .join("")}</span>`
+      : "";
+
+    els.searchConfirmPreview.innerHTML = `
+      ${poster}
+      <div class="title-search-confirm__body">
+        <h3 class="title-search-confirm__name">${escapeHtml(details.title)}</h3>
+        ${
+          yearHtml || ratingHtml || actorsHtml
+            ? `<div class="title-search-confirm__meta">${yearHtml}${ratingHtml}${actorsHtml}</div>`
+            : ""
+        }
+        <p class="title-search-confirm__plot">${escapeHtml(details.plot || t("search.noSummary"))}</p>
+      </div>
+    `;
+  }
+
   function populateSearchConfirmGenreSelect(selected) {
     if (!els.searchConfirmGenre) return;
     els.searchConfirmGenre.innerHTML =
@@ -2257,6 +2449,7 @@
     state.searchResults = [];
     state.searchLoading = false;
     state.searchPickDetails = null;
+    state.searchConfirmSecondary = [];
 
     if (els.titleSearchInput) els.titleSearchInput.value = "";
     if (els.titleSearchType) {
@@ -2294,35 +2487,20 @@
       (state.type !== "all" ? state.type : "movies");
 
     populateSearchConfirmGenreSelect(primaryGenre);
-    if (els.searchConfirmType) {
-      els.searchConfirmType.value = defaultType;
-    }
-
-    const poster = details.poster
-      ? `<img class="title-search-confirm__poster" src="${escapeHtml(details.poster)}" alt="" />`
-      : `<div class="title-search-confirm__poster title-search-confirm__poster--empty" aria-hidden="true">🎬</div>`;
-    const subParts = [
-      details.year,
-      details.rating ? `${details.rating}/10` : "",
-      details.actors?.length ? details.actors.slice(0, 3).join(", ") : "",
-    ].filter(Boolean);
-
-    if (els.searchConfirmPreview) {
-      els.searchConfirmPreview.innerHTML = `
-        ${poster}
-        <div class="title-search-confirm__body">
-          <h3 class="title-search-confirm__name">${escapeHtml(details.title)}</h3>
-          <p class="title-search-confirm__sub">${escapeHtml(subParts.join(" · "))}</p>
-          <p class="title-search-confirm__plot">${escapeHtml(details.plot || t("search.noSummary"))}</p>
-        </div>
-      `;
-    }
+    syncContentTypePicker(
+      els.searchConfirmTypePicker,
+      els.searchConfirmType,
+      normalizeContentType(defaultType)
+    );
+    setSearchConfirmSecondary(suggested.slice(1));
+    renderSearchConfirmPreview(details);
 
     els.searchConfirmGenre?.focus();
   }
 
   function hideSearchConfirmStep() {
     state.searchPickDetails = null;
+    state.searchConfirmSecondary = [];
     if (els.searchAddStep) els.searchAddStep.hidden = false;
     if (els.searchConfirmStep) els.searchConfirmStep.hidden = true;
     els.titleSearchInput?.focus();
@@ -2446,7 +2624,8 @@
     );
     const secondaryGenres = normalizeSecondaryGenres(
       genre,
-      suggested.filter((entry) => entry !== genre)
+      options.secondaryGenres ??
+        suggested.filter((entry) => entry !== genre)
     );
     const leads =
       details.actors?.length > 0
@@ -2475,11 +2654,13 @@
   }
 
   async function handleSearchConfirmAdd() {
+    if (addSaveInFlight) return;
+
     const details = state.searchPickDetails;
     if (!details) return;
 
     const genre = els.searchConfirmGenre?.value?.trim() || "";
-    const contentType = els.searchConfirmType?.value || "movies";
+    const contentType = normalizeContentType(els.searchConfirmType?.value || "movies");
 
     if (!genre) {
       await window.WatchlistDialog.alert(t("alert.genreRequired"), {
@@ -2488,7 +2669,11 @@
       return;
     }
 
-    const item = buildItemFromSearchDetails(details, { contentType, genre });
+    const item = buildItemFromSearchDetails(details, {
+      contentType,
+      genre,
+      secondaryGenres: state.searchConfirmSecondary,
+    });
 
     if (!item.title || !item.summary) {
       await window.WatchlistDialog.alert(t("alert.incomplete"), {
@@ -2512,12 +2697,20 @@
       return;
     }
 
-    state.items.push(item);
-    state.data = itemsToNested(state.items);
-    saveData();
-    updateGenreOptions();
-    closeModal();
-    render();
+    addSaveInFlight = true;
+    if (els.searchConfirmAdd) els.searchConfirmAdd.disabled = true;
+
+    try {
+      state.items.push(item);
+      state.data = itemsToNested(state.items);
+      saveData();
+      closeModal();
+      updateGenreOptions();
+      render();
+    } finally {
+      addSaveInFlight = false;
+      if (els.searchConfirmAdd) els.searchConfirmAdd.disabled = false;
+    }
   }
 
   function setAddMode(mode) {
@@ -2591,7 +2784,11 @@
     populateFormGenreSelect();
 
     if (item) {
-      els.formType.value = item.contentType;
+      syncContentTypePicker(
+        els.formTypePicker,
+        els.formType,
+        normalizeContentType(item.contentType)
+      );
       els.formGenre.value = item.genre;
       els.formTitle.value = item.title;
       setFormLeads(item.leads || parseLeads(item));
@@ -2600,7 +2797,11 @@
       setFormSecondary(item.secondaryGenres || []);
     } else {
       const defaultType = state.type !== "all" ? state.type : "movies";
-      els.formType.value = defaultType;
+      syncContentTypePicker(
+        els.formTypePicker,
+        els.formType,
+        normalizeContentType(defaultType)
+      );
       if (state.selectedGenres.length === 1) {
         els.formGenre.value = state.selectedGenres[0];
       }
@@ -2622,6 +2823,7 @@
 
   function closeModal() {
     els.modal.hidden = true;
+    addSaveInFlight = false;
     updateBodyScrollLock();
     state.editingId = null;
     state.addMode = "search";
@@ -2631,6 +2833,7 @@
     clearTimeout(searchDebounceTimer);
     clearTimeout(formLinkLookupTimer);
     setFormLinkStatus("");
+    setFormFilledBanner(false);
     resetSearchAddState();
     setBulkPasteError("");
     if (els.form) els.form.hidden = true;
@@ -2888,7 +3091,15 @@
   function positionCardMenuPanel(panel) {
     if (!panel) return;
     resetCardMenuPosition(panel);
-    panel.style.right = "0";
+    const rtl = document.documentElement.getAttribute("dir") === "rtl";
+
+    if (rtl) {
+      panel.style.left = "0";
+      panel.style.right = "auto";
+    } else {
+      panel.style.right = "0";
+      panel.style.left = "auto";
+    }
     panel.style.bottom = "calc(100% + 0.25rem)";
 
     requestAnimationFrame(() => {
@@ -2896,14 +3107,14 @@
       let rect = panel.getBoundingClientRect();
 
       if (rect.left < margin) {
-        panel.style.right = "auto";
-        panel.style.left = "0";
+        panel.style.left = "auto";
+        panel.style.right = "0";
         rect = panel.getBoundingClientRect();
       }
 
       if (rect.right > window.innerWidth - margin) {
-        panel.style.left = "auto";
-        panel.style.right = "0";
+        panel.style.right = "auto";
+        panel.style.left = "0";
         rect = panel.getBoundingClientRect();
       }
 
@@ -3309,7 +3520,7 @@
   }
 
   function formToItem() {
-    const contentType = els.formType.value;
+    const contentType = normalizeContentType(els.formType.value);
     const genre = normalizeGenre(els.formGenre.value.trim());
     const title = els.formTitle.value.trim();
     const leads = [...state.formLeads];
@@ -3487,6 +3698,7 @@
 
   function handleFormSubmit(event) {
     event.preventDefault();
+    if (addSaveInFlight) return;
 
     const item = formToItem();
 
@@ -3494,6 +3706,10 @@
       if (!item.leads.length) {
         window.WatchlistDialog.alert(t("alert.leadRequired"), {
           title: t("alert.missingActorTitle"),
+        });
+      } else {
+        window.WatchlistDialog.alert(t("alert.incomplete"), {
+          title: t("alert.incompleteTitle"),
         });
       }
       return;
@@ -3514,11 +3730,20 @@
       return;
     }
 
-    saveItem(item);
-    state.manualLinkMeta = null;
-    updateGenreOptions();
-    closeModal();
-    render();
+    addSaveInFlight = true;
+    const saveBtn = els.form?.querySelector('button[type="submit"]');
+    if (saveBtn) saveBtn.disabled = true;
+
+    try {
+      saveItem(item);
+      state.manualLinkMeta = null;
+      closeModal();
+      updateGenreOptions();
+      render();
+    } finally {
+      addSaveInFlight = false;
+      if (saveBtn) saveBtn.disabled = false;
+    }
   }
 
   async function handleDelete() {
@@ -4060,18 +4285,8 @@
       render();
     });
 
-    els.ratingFilterSource?.addEventListener("change", () => {
-      const value = els.ratingFilterSource.value || "all";
-      state.ratingFilterSource = value === "rt" ? "all" : value;
-      if (state.ratingFilterSource !== value) {
-        els.ratingFilterSource.value = "all";
-      }
-      updateRatingFilterOptions();
-      render();
-    });
-
-    els.ratingFilterSort?.addEventListener("change", () => {
-      state.ratingFilterSort = els.ratingFilterSort.value || "default";
+    els.ratingFilter?.addEventListener("change", () => {
+      applyRatingFilter(els.ratingFilter.value || "all");
       render();
     });
 
@@ -4308,6 +4523,25 @@
 
     els.formGenre.addEventListener("change", () => {
       setFormSecondary(state.formSecondary);
+    });
+
+    initContentTypePicker(els.formTypePicker, els.formType);
+    initContentTypePicker(els.searchConfirmTypePicker, els.searchConfirmType);
+
+    els.searchConfirmGenre?.addEventListener("change", () => {
+      setSearchConfirmSecondary(state.searchConfirmSecondary);
+    });
+
+    els.searchConfirmSecondaryAdd?.addEventListener("change", () => {
+      const genre = els.searchConfirmSecondaryAdd.value;
+      if (genre) addSearchConfirmSecondary(genre);
+      els.searchConfirmSecondaryAdd.value = "";
+    });
+
+    els.searchConfirmSecondaryChips?.addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-action='remove-search-secondary']");
+      if (!btn) return;
+      removeSearchConfirmSecondary(btn.dataset.genre);
     });
 
     els.formSecondaryAdd.addEventListener("change", () => {
@@ -4656,10 +4890,11 @@
     });
     updateGenreOptions();
     bindEvents();
+    syncContentTypePicker(els.formTypePicker, els.formType, els.formType?.value || "movies");
     renderListSwitcher();
-    if (els.ratingFilterSource?.value === "rt") {
-      els.ratingFilterSource.value = "all";
-      state.ratingFilterSource = "all";
+    if (els.ratingFilter?.value === "rt-best" || els.ratingFilter?.value === "rt-worst") {
+      els.ratingFilter.value = "all";
+      applyRatingFilter("all");
     }
     updateRatingFilterOptions();
     updateStats();

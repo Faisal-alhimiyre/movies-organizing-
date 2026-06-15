@@ -246,11 +246,41 @@
   .card__overlay .badge--tvSeries,
   .card__overlay .badge--series,
   .card__overlay .badge--anime,
-  .card__overlay .badge--franchise {
+  .card__overlay .badge--franchise,
+  .app[data-layout="hover"] .card__head .badge--movie,
+  .app[data-layout="hover"] .card__head .badge--tvSeries,
+  .app[data-layout="hover"] .card__head .badge--series,
+  .app[data-layout="hover"] .card__head .badge--anime,
+  .app[data-layout="hover"] .card__head .badge--franchise {
+    color: #fff;
     font-weight: 700;
-    border: 1px solid rgba(255, 255, 255, 0.28);
-    box-shadow: none;
-    backdrop-filter: blur(3px);
+    border: 1px solid rgba(255, 255, 255, 0.38);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    text-shadow: none;
+  }
+
+  .card__overlay .badge--movie,
+  .app[data-layout="hover"] .card__head .badge--movie {
+    background: var(--movie, #6898b8);
+  }
+
+  .card__overlay .badge--tvSeries,
+  .card__overlay .badge--series,
+  .app[data-layout="hover"] .card__head .badge--tvSeries,
+  .app[data-layout="hover"] .card__head .badge--series {
+    background: var(--tv, #8f7eb8);
+  }
+
+  .card__overlay .badge--anime,
+  .app[data-layout="hover"] .card__head .badge--anime {
+    background: var(--anime, #b87284);
+  }
+
+  .card__overlay .badge--franchise,
+  .app[data-layout="hover"] .card__head .badge--franchise {
+    background: var(--franchise, #62a892);
   }
 
   .card__overlay .badge--genre-primary,
@@ -275,7 +305,7 @@
   .card__overlay .card__badges {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    align-items: start;
     gap: 0.12rem;
     max-width: calc(100% - 1.35rem);
   }
@@ -285,13 +315,14 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: start;
     gap: 0.1rem;
     max-width: 100%;
   }
 
   .app[data-layout="hover"] .card__head .card__badges {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: start;
     gap: 0.2rem;
     margin-bottom: 0.4rem;
   }
@@ -300,6 +331,7 @@
   .app[data-layout="hover"] .card__head .card__genre-row {
     display: flex;
     flex-wrap: wrap;
+    justify-content: start;
     gap: 0.12rem;
   }
 
