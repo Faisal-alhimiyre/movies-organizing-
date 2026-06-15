@@ -30,6 +30,7 @@
     document.querySelectorAll("[data-action='set-theme']").forEach((btn) => {
       const active = btn.dataset.theme === current;
       btn.classList.toggle("theme-option--active", active);
+      btn.classList.toggle("gate__theme-swatch--active", active);
       btn.setAttribute("aria-pressed", String(active));
     });
   }

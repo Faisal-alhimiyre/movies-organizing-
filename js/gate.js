@@ -3,6 +3,7 @@
 
   const auth = window.WatchlistAuth;
   const i18n = () => window.WatchlistI18n;
+  const MIN_CODE_LENGTH = auth?.MIN_CODE_LENGTH ?? 6;
 
   function t(key, vars) {
     return i18n()?.t(key, vars) ?? key;
@@ -15,6 +16,7 @@
     openCode: document.getElementById("openCode"),
     createCode: document.getElementById("createCode"),
     confirmCode: document.getElementById("confirmCode"),
+    createCodeRules: document.getElementById("createCodeRules"),
     error: document.getElementById("gateError"),
     themeModal: document.getElementById("themeModal"),
   };
@@ -87,6 +89,52 @@
       : "index.html";
   }
 
+  function evaluateCodeRules(code) {
+    const raw = String(code);
+    const normalized = raw.trim().toLowerCase();
+
+    return {
+      length: normalized.length >= MIN_CODE_LENGTH,
+      alnum: /[a-z]/.test(normalized) && /[0-9]/.test(normalized),
+      spaces: raw.length > 0 && !/\s/.test(raw),
+    };
+  }
+
+  function updateCreateCodeRules() {
+    if (!els.createCodeRules || !els.createCode) return;
+    const checks = evaluateCodeRules(els.createCode.value || "");
+
+    els.createCodeRules.querySelectorAll(".gate__rule").forEach((item) => {
+      const rule = item.dataset.rule;
+      item.classList.toggle("gate__rule--met", Boolean(checks[rule]));
+    });
+  }
+
+  function setPasswordVisible(inputId, visible) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    input.type = visible ? "text" : "password";
+
+    document
+      .querySelectorAll(`[data-action='toggle-password'][data-target='${inputId}']`)
+      .forEach((btn) => {
+        btn.setAttribute("aria-pressed", String(visible));
+        btn.setAttribute("aria-label", t(visible ? "gate.hideCode" : "gate.showCode"));
+      });
+  }
+
+  function togglePasswordVisibility(button) {
+    const targetId = button?.dataset?.target;
+    if (!targetId) return;
+
+    const input = document.getElementById(targetId);
+    if (!input) return;
+
+    const show = input.type === "password";
+    setPasswordVisible(targetId, show);
+  }
+
   function setMode(mode) {
     const isCreate = mode === "create";
 
@@ -101,6 +149,7 @@
     clearInputErrors();
 
     if (isCreate) {
+      updateCreateCodeRules();
       els.createCode?.focus();
     } else {
       els.openCode?.focus();
@@ -146,6 +195,7 @@
     const formatError = auth.validateCode(code, { forCreate: true });
     if (formatError) {
       showError(formatError, [els.createCode, els.confirmCode]);
+      updateCreateCodeRules();
       return;
     }
 
@@ -173,9 +223,12 @@
       btn.addEventListener("click", () => setMode(btn.dataset.mode));
     });
 
-    [els.openCode, els.createCode, els.confirmCode].forEach((field) => {
-      field?.addEventListener("input", clearInputErrors);
+    els.openCode?.addEventListener("input", clearInputErrors);
+    els.createCode?.addEventListener("input", () => {
+      clearInputErrors();
+      updateCreateCodeRules();
     });
+    els.confirmCode?.addEventListener("input", clearInputErrors);
 
     els.openForm?.addEventListener("submit", handleOpen);
     els.createForm?.addEventListener("submit", handleCreate);
@@ -184,6 +237,12 @@
       const lang = event.target.closest("[data-action='set-language']")?.dataset.lang;
       if (lang) {
         i18n()?.setLang(lang);
+        return;
+      }
+
+      const toggleBtn = event.target.closest("[data-action='toggle-password']");
+      if (toggleBtn) {
+        togglePasswordVisibility(toggleBtn);
         return;
       }
 
@@ -217,10 +276,12 @@
 
     bindEvents();
     setMode(startMode);
+    updateCreateCodeRules();
     i18n()?.applyGateDocument();
 
     i18n()?.onChange(() => {
       i18n().applyGateDocument();
+      updateCreateCodeRules();
       document.querySelectorAll("[data-action='set-language']").forEach((btn) => {
         btn.classList.toggle(
           "gate__lang-btn--active",

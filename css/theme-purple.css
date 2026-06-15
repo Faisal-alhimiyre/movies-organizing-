@@ -203,6 +203,13 @@ html[data-theme="purple"] .add-mode-tab--active {
   background: linear-gradient(180deg, #f0d498 0%, #e8c078 100%);
 }
 
+html[data-theme="purple"] .add-mode-tab--active:hover,
+html[data-theme="purple"] .add-mode-tab--active:focus,
+html[data-theme="purple"] .add-mode-tab--active:focus-visible {
+  color: #1a0828;
+  background: linear-gradient(180deg, #f0d498 0%, #e8c078 100%);
+}
+
 html[data-theme="purple"] .add-panel-hint {
   background: rgba(140, 80, 220, 0.1);
   border-color: rgba(180, 140, 255, 0.14);

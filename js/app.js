@@ -84,7 +84,7 @@
     search: "",
     watchedFilter: "all",
     ratingFilterSource: "all",
-    ratingFilterMin: "any",
+    ratingFilterSort: "default",
     watched: {},
     data: null,
     items: [],
@@ -118,7 +118,7 @@
     genreFilterChips: document.getElementById("genreFilterChips"),
     watchedFilter: document.getElementById("watchedFilter"),
     ratingFilterSource: document.getElementById("ratingFilterSource"),
-    ratingFilterMin: document.getElementById("ratingFilterMin"),
+    ratingFilterSort: document.getElementById("ratingFilterSort"),
     exportBtn: null,
     importBtn: null,
     manageListsBtn: null,
@@ -1055,6 +1055,21 @@
     return raw > 10 ? raw / 10 : raw;
   }
 
+  function getItemAnilistSortScore(item) {
+    const raw = parseScoreValue(item.anilistRating);
+    if (raw == null) return null;
+    return raw > 10 ? raw : raw * 10;
+  }
+
+  function getRatingSortScore(item) {
+    const source = state.ratingFilterSource;
+    if (!source || source === "all") return null;
+    if (source === "imdb") return getItemImdbScore(item);
+    if (source === "anilist") return getItemAnilistSortScore(item);
+    if (source === "personal") return getItemPersonalScore(item);
+    return null;
+  }
+
   function formatImdbDisplay(value) {
     const score = parseScoreValue(value);
     if (score == null) return "";
@@ -1097,62 +1112,68 @@
     return `<div class="card__rating-badges">${parts.join("")}</div>`;
   }
 
+  function isRatingSortActive() {
+    const source = state.ratingFilterSource;
+    const sort = state.ratingFilterSort;
+    return Boolean(source && source !== "all" && sort && sort !== "default");
+  }
+
+  function sortItemsByRating(items) {
+    const ratingSort = state.ratingFilterSort;
+    return [...items].sort((a, b) => {
+      const aScore = getRatingSortScore(a);
+      const bScore = getRatingSortScore(b);
+      if (aScore == null && bScore == null) {
+        return a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+      }
+      if (aScore == null) return 1;
+      if (bScore == null) return -1;
+      const diff = ratingSort === "best" ? bScore - aScore : aScore - bScore;
+      if (diff !== 0) return diff;
+      return a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+    });
+  }
+
   function itemMatchesRatingFilter(item) {
     const source = state.ratingFilterSource;
     if (!source || source === "all") return true;
-
-    const min = state.ratingFilterMin;
-    const requireAny = !min || min === "any";
-
-    let score = null;
-    if (source === "imdb") score = getItemImdbScore(item);
-    else if (source === "anilist") score = getItemAnilistScore(item);
-    else if (source === "personal") score = getItemPersonalScore(item);
-
-    if (score == null) return false;
-    if (requireAny) return true;
-
-    const threshold = Number(min);
-    if (!Number.isFinite(threshold)) return true;
-    return score >= threshold;
+    return getRatingSortScore(item) != null;
   }
 
-  function ratingMinOptionsForSource() {
+  function ratingSortOptions() {
     return [
-      { value: "any", labelKey: "filter.ratingAny" },
-      { value: "6", labelKey: "filter.rating6" },
-      { value: "7", labelKey: "filter.rating7" },
-      { value: "8", labelKey: "filter.rating8" },
-      { value: "9", labelKey: "filter.rating9" },
+      { value: "default", labelKey: "filter.ratingSortDefault" },
+      { value: "best", labelKey: "filter.ratingSortBest" },
+      { value: "worst", labelKey: "filter.ratingSortWorst" },
     ];
   }
 
   function updateRatingFilterOptions() {
-    if (!els.ratingFilterSource || !els.ratingFilterMin) return;
+    if (!els.ratingFilterSource || !els.ratingFilterSort) return;
 
     const source = state.ratingFilterSource || "all";
     const active = source !== "all";
-    els.ratingFilterMin.disabled = !active;
+    els.ratingFilterSort.disabled = !active;
 
     if (!active) {
-      state.ratingFilterMin = "any";
-      els.ratingFilterMin.value = "any";
+      state.ratingFilterSort = "default";
+      els.ratingFilterSort.value = "default";
       return;
     }
 
-    const options = ratingMinOptionsForSource();
-    const current = state.ratingFilterMin;
+    const options = ratingSortOptions();
+    const current = state.ratingFilterSort;
     const valid = options.some((opt) => opt.value === current);
-    const next = valid ? current : "any";
+    const next = valid ? current : "default";
 
-    els.ratingFilterMin.innerHTML = options
+    els.ratingFilterSort.innerHTML = options
       .map(
         (opt) =>
           `<option value="${escapeHtml(opt.value)}">${escapeHtml(t(opt.labelKey))}</option>`
       )
       .join("");
-    els.ratingFilterMin.value = next;
-    state.ratingFilterMin = next;
+    els.ratingFilterSort.value = next;
+    state.ratingFilterSort = next;
   }
 
   function itemMatchesFiltersExceptType(item) {
@@ -1172,6 +1193,10 @@
   }
 
   function sortItemsInGroup(items) {
+    if (isRatingSortActive()) {
+      return sortItemsByRating(items);
+    }
+
     const typeOrder = ["movies", "tvSeries", "anime"];
 
     return [...items].sort((a, b) => {
@@ -1188,6 +1213,18 @@
   }
 
   function groupItems(items) {
+    if (isRatingSortActive() && state.selectedGenres.length === 0) {
+      return [
+        {
+          contentType: null,
+          genre: null,
+          isAllMatch: false,
+          isRatingSorted: true,
+          items: sortItemsByRating(items),
+        },
+      ];
+    }
+
     const groups = [];
     const mergeByGenreOnly = state.type === "all";
     const selectedGenres = state.selectedGenres;
@@ -1937,12 +1974,23 @@
               </button>
             </div>
           </div>`
-        : `<div class="card__rating card__rating--empty">
-            <div class="card__rating-top">
-              <span class="card__rating-label">${escapeHtml(t("card.yourRating"))}</span>
-              <span class="card__rating-placeholder">${escapeHtml(t("card.notWatched"))}</span>
+        : `<span class="card__footer-badge card__footer-badge--unwatched">${escapeHtml(t("card.notWatchedShort"))}</span>`;
+
+    const mobileFooter = !isWatched
+      ? `<span class="card__watch-status">${escapeHtml(t("card.notWatchedShort"))}</span>`
+      : rated
+        ? `<div class="card__watch-rating">
+            <div class="card__watch-rating-top">
+              <span class="card__watch-rating-label">${escapeHtml(t("card.yourRating"))}</span>
+              <span class="card__watch-rating-score">${escapeHtml(formatWatchRating(watchEntry.rating))}/10</span>
             </div>
-          </div>`;
+            ${
+              watchEntry.note
+                ? `<p class="card__watch-rating-note">${escapeHtml(watchEntry.note)}</p>`
+                : ""
+            }
+          </div>`
+        : `<span class="card__watch-status card__watch-status--watched">${escapeHtml(t("card.watched"))}</span>`;
     const moveToListItem = canMoveToList
       ? `<button
           type="button"
@@ -1966,6 +2014,7 @@
         <p class="card__summary">${escapeHtml(item.summary || parseSummary(item))}</p>
         ${externalScores}
         <div class="card__footer">
+          <div class="card__footer-mobile">${mobileFooter}</div>
           ${ratingFooter}
           <div class="card-menu">
             <button
@@ -1977,7 +2026,18 @@
               aria-haspopup="menu"
               aria-expanded="false"
             >
-              <span aria-hidden="true">⋯</span>
+              <span class="card-menu__trigger-icon card-menu__trigger-icon--desktop" aria-hidden="true">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="5" r="1.75" fill="currentColor"/>
+                  <circle cx="12" cy="12" r="1.75" fill="currentColor"/>
+                  <circle cx="12" cy="19" r="1.75" fill="currentColor"/>
+                </svg>
+              </span>
+              <svg class="card-menu__trigger-icon card-menu__trigger-icon--mobile" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="5" r="1.75" fill="currentColor"/>
+                <circle cx="12" cy="12" r="1.75" fill="currentColor"/>
+                <circle cx="12" cy="19" r="1.75" fill="currentColor"/>
+              </svg>
             </button>
             <div class="card-menu__panel" hidden role="menu">
               <button
@@ -2053,8 +2113,12 @@
     const groups = groupItems(filtered);
     const html = groups
       .map((group) => {
-        const meta = group.contentType ? TYPE_META[group.contentType] : null;
         const cards = group.items.map(renderCard).join("");
+        if (group.isRatingSorted) {
+          return `<div class="cards cards--rating-sorted">${cards}</div>`;
+        }
+
+        const meta = group.contentType ? TYPE_META[group.contentType] : null;
         const sectionId = group.isAllMatch
           ? `all-match-${group.genre}`
           : group.contentType
@@ -2813,12 +2877,50 @@
     updateBodyScrollLock();
   }
 
+  function resetCardMenuPosition(panel) {
+    if (!panel) return;
+    panel.style.removeProperty("left");
+    panel.style.removeProperty("right");
+    panel.style.removeProperty("top");
+    panel.style.removeProperty("bottom");
+  }
+
+  function positionCardMenuPanel(panel) {
+    if (!panel) return;
+    resetCardMenuPosition(panel);
+    panel.style.right = "0";
+    panel.style.bottom = "calc(100% + 0.25rem)";
+
+    requestAnimationFrame(() => {
+      const margin = 10;
+      let rect = panel.getBoundingClientRect();
+
+      if (rect.left < margin) {
+        panel.style.right = "auto";
+        panel.style.left = "0";
+        rect = panel.getBoundingClientRect();
+      }
+
+      if (rect.right > window.innerWidth - margin) {
+        panel.style.left = "auto";
+        panel.style.right = "0";
+        rect = panel.getBoundingClientRect();
+      }
+
+      if (rect.top < margin) {
+        panel.style.bottom = "auto";
+        panel.style.top = "calc(100% + 0.25rem)";
+      }
+    });
+  }
+
   function closeAllCardMenus(exceptId) {
     els.main?.querySelectorAll(".card-menu__panel:not([hidden])").forEach((panel) => {
       const card = panel.closest(".card");
       const cardId = card?.dataset.id;
       if (exceptId && cardId === exceptId) return;
       panel.hidden = true;
+      resetCardMenuPosition(panel);
       panel
         .closest(".card-menu")
         ?.querySelector(".card-menu__trigger")
@@ -2836,8 +2938,16 @@
 
     const willOpen = panel.hidden;
     closeAllCardMenus(willOpen ? cardId : null);
-    panel.hidden = !willOpen;
-    trigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
+
+    if (willOpen) {
+      panel.hidden = false;
+      positionCardMenuPanel(panel);
+      trigger.setAttribute("aria-expanded", "true");
+    } else {
+      panel.hidden = true;
+      resetCardMenuPosition(panel);
+      trigger.setAttribute("aria-expanded", "false");
+    }
   }
 
   function findDuplicateInItems(items, item) {
@@ -3960,8 +4070,8 @@
       render();
     });
 
-    els.ratingFilterMin?.addEventListener("change", () => {
-      state.ratingFilterMin = els.ratingFilterMin.value || "any";
+    els.ratingFilterSort?.addEventListener("change", () => {
+      state.ratingFilterSort = els.ratingFilterSort.value || "default";
       render();
     });
 
@@ -4595,7 +4705,7 @@
     });
   }
 
-  window.WatchlistApp = { init };
+  window.WatchlistApp = { init, renderExternalRatings };
 
   if (document.getElementById("mainContent")) {
     init();

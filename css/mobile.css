@@ -4,28 +4,391 @@
    ========================================================================== */
 
 @media (max-width: 640px) {
-  /* Keep compact grid cards — only tame long review text in the small card */
-  .card__rating-note {
+  .card {
+    position: relative;
+    cursor: pointer;
+    overflow: hidden;
+  }
+
+  .card:has(.card-menu__panel:not([hidden])) {
+    overflow: visible;
+    z-index: 35;
+  }
+
+  .card__body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+    min-width: 0;
+    min-height: 7rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .card:has(.card-menu__panel:not([hidden])) .card__body {
+    overflow: visible;
+  }
+
+  .card__footer > .card__rating,
+  .card__footer > button.card__rating,
+  .card__footer > .card__footer-badge {
+    display: none !important;
+  }
+
+  .card__watch-status {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    max-width: 100%;
+    padding: 0.16rem 0.42rem;
+    font-size: 0.56rem;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--text-muted, #9ca3af);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+
+  .card__watch-status--watched {
+    color: var(--watched, #4ade80);
+    border-color: rgba(74, 222, 128, 0.28);
+    background: rgba(74, 222, 128, 0.08);
+  }
+
+  .card__watch-rating {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    text-align: left;
+  }
+
+  .card__watch-rating-top {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .card__watch-rating-label {
+    display: block;
+    font-size: 0.48rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: rgba(139, 147, 167, 0.85);
+    white-space: nowrap;
+  }
+
+  .card__watch-rating-score {
+    display: inline-flex;
+    align-items: center;
+    margin-top: 0.08rem;
+    font-size: 0.58rem;
+    font-weight: 700;
+    color: var(--accent, #d9b96a);
+    white-space: nowrap;
+  }
+
+  .card__watch-rating-score::before {
+    content: "★";
+    margin-right: 0.12rem;
+    font-size: 0.52rem;
+  }
+
+  .card__watch-rating-note {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 0.1rem 0 0;
+    font-size: 0.52rem;
+    line-height: 1.25;
+    color: var(--text-muted, #9ca3af);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .card__body > .card__rating-badges {
+    display: flex !important;
+    flex-wrap: wrap;
+    justify-content: flex-start !important;
+    align-items: center;
+    gap: 0.28rem;
+    width: 100%;
+    margin: 0.2rem 0 0.32rem;
+    min-height: 0;
+  }
+
+  .card__body > .card__rating-badges .card__score {
+    min-height: 1.2rem;
+    min-width: 0;
+    padding: 0.1rem 0.3rem 0.1rem 0.38rem;
+    gap: 0.22rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  }
+
+  .card__body > .card__rating-badges .card__score-value {
+    font-size: 0.6rem;
+    font-weight: 800;
+  }
+
+  .card__body > .card__rating-badges .card__score-logo--imdb {
+    height: 0.52rem;
+  }
+
+  .card__body > .card__rating-badges .card__score-logo--anilist {
+    height: 0.58rem;
+  }
+
+  .cards,
+  .app[data-layout="poster"] .cards,
+  .app[data-layout="hover"] .cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+  }
+
+  .card__summary {
+    flex: 1;
+    margin-bottom: 0.12rem;
+    font-size: 0.62rem;
+    line-height: 1.32;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    line-clamp: 2;
-    word-break: break-word;
   }
 
-  .card__rating--rated {
-    overflow: hidden;
+  .card__footer {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
+    margin-top: 0.2rem;
+    padding: 0.38rem 0.28rem 0.32rem 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .card__footer-mobile {
+    display: flex;
+    flex: 1;
+    align-items: center;
     min-width: 0;
   }
 
-  /* Hint that cards open a detail view (not an external link) */
-  .card {
-    cursor: pointer;
+  .card-menu {
+    position: relative;
+    top: auto;
+    right: auto;
+    z-index: 5;
+    transform: none;
+    flex-shrink: 0;
+    margin-left: auto;
+  }
+
+  .card-menu__trigger-icon--desktop {
+    display: none !important;
+  }
+
+  .card-menu__trigger-icon--mobile {
+    display: block !important;
+    width: 0.95rem;
+    height: 0.95rem;
+  }
+
+  .card-menu__trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.65rem;
+    height: 1.65rem;
+    min-height: 0;
+    padding: 0;
+    flex-shrink: 0;
+    border-radius: 6px;
+  }
+
+  .card__footer:has(.card__watch-rating) .card__footer-mobile {
+    display: block;
+    width: 100%;
+  }
+
+  .card-menu__panel {
+    top: auto;
+    right: 0;
+    bottom: calc(100% + 0.25rem);
+    min-width: 0;
+    width: max-content;
+    max-width: min(10.5rem, calc(100vw - 1.25rem));
+    padding: 0.18rem;
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+    z-index: 60;
+  }
+
+  .card-menu__item {
+    padding: 0.38rem 0.48rem;
+    font-size: 0.72rem;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .card__overlay .badge--movie,
+  .card__overlay .badge--tvSeries,
+  .card__overlay .badge--series,
+  .card__overlay .badge--anime,
+  .card__overlay .badge--franchise {
+    font-weight: 700;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    box-shadow: none;
+    backdrop-filter: blur(3px);
+  }
+
+  .card__overlay .badge--genre-primary,
+  .card__overlay .badge--genre-secondary {
+    display: inline-flex;
+    color: #f3f4f6;
+    background: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-shadow: none;
+    box-shadow: none;
+  }
+
+  .card__overlay .badge {
+    padding: 0.08rem 0.26rem;
+    font-size: 0.44rem;
+    border-radius: 999px;
+    line-height: 1.2;
+  }
+
+  .card__overlay .card__badges {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.12rem;
+    max-width: calc(100% - 1.35rem);
+  }
+
+  .card__overlay .card__type-row,
+  .card__overlay .card__genre-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.1rem;
+    max-width: 100%;
+  }
+
+  .app[data-layout="hover"] .card__head .card__badges {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .app[data-layout="hover"] .card__head .card__type-row,
+  .app[data-layout="hover"] .card__head .card__genre-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.12rem;
+  }
+
+  .card:not(:has(.card__media)) .badge--genre-primary {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--border-strong);
+    text-shadow: none;
+  }
+
+  .card:not(:has(.card__media)) .badge--genre-secondary {
+    display: inline-flex;
+  }
+
+  .genre-section {
+    margin-bottom: 0.85rem;
+  }
+
+  .genre-section__header {
+    margin-bottom: 0.35rem;
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+
+  .genre-section__bar {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
+    padding: 0.32rem 0.5rem;
+    border-radius: 8px;
+    box-shadow: none;
+  }
+
+  .genre-section__bar:has(.genre-section__badges:not(:empty)) {
+    flex-wrap: wrap;
+  }
+
+  .genre-section__title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 0.88rem;
+    line-height: 1.2;
+  }
+
+  .genre-section__count {
+    flex: 0 0 auto;
+    margin-left: auto;
+    width: auto;
+    padding: 0.12rem 0.38rem;
+    font-size: 0.56rem;
+    letter-spacing: 0.04em;
+  }
+
+  .genre-section__type {
+    padding: 0.12rem 0.38rem;
+    font-size: 0.54rem;
   }
 
   .card--linked:hover .card__title {
     color: inherit;
+  }
+
+  /* iOS keeps :hover after tap — keep active tab label readable in dark mode */
+  .add-mode-tab--active,
+  .add-mode-tab--active:hover,
+  .add-mode-tab--active:focus,
+  .add-mode-tab--active:focus-visible {
+    color: #060607;
+    -webkit-text-fill-color: #060607;
+  }
+
+  html[data-theme="light"] .add-mode-tab--active,
+  html[data-theme="light"] .add-mode-tab--active:hover,
+  html[data-theme="light"] .add-mode-tab--active:focus,
+  html[data-theme="light"] .add-mode-tab--active:focus-visible {
+    color: #fff;
+    -webkit-text-fill-color: #fff;
+  }
+
+  html[data-theme="purple"] .add-mode-tab--active,
+  html[data-theme="purple"] .add-mode-tab--active:hover,
+  html[data-theme="purple"] .add-mode-tab--active:focus,
+  html[data-theme="purple"] .add-mode-tab--active:focus-visible {
+    color: #1a0828;
+    -webkit-text-fill-color: #1a0828;
+  }
+
+  html[data-theme="brown"] .add-mode-tab--active,
+  html[data-theme="brown"] .add-mode-tab--active:hover,
+  html[data-theme="brown"] .add-mode-tab--active:focus,
+  html[data-theme="brown"] .add-mode-tab--active:focus-visible {
+    color: #2a1e12;
+    -webkit-text-fill-color: #2a1e12;
   }
 }
 
@@ -81,12 +444,29 @@
   height: 2rem;
   padding: 0;
   font-size: 1.35rem;
+  font-weight: 700;
   line-height: 1;
-  color: var(--text, #f3f4f6);
-  background: rgba(0, 0, 0, 0.45);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  color: #ffffff;
+  background: #dc2626;
+  border: 2px solid #fecaca;
   border-radius: 999px;
   cursor: pointer;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.45);
+}
+
+.mobile-card-focus__close:hover,
+.mobile-card-focus__close:focus-visible {
+  background: #b91c1c;
+  outline: none;
+}
+
+.mobile-card-focus__scores .card__rating-badges {
+  display: flex !important;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 0.45rem;
+  margin: 0;
+  min-height: 0;
 }
 
 .mobile-card-focus__scroll {
@@ -158,12 +538,55 @@
   color: var(--text-muted, #9ca3af);
 }
 
+.mobile-card-focus__scores {
+  margin-bottom: 0.75rem;
+}
+
+.mobile-card-focus__scores .card__score {
+  min-height: 2rem;
+  min-width: 5rem;
+  padding: 0.18rem 0.5rem 0.18rem 0.65rem;
+}
+
+.mobile-card-focus__scores .card__score-value {
+  font-size: 0.82rem;
+}
+
+.mobile-card-focus__scores .card__score-logo--imdb {
+  height: 0.88rem;
+}
+
+.mobile-card-focus__scores .card__score-logo--anilist {
+  height: 1rem;
+}
+
 .mobile-card-focus__rating {
   margin-bottom: 0.5rem;
   padding: 0.65rem 0.75rem;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+}
+
+.mobile-card-focus__rating-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.mobile-card-focus__rating-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(139, 147, 167, 0.8);
+}
+
+.mobile-card-focus__rating-top + .mobile-card-focus__rating-note {
+  margin-top: 0.5rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.1));
 }
 
 .mobile-card-focus__rating-score {

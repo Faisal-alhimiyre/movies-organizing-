@@ -189,6 +189,13 @@ html[data-theme="light"] .add-mode-tab--active {
   background: #1c1c20;
 }
 
+html[data-theme="light"] .add-mode-tab--active:hover,
+html[data-theme="light"] .add-mode-tab--active:focus,
+html[data-theme="light"] .add-mode-tab--active:focus-visible {
+  color: #fff;
+  background: #1c1c20;
+}
+
 html[data-theme="light"] .add-panel-hint {
   background: rgba(138, 109, 66, 0.06);
 }
@@ -243,4 +250,9 @@ html[data-theme="light"] .theme-option:focus-visible {
 
 html[data-theme="light"] .genre-chip--filter {
   border-color: rgba(138, 109, 66, 0.25);
+}
+
+html[data-theme="light"] .gate__toggle-password:hover,
+html[data-theme="light"] .gate__toggle-password:focus-visible {
+  background: rgba(0, 0, 0, 0.06);
 }

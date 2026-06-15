@@ -617,6 +617,13 @@ select option:hover,
   background: var(--text);
 }
 
+.add-mode-tab--active:hover,
+.add-mode-tab--active:focus,
+.add-mode-tab--active:focus-visible {
+  color: var(--bg);
+  background: var(--text);
+}
+
 .add-panel-hint {
   font-weight: 400;
   font-size: 0.9rem;
@@ -677,10 +684,26 @@ select option:hover,
   margin-top: 0.85rem;
 }
 
-.gate__lang {
-  display: flex;
-  gap: 0.4rem;
-  margin-top: 0.75rem;
+.gate__toolbar {
+  justify-content: flex-start;
+}
+
+html[dir="rtl"] .gate__toolbar {
+  justify-content: flex-end;
+}
+
+.gate__theme-row {
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border-strong);
+}
+
+.gate__lang--compact {
+  margin-top: 0;
+}
+
+.gate__lang-btn--icon {
+  border: 1px solid var(--border);
 }
 
 /* — Theme modal — */

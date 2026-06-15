@@ -58,16 +58,14 @@
       "filter.byGenre": "Filter by genre",
       "filter.byWatched": "Filter by watched status",
       "filter.byRating": "Filter by rating type",
-      "filter.ratingMin": "Minimum rating",
+      "filter.ratingSort": "Sort by rating",
+      "filter.ratingSortDefault": "Default order",
+      "filter.ratingSortBest": "Highest rating",
+      "filter.ratingSortWorst": "Lowest rating",
       "filter.allRatings": "All ratings",
       "filter.ratingImdb": "IMDb",
       "filter.ratingAnilist": "AniList",
       "filter.ratingPersonal": "My rating",
-      "filter.ratingAny": "Any score",
-      "filter.rating6": "6+",
-      "filter.rating7": "7+",
-      "filter.rating8": "8+",
-      "filter.rating9": "9+",
       "layout.hover": "Preview on hover",
       "layout.poster": "Show poster images",
       "layout.toolbar": "Card layout",
@@ -124,12 +122,17 @@
       "type.filmSeries": "Film series",
       "type.series": "TV Series",
       "card.notWatched": "Not watched",
+      "card.notWatchedShort": "Unwatched",
+      "card.watched": "Watched",
       "card.yourRating": "Your rating",
       "card.rate": "Rate",
       "card.markWatched": "Mark watched",
       "card.markUnwatched": "Mark unwatched",
+      "card.markWatchedShort": "Mark watched",
+      "card.markUnwatchedShort": "Unwatch",
       "card.edit": "Edit",
       "card.moveToList": "Move to another list",
+      "card.moveToListShort": "Move list",
       "card.delete": "Delete",
       "card.actions": "Title actions",
       "card.openLink": "Open link",
@@ -209,7 +212,7 @@
       "create.editList": "Edit list",
       "move.title": "Move to another list",
       "move.text":
-        'Copy "{title}" to another list. Your current list stays unchanged.',
+        'Duplicate "{title}" to another list. Current list stays unchanged.',
       "move.empty": "Create another list first.",
       "import.title": "Import a list",
       "import.hint":
@@ -253,8 +256,13 @@
       "gate.openList": "Open list",
       "gate.newList": "New list",
       "gate.access": "List access",
-      "gate.hint":
-        "6+ characters, letters and numbers, no spaces. Capitals don't matter.",
+      "gate.rulesLabel": "Code requirements",
+      "gate.ruleLength": "6+ characters",
+      "gate.ruleChars": "Letters and numbers",
+      "gate.ruleSpaces": "No spaces",
+      "gate.ruleCaps": "Capitalization doesn't matter",
+      "gate.showCode": "Show code",
+      "gate.hideCode": "Hide code",
       "gate.yourCode": "Your code",
       "gate.chooseCode": "Choose a code",
       "gate.confirmCode": "Confirm code",
@@ -450,16 +458,14 @@
       "filter.byGenre": "تصفية حسب التصنيف",
       "filter.byWatched": "تصفية حسب حالة المشاهدة",
       "filter.byRating": "تصفية حسب نوع التقييم",
-      "filter.ratingMin": "الحد الأدنى للتقييم",
+      "filter.ratingSort": "ترتيب حسب التقييم",
+      "filter.ratingSortDefault": "الترتيب الافتراضي",
+      "filter.ratingSortBest": "أعلى تقييم",
+      "filter.ratingSortWorst": "أقل تقييم",
       "filter.allRatings": "كل التقييمات",
       "filter.ratingImdb": "IMDb",
       "filter.ratingAnilist": "AniList",
       "filter.ratingPersonal": "تقييمي",
-      "filter.ratingAny": "أي تقييم",
-      "filter.rating6": "6+",
-      "filter.rating7": "7+",
-      "filter.rating8": "8+",
-      "filter.rating9": "9+",
       "layout.hover": "معاينة عند التمرير",
       "layout.poster": "عرض صور الغلاف",
       "layout.toolbar": "شكل البطاقات",
@@ -516,12 +522,17 @@
       "type.filmSeries": "سلسلة أفلام",
       "type.series": "مسلسل",
       "card.notWatched": "لم تُشاهد",
+      "card.notWatchedShort": "غير مشاهد",
+      "card.watched": "مشاهد",
       "card.yourRating": "تقييمك",
       "card.rate": "قيّم",
       "card.markWatched": "تعيين كمشاهد",
       "card.markUnwatched": "تعيين كغير مشاهد",
+      "card.markWatchedShort": "مشاهد",
+      "card.markUnwatchedShort": "إلغاء",
       "card.edit": "تعديل",
       "card.moveToList": "نقل لقائمة أخرى",
+      "card.moveToListShort": "نقل",
       "card.delete": "حذف",
       "card.actions": "إجراءات العنوان",
       "card.openLink": "فتح الرابط",
@@ -600,7 +611,7 @@
       "create.newList": "قائمة جديدة",
       "create.editList": "تعديل القائمة",
       "move.title": "نقل لقائمة أخرى",
-      "move.text": 'نسخ "{title}" إلى قائمة أخرى. قائمتك الحالية تبقى كما هي.',
+      "move.text": 'تكرار "{title}" في قائمة أخرى. القائمة الحالية تبقى كما هي.',
       "move.empty": "أنشئ قائمة أخرى أولاً.",
       "import.title": "استيراد قائمة",
       "import.hint":
@@ -644,8 +655,13 @@
       "gate.openList": "فتح قائمة",
       "gate.newList": "قائمة جديدة",
       "gate.access": "الوصول للقائمة",
-      "gate.hint":
-        "6 أحرف أو أكثر، حروف وأرقام، بدون مسافات. الأحرف الكبيرة لا تهم.",
+      "gate.rulesLabel": "متطلبات الرمز",
+      "gate.ruleLength": "6 أحرف أو أكثر",
+      "gate.ruleChars": "حروف وأرقام",
+      "gate.ruleSpaces": "بدون مسافات",
+      "gate.ruleCaps": "حالة الأحرف لا تهم",
+      "gate.showCode": "إظهار الرمز",
+      "gate.hideCode": "إخفاء الرمز",
       "gate.yourCode": "رمزك",
       "gate.chooseCode": "اختر رمزاً",
       "gate.confirmCode": "تأكيد الرمز",
@@ -935,7 +951,7 @@
     setAria("#genreSelect", "filter.byGenre");
     setAria("#watchedFilter", "filter.byWatched");
     setAria("#ratingFilterSource", "filter.byRating");
-    setAria("#ratingFilterMin", "filter.ratingMin");
+    setAria("#ratingFilterSort", "filter.ratingSort");
 
     const ratingSource = document.getElementById("ratingFilterSource");
     if (ratingSource?.options?.length >= 4) {
@@ -943,6 +959,13 @@
       ratingSource.options[1].textContent = t("filter.ratingImdb");
       ratingSource.options[2].textContent = t("filter.ratingAnilist");
       ratingSource.options[3].textContent = t("filter.ratingPersonal");
+    }
+
+    const ratingSort = document.getElementById("ratingFilterSort");
+    if (ratingSort?.options?.length >= 3) {
+      ratingSort.options[0].textContent = t("filter.ratingSortDefault");
+      ratingSort.options[1].textContent = t("filter.ratingSortBest");
+      ratingSort.options[2].textContent = t("filter.ratingSortWorst");
     }
 
     const watched = document.getElementById("watchedFilter");
@@ -1126,15 +1149,29 @@
     setText(".gate__mode[data-mode='open']", "gate.openList");
     setText(".gate__mode[data-mode='create']", "gate.newList");
     setAria(".gate__modes", "gate.access");
-    document.querySelectorAll(".gate__hint").forEach((el) => {
-      el.textContent = t("gate.hint");
+    const ruleKeys = [
+      "gate.ruleLength",
+      "gate.ruleChars",
+      "gate.ruleSpaces",
+    ];
+    const rulesList = document.getElementById("createCodeRules");
+    if (rulesList) {
+      setAria(rulesList, "gate.rulesLabel");
+      rulesList.querySelectorAll(".gate__rule").forEach((item, index) => {
+        if (ruleKeys[index]) item.textContent = t(ruleKeys[index]);
+      });
+    }
+    setText("#createCodeHint", "gate.ruleCaps");
+    document.querySelectorAll("[data-action='toggle-password']").forEach((btn) => {
+      const pressed = btn.getAttribute("aria-pressed") === "true";
+      btn.setAttribute("aria-label", t(pressed ? "gate.hideCode" : "gate.showCode"));
     });
     setPlaceholder("#openCode", "gate.yourCode");
     setPlaceholder("#createCode", "gate.chooseCode");
     setPlaceholder("#confirmCode", "gate.confirmCode");
     setText("#openForm .gate__submit", "gate.open");
     setText("#createForm .gate__submit", "gate.createList");
-    setText("[data-action='open-theme']", "menu.theme");
+    setText(".gate__theme-label", "menu.theme");
     setText("#themeModalTitle", "menu.theme");
     setText("#themeModalIntro", "theme.modalIntro");
     document.querySelectorAll("[data-theme-label]").forEach((el) => {
@@ -1145,7 +1182,7 @@
     window.WatchlistThemes?.applyThemeUi?.();
     document.title = t("gate.title");
     document.querySelectorAll("[data-action='set-language']").forEach((btn) => {
-      btn.classList.toggle("account-menu__lang-btn--active", btn.dataset.lang === getLang());
+      btn.classList.toggle("gate__lang-btn--active", btn.dataset.lang === getLang());
     });
   }
 

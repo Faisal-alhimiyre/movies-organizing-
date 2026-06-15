@@ -70,6 +70,8 @@
                 lead: leads.join(", "),
                 secondaryGenres: entry.secondaryGenres || [],
                 link: entry.link || "",
+                imdbRating: entry.imdbRating || "",
+                anilistRating: entry.anilistRating || "",
               };
             }
           }
@@ -151,6 +153,49 @@
     });
   }
 
+  function formatImdbDisplay(value) {
+    const num = Number(String(value ?? "").replace(",", "."));
+    if (!Number.isFinite(num)) return "";
+    return Number.isInteger(num) ? String(num) : num.toFixed(1);
+  }
+
+  function formatAnilistDisplay(value) {
+    const num = Number(String(value ?? "").replace(",", "."));
+    if (!Number.isFinite(num)) return "";
+    const pct = num > 10 ? Math.round(num) : Math.round(num * 10);
+    return `${pct}%`;
+  }
+
+  function renderFocusExternalRatings(item) {
+    if (window.WatchlistApp?.renderExternalRatings) {
+      return window.WatchlistApp.renderExternalRatings(item);
+    }
+
+    const parts = [];
+    const imdb = formatImdbDisplay(item.imdbRating);
+    const anilist = formatAnilistDisplay(item.anilistRating);
+
+    if (imdb) {
+      parts.push(
+        `<span class="card__score card__score--imdb" title="IMDb ${escapeHtml(imdb)}">
+          <span class="card__score-value">${escapeHtml(imdb)}</span>
+          <img class="card__score-logo card__score-logo--imdb" src="assets/brand/imdb.svg" width="46" height="20" alt="" />
+        </span>`
+      );
+    }
+    if (anilist) {
+      parts.push(
+        `<span class="card__score card__score--anilist" title="AniList ${escapeHtml(anilist)}">
+          <span class="card__score-value">${escapeHtml(anilist)}</span>
+          <img class="card__score-logo card__score-logo--anilist" src="assets/brand/anilist.svg" width="34" height="26" alt="" />
+        </span>`
+      );
+    }
+
+    if (!parts.length) return "";
+    return `<div class="card__rating-badges">${parts.join("")}</div>`;
+  }
+
   function buildFocusMarkup(item, watchEntry) {
     const typeBadge = getTypeBadge(item);
     const secondaryBadges = (item.secondaryGenres || [])
@@ -176,7 +221,10 @@
     let ratingBlock = `<p class="mobile-card-focus__unwatched">${escapeHtml(t("mobile.notWatched"))}</p>`;
     if (watchEntry && hasWatchRating(watchEntry)) {
       ratingBlock = `
-        <span class="mobile-card-focus__rating-score">${escapeHtml(formatRating(watchEntry.rating))}/10</span>
+        <div class="mobile-card-focus__rating-top">
+          <span class="mobile-card-focus__rating-label">${escapeHtml(t("card.yourRating"))}</span>
+          <span class="mobile-card-focus__rating-score">${escapeHtml(formatRating(watchEntry.rating))}/10</span>
+        </div>
         ${
           watchEntry.note
             ? `<p class="mobile-card-focus__rating-note">${escapeHtml(watchEntry.note)}</p>`
@@ -186,6 +234,8 @@
     } else if (watchEntry) {
       ratingBlock = `<p class="mobile-card-focus__unwatched">${escapeHtml(t("mobile.watchedUnrated"))}</p>`;
     }
+
+    const externalScores = renderFocusExternalRatings(item);
 
     return `
       ${poster}
@@ -204,6 +254,7 @@
       </h2>
       ${leadBlock}
       <p class="mobile-card-focus__summary">${escapeHtml(item.summary || "")}</p>
+      ${externalScores ? `<div class="mobile-card-focus__scores">${externalScores}</div>` : ""}
       <div class="mobile-card-focus__rating">${ratingBlock}</div>
     `;
   }

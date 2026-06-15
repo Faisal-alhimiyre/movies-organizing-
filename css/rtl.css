@@ -84,6 +84,29 @@ html[dir="rtl"] .mobile-card-focus__close {
   left: 0.45rem;
 }
 
+html[dir="rtl"] .gate__toolbar {
+  justify-content: flex-end;
+}
+
+html[dir="rtl"] .gate__rule {
+  padding-left: 0;
+  padding-right: 1.2rem;
+}
+
+html[dir="rtl"] .gate__rule::before {
+  left: auto;
+  right: 0;
+}
+
+html[dir="rtl"] .gate__field .gate__input {
+  padding: 0.75rem 0.85rem 0.75rem 2.65rem;
+}
+
+html[dir="rtl"] .gate__toggle-password {
+  right: auto;
+  left: 0.45rem;
+}
+
 html[dir="rtl"] .layout-toggle::after {
   left: auto;
   right: 0;
@@ -126,6 +149,11 @@ html[dir="rtl"] .card__score-value,
 html[dir="rtl"] .rating-picker__value {
   direction: ltr;
   unicode-bidi: isolate;
+}
+
+html[dir="rtl"] .mobile-card-focus__rating-label {
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 html[dir="rtl"] .card__rating-badges {
