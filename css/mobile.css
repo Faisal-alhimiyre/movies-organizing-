@@ -184,14 +184,6 @@
     padding-bottom: 0.5rem;
   }
 
-  html[data-theme="pink"] .card__body {
-    overflow: visible;
-  }
-
-  html[data-theme="pink"] .card__footer {
-    flex-shrink: 0;
-  }
-
   .card:has(.card-menu__panel:not([hidden])) .card__body {
     overflow: visible;
   }
@@ -206,7 +198,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    flex: 0 1 auto;
+    flex: 0 0 auto;
     max-width: 100%;
     min-width: 0;
     overflow: hidden;
@@ -347,20 +339,10 @@
 
   .card__footer-mobile {
     display: flex;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     align-items: center;
     min-width: 0;
     overflow: hidden;
-  }
-
-  html[data-theme="pink"] .card__footer-mobile {
-    overflow: visible;
-  }
-
-  html[data-theme="pink"] .card__watch-status {
-    flex-shrink: 0;
-    overflow: visible;
-    text-overflow: clip;
   }
 
   .card-menu {
@@ -395,8 +377,10 @@
 
   .card__footer:has(.card__watch-rating) .card__footer-mobile {
     display: block;
-    width: 100%;
+    flex: 1 1 auto;
+    width: auto;
     min-width: 0;
+    max-width: calc(100% - 1.82rem);
   }
 
   .card-menu__panel {
