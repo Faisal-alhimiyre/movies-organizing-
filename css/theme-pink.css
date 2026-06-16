@@ -290,6 +290,37 @@ html[data-theme="pink"] .card-menu__trigger {
   color: #ffffff;
 }
 
+html[data-theme="pink"] .card__body {
+  overflow: visible;
+}
+
+html[data-theme="pink"] .card__footer {
+  flex-shrink: 0;
+  margin-top: auto;
+  border-top-color: rgba(255, 130, 170, 0.2);
+}
+
+html[data-theme="pink"] .card__footer-mobile {
+  overflow: visible;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+html[data-theme="pink"] .card__footer-badge--unwatched,
+html[data-theme="pink"] .card__watch-status {
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(36, 6, 20, 0.92);
+  border: 1px solid rgba(255, 150, 185, 0.38);
+  box-shadow: inset 0 1px 0 rgba(255, 200, 218, 0.06);
+}
+
+html[data-theme="pink"] .card__watch-status--watched {
+  color: var(--watched);
+  border-color: rgba(120, 216, 152, 0.35);
+  background: rgba(36, 6, 20, 0.92);
+}
+
 html[data-theme="pink"] .modal__panel,
 html[data-theme="pink"] .app-dialog__panel {
   background: linear-gradient(

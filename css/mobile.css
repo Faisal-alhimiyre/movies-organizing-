@@ -184,6 +184,14 @@
     padding-bottom: 0.5rem;
   }
 
+  html[data-theme="pink"] .card__body {
+    overflow: visible;
+  }
+
+  html[data-theme="pink"] .card__footer {
+    flex-shrink: 0;
+  }
+
   .card:has(.card-menu__panel:not([hidden])) .card__body {
     overflow: visible;
   }
@@ -343,6 +351,16 @@
     align-items: center;
     min-width: 0;
     overflow: hidden;
+  }
+
+  html[data-theme="pink"] .card__footer-mobile {
+    overflow: visible;
+  }
+
+  html[data-theme="pink"] .card__watch-status {
+    flex-shrink: 0;
+    overflow: visible;
+    text-overflow: clip;
   }
 
   .card-menu {
