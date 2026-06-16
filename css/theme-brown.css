@@ -89,12 +89,21 @@ html[data-theme="brown"] .type-tab--active:hover {
 
 html[data-theme="brown"] .search__input,
 html[data-theme="brown"] .filter,
-html[data-theme="brown"] .genre-filter__select,
-html[data-theme="brown"] .select,
 html[data-theme="brown"] .gate__input,
 html[data-theme="brown"] .form-input,
 html[data-theme="brown"] .form-textarea {
-  background: rgba(12, 8, 4, 0.45);
+  background-color: rgba(12, 8, 4, 0.45);
+  border-color: rgba(212, 184, 150, 0.14);
+}
+
+html[data-theme="brown"] .genre-filter__select,
+html[data-theme="brown"] .watched-filter__select,
+html[data-theme="brown"] .rating-filter__select,
+html[data-theme="brown"] .select {
+  background-color: rgba(12, 8, 4, 0.45);
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right 0.65rem center;
   border-color: rgba(212, 184, 150, 0.14);
 }
 

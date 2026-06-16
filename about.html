@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta
+      name="description"
+      content="About Our Movie Nights — personal movie, TV, and anime watchlists."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Our Movie Nights" />
+    <meta property="og:title" content="About — Our Movie Nights" />
+    <meta
+      property="og:description"
+      content="Free personal watchlist app for movies, TV, and anime. Multiple lists, cloud sync, share by link."
+    />
+    <meta property="og:image" content="assets/og/og-image.svg" />
+    <meta property="og:image:type" content="image/svg+xml" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Our Movie Nights — movies, TV, and anime watchlists"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="About — Our Movie Nights" />
+    <meta
+      name="twitter:description"
+      content="Free personal watchlist app for movies, TV, and anime. Multiple lists, cloud sync, share by link."
+    />
+    <meta name="twitter:image" content="assets/og/og-image.svg" />
+    <meta name="theme-color" content="#141416" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Movie Nights" />
+    <title>About — Our Movie Nights</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="assets/icons/icon-maskable.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="assets/icons/icon-maskable.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/theme.css" />
+    <link rel="stylesheet" href="css/theme-light.css" />
+    <link rel="stylesheet" href="css/theme-purple.css" />
+    <link rel="stylesheet" href="css/theme-brown.css" />
+    <link rel="stylesheet" href="css/theme-consistency.css" />
+    <link rel="stylesheet" href="css/typography.css" />
+    <link rel="stylesheet" href="css/reduced-motion.css" />
+    <link rel="stylesheet" href="css/accessibility.css" />
+    <link rel="stylesheet" href="css/rtl.css" />
+    <link rel="stylesheet" href="css/about.css" />
+    <script src="js/themes.js"></script>
+  </head>
+  <body data-page="about">
+    <a href="#aboutMain" class="skip-link">Skip to main content</a>
+    <div class="about-page">
+      <article class="about" id="aboutMain" tabindex="-1">
+        <div class="about__toolbar">
+          <div class="about__lang" role="group" aria-label="Language">
+            <button
+              type="button"
+              class="about__lang-btn"
+              data-action="set-language"
+              data-lang="en"
+            >
+              English
+            </button>
+            <button
+              type="button"
+              class="about__lang-btn"
+              data-action="set-language"
+              data-lang="ar"
+            >
+              العربية
+            </button>
+          </div>
+        </div>
+
+        <h1 class="about__title" data-i18n="about.title">Our Movie Nights</h1>
+        <p class="about__tagline" data-i18n="about.tagline">
+          A free personal watchlist for movies, TV series, and anime — organized by genre, synced to the cloud, and shareable by link.
+        </p>
+
+        <section class="about__section">
+          <h2 data-i18n="about.whatTitle">What you can do</h2>
+          <ul class="about__list">
+            <li data-i18n="about.what1">Build multiple lists per account</li>
+            <li data-i18n="about.what2">Search, paste links, or bulk-add titles</li>
+            <li data-i18n="about.what3">Mark watched, rate, and add private notes</li>
+            <li data-i18n="about.what4">Share a list with a link — recipients import into their own account</li>
+          </ul>
+        </section>
+
+        <section class="about__section">
+          <h2 data-i18n="about.accountTitle">Your account</h2>
+          <p data-i18n="about.accountText">
+            You sign in with a private code you create. Keep it safe — we cannot recover a lost code. Your code is not used for sharing; share links are separate.
+          </p>
+        </section>
+
+        <section class="about__section about__attribution">
+          <h2 data-i18n="about.attributionTitle">Third-party data</h2>
+          <p data-i18n-html="about.tmdbAttribution"></p>
+          <p data-i18n="about.imdbAttribution">
+            Title metadata and posters may come from IMDb via the OMDb API. This product uses these sources for identification only and is not affiliated with IMDb.
+          </p>
+          <p data-i18n="about.anilistAttribution">
+            Anime metadata may come from AniList. This product is not affiliated with AniList.
+          </p>
+        </section>
+
+        <section class="about__section">
+          <h2 data-i18n="about.supportTitle">Support</h2>
+          <p class="about__support">
+            <span data-i18n="about.supportText">Questions or feedback:</span>
+            <a id="aboutSupportLink" href="#" data-i18n="about.supportFallback">See project README</a>
+          </p>
+        </section>
+
+        <div class="about__actions">
+          <button type="button" class="btn btn--primary" data-action="go-app">
+            Open app
+          </button>
+          <a class="btn btn--ghost" href="gate.html" data-i18n="about.backGate">Log in</a>
+        </div>
+      </article>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/i18n.js"></script>
+    <script src="js/accessibility.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/about.js"></script>
+    <script src="js/pwa.js"></script>
+  </body>
+</html>

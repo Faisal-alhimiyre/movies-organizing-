@@ -135,7 +135,23 @@
     setPasswordVisible(targetId, show);
   }
 
-  function setMode(mode) {
+  function getGateTabs() {
+    return [...document.querySelectorAll(".gate__modes [role='tab']")];
+  }
+
+  function updateGateTabIndices(mode) {
+    getGateTabs().forEach((tab) => {
+      tab.tabIndex = tab.dataset.mode === mode ? 0 : -1;
+    });
+  }
+
+  function focusGateTab(tab) {
+    if (!tab?.dataset?.mode) return;
+    setMode(tab.dataset.mode, { focusField: false });
+    tab.focus();
+  }
+
+  function setMode(mode, { focusField = true } = {}) {
     const isCreate = mode === "create";
 
     els.modes.forEach((btn) => {
@@ -147,6 +163,9 @@
     if (els.openForm) els.openForm.hidden = isCreate;
     if (els.createForm) els.createForm.hidden = !isCreate;
     clearInputErrors();
+    updateGateTabIndices(mode);
+
+    if (!focusField) return;
 
     if (isCreate) {
       updateCreateCodeRules();
@@ -221,6 +240,31 @@
   function bindEvents() {
     els.modes.forEach((btn) => {
       btn.addEventListener("click", () => setMode(btn.dataset.mode));
+    });
+
+    document.querySelector(".gate__modes")?.addEventListener("keydown", (event) => {
+      const tabs = getGateTabs();
+      const index = tabs.indexOf(document.activeElement);
+      if (index < 0) return;
+
+      let next = index;
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+        event.preventDefault();
+        next = (index + 1) % tabs.length;
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        event.preventDefault();
+        next = (index - 1 + tabs.length) % tabs.length;
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        next = 0;
+      } else if (event.key === "End") {
+        event.preventDefault();
+        next = tabs.length - 1;
+      } else {
+        return;
+      }
+
+      focusGateTab(tabs[next]);
     });
 
     els.openCode?.addEventListener("input", clearInputErrors);

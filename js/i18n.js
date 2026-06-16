@@ -36,6 +36,7 @@
       "menu.signOut": "Sign out",
       "menu.language": "Language",
       "menu.theme": "Theme",
+      "menu.about": "About",
       "theme.dark": "Dark",
       "theme.light": "Light",
       "theme.purple": "Purple",
@@ -60,6 +61,10 @@
       "filter.byGenre": "Filter by genre (primary or secondary)",
       "filter.byWatched": "Filter by watched status",
       "filter.byRating": "Sort by",
+      "chip.removeFilter": "Remove {genre} filter",
+      "chip.removeGenre": "Remove {genre}",
+      "chip.removeLead": "Remove {name}",
+      "chip.activeFilters": "Active genre filters",
       "filter.ratingOptionAll": "Default order",
       "filter.ratingOptionAddedNewest": "Recently added",
       "filter.ratingOptionAddedOldest": "Oldest first",
@@ -73,22 +78,36 @@
       "layout.poster": "Show poster images",
       "layout.toolbar": "Card layout",
       "panel.contentType": "Content type",
+      "panel.filters": "Filters and search",
       "loading.watchlist": "Loading watchlist…",
+      "a11y.skipToMain": "Skip to main content",
       "footer.hint":
         "Your list is saved on this device. Use Menu → Share to send it to a friend or add theirs.",
       "preview.loading": "Loading preview…",
       "stats.total": "{total} total · {watched} watched{sync}",
       "stats.totalWord": "total",
       "stats.watchedWord": "watched",
-      "sync.savingShort": "Syncing…",
-      "sync.failedShort": "Not backed up yet",
-      "sync.savedShort": "Backed up",
+      "sync.savingShort": "Saving…",
+      "sync.failedShort": "Backup failed",
+      "sync.savedShort": "Saved",
+      "sync.offlineShort": "Offline",
+      "sync.retry": "Retry",
+      "sync.retryAria": "Retry backup",
       "sync.saving": " · saving…",
       "sync.failed": " · save failed",
       "sync.saved": " · saved",
       "empty.noTitles": "Your watchlist is empty",
       "empty.noTitlesHint":
         "Search for a title, add many at once with Multiple titles, or enter details manually.",
+      "empty.firstTitle": "Add your first title",
+      "empty.firstSubtitle": "Pick any way below — you can mix them anytime.",
+      "empty.hintSearch": "Search add — find movies, TV, or anime by name",
+      "empty.hintLink": "Manual add — paste an IMDb or AniList link",
+      "empty.hintBulk": "Multiple titles — paste a list from ChatGPT or notes",
+      "empty.ctaSearch": "Search for a title",
+      "empty.ctaBulk": "Paste multiple titles",
+      "empty.ctaImport": "Import a shared list",
+      "empty.clearFilters": "Clear filters",
       "empty.noMatch": "No titles match your filters",
       "empty.noMatchHint": "Try a different search, genre, or type tab.",
       "empty.ratingLoading": "Loading ratings from IMDb for your list…",
@@ -138,6 +157,8 @@
       "card.markWatchedShort": "Mark watched",
       "card.markUnwatchedShort": "Unwatch",
       "card.edit": "Edit",
+      "card.posterBroken":
+        "Poster unavailable — the link may be broken. Tap Edit to replace the IMDb or AniList link, or delete this title and add it again via Search add.",
       "card.moveToList": "Move to another list",
       "card.moveToListShort": "Move list",
       "card.delete": "Delete",
@@ -167,6 +188,7 @@
       "search.mainGenre": "Main genre",
       "search.noSummary": "No summary available.",
       "search.alreadyOnList": "On your list",
+      "search.pickResult": "{title} — {meta}",
       "manual.hint":
         "<strong>Step 1: Paste your link.</strong> IMDb, AniList, or MyAnimeList. We'll fill in the details for you.",
       "manual.link": "Link",
@@ -200,19 +222,66 @@
         "Your movies stay the same. Only the sign-in code changes. 6+ characters, letters and numbers, no spaces. Capitals don't matter.",
       "changeCode.new": "New code",
       "changeCode.confirm": "Confirm new code",
-      "share.title": "Share lists with friends",
-      "share.tagline": "Share the fun!",
+      "changeCode.codesMismatch": "Codes do not match.",
+      "changeCode.codeInUse": "That code is already in use. Pick another.",
+      "changeCode.cloudFailed": "Could not update cloud account. Try again.",
+      "share.title": "Share a list",
+      "share.tagline": "Send a link — not your account code",
       "share.intro":
-        "Send a link. Your friend opens it, signs in or creates a list, then chooses how to import your titles, ratings, and notes.",
+        "Sharing creates a link anyone can open. They log in with their own account and choose how to import your titles, ratings, and notes.",
+      "share.note":
+        "Your private login code is never included in a share link.",
       "share.sendTitle": "Send my list",
-      "share.sendDesc": "Share a link — titles, watched state, ratings, and your notes",
+      "share.sendDesc": "Create a share link for this list",
       "share.importTitle": "Import a list",
-      "share.importDesc": "Pick a .json file someone sent you",
+      "share.importDesc": "Open a link someone sent you, or pick a .json backup file",
       "share.linkMessage": "My movie list “{name}” — open this link to import it into Our Movie Nights.",
+      "share.arrivalTitle": "Shared list ready to import",
+      "share.arrivalLoading": "Loading shared list…",
+      "share.arrivalText": "“{name}” has {count} titles. Choose how to import it into your account.",
+      "share.arrivalImport": "Review import",
+      "share.arrivalDismiss": "Not now",
+      "share.arrivalExpired": "This share link has expired.",
+      "share.arrivalInvalid": "This share link is invalid or no longer available.",
+      "onboarding.title": "Quick tips",
+      "onboarding.code": "Your login code is private — use it only to open your account on your devices.",
+      "onboarding.share": "To share a list, use Menu → Share and send the link. Never give anyone your code.",
+      "onboarding.sync": "When you're online, your lists back up automatically — nothing to tap or check.",
+      "onboarding.dismiss": "Got it",
+      "about.pageTitle": "About — Our Movie Nights",
+      "about.title": "Our Movie Nights",
+      "about.tagline":
+        "A free personal watchlist for movies, TV series, and anime — organized by genre, synced to the cloud, and shareable by link.",
+      "about.whatTitle": "What you can do",
+      "about.what1": "Build multiple lists per account",
+      "about.what2": "Search, paste links, or bulk-add titles",
+      "about.what3": "Mark watched, rate, and add private notes",
+      "about.what4": "Share a list with a link — recipients import into their own account",
+      "about.accountTitle": "Your account",
+      "about.accountText":
+        "You sign in with a private code you create. Keep it safe — we cannot recover a lost code. Your code is not used for sharing; share links are separate.",
+      "about.attributionTitle": "Third-party data",
+      "about.tmdbAttribution":
+        'This product uses the <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer">TMDB API</a> but is not endorsed or certified by TMDB.',
+      "about.imdbAttribution":
+        "Title metadata and posters may come from IMDb via the OMDb API. This product uses these sources for identification only and is not affiliated with IMDb.",
+      "about.anilistAttribution":
+        "Anime metadata may come from AniList. This product is not affiliated with AniList.",
+      "about.supportTitle": "Support",
+      "about.supportText": "Questions or feedback:",
+      "about.supportFallback": "See project README",
+      "about.backGate": "Log in",
+      "about.openApp": "Open app",
       "share.fileMessage":
         "My watchlist backup. Open Our Movie Nights → Share → Import a list.",
       "manage.title": "Manage lists",
       "manage.create": "Create a new list",
+      "manage.unnamedList": "Unnamed list",
+      "manage.signedInNow": "Signed in now",
+      "manage.switchToList": "Open list",
+      "manage.editListName": "Edit \"{name}\"",
+      "manage.deleteListName": "Delete \"{name}\"",
+      "manage.switchListName": "Open \"{name}\"",
       "create.name": "Name",
       "create.namePlaceholder": "Classic movies",
       "create.about": "About this list",
@@ -243,6 +312,7 @@
       "rating.lower": "Lower rating by 0.1",
       "rating.raise": "Raise rating by 0.1",
       "rating.fineTune": "Fine-tune",
+      "rating.chooseStarFirst": "Tap a star to choose your score first.",
       "rating.note": "Note for yourself",
       "rating.notePlaceholder": "What stood out? Would you watch again?",
       "bulk.headline": "Add many titles at once with your AI",
@@ -259,12 +329,22 @@
         "Copy what your AI returns and paste it here. We'll add every valid title at once.",
       "bulk.pastePlaceholder": "Paste here…",
       "bulk.pasteLabel": "Paste filled list from AI",
+      "bulk.readFailed": "Could not read that paste.",
+      "bulk.allDuplicates": "Every title was already on your list.",
+      "bulk.noneAdded": "No titles could be added.",
+      "bulk.duplicatesSkipped": "{count} duplicate skipped.",
+      "bulk.duplicatesSkippedPlural": "{count} duplicates skipped.",
+      "error.cloudSyncFailed": "Saved locally, but cloud sync failed. Try again.",
+      "error.loadWatchlistFailed": "Could not load watchlist data",
+      "error.loadWatchlistHint": "Try signing out and back in, or clear site data for this page.",
       "dialog.notice": "Notice",
       "dialog.sure": "Are you sure?",
       "gate.title": "Our Movie Nights",
-      "gate.openList": "Open list",
-      "gate.newList": "New list",
-      "gate.access": "List access",
+      "gate.openList": "Log in",
+      "gate.newList": "Create new account",
+      "gate.access": "Account access",
+      "gate.codeSaveWarning":
+        "Write your code down and keep it safe. If you lose it, we cannot recover your account or lists.",
       "gate.rulesLabel": "Code requirements",
       "gate.ruleLength": "6+ characters",
       "gate.ruleChars": "Letters and numbers",
@@ -275,15 +355,15 @@
       "gate.yourCode": "Your code",
       "gate.chooseCode": "Choose a code",
       "gate.confirmCode": "Confirm code",
-      "gate.open": "Open",
-      "gate.createList": "Create list",
+      "gate.open": "Log in",
+      "gate.createList": "Create account",
       "gate.noList":
-        "No list found with this code. Use New list to create one.",
+        "No account found with this code. Use Create new account to sign up.",
       "gate.codesMismatch": "Codes do not match.",
       "gate.codeExists":
-        "A list with this code already exists. Use Open list instead.",
+        "An account with this code already exists. Use Log in instead.",
       "gate.deleted":
-        "Account deleted. You can create a new list with the same code.",
+        "Account deleted. You can create a new account with the same code.",
       "auth.spaces": "Spaces are not allowed.",
       "auth.minLength": "Use at least {n} characters.",
       "auth.needLetter": "Use at least one letter.",
@@ -356,7 +436,11 @@
         "Created locally, but cloud sync failed. Your new list is on this device.",
       "alert.savedLocally":
         "Saved on this device, but cloud sync failed. Your changes are still here locally.",
-      "alert.savedLocallyTitle": "Saved locally",
+      "alert.cloudSyncFailed":
+        "Your changes are on this device, but backup failed. Check your connection and tap Retry in the header.",
+      "alert.cloudSyncFailedDelete":
+        "Removed on this device, but backup didn't update. Tap Retry when you're back online.",
+      "alert.savedLocallyTitle": "On this device only",
       "alert.listShared":
         "If the share finished, your friend can open the link, sign in, and import your list.",
       "alert.listSharedTitle": "List shared",
@@ -448,6 +532,7 @@
       "menu.signOut": "تسجيل الخروج",
       "menu.language": "اللغة",
       "menu.theme": "المظهر",
+      "menu.about": "حول التطبيق",
       "theme.dark": "داكن",
       "theme.light": "فاتح",
       "theme.purple": "بنفسجي",
@@ -472,6 +557,10 @@
       "filter.byGenre": "تصفية حسب التصنيف (رئيسي أو ثانوي)",
       "filter.byWatched": "تصفية حسب حالة المشاهدة",
       "filter.byRating": "ترتيب حسب",
+      "chip.removeFilter": "إزالة تصنيف {genre}",
+      "chip.removeGenre": "إزالة {genre}",
+      "chip.removeLead": "إزالة {name}",
+      "chip.activeFilters": "تصنيفات التصفية النشطة",
       "filter.ratingOptionAll": "الترتيب الافتراضي",
       "filter.ratingOptionAddedNewest": "المضاف مؤخراً",
       "filter.ratingOptionAddedOldest": "الأقدم أولاً",
@@ -485,22 +574,36 @@
       "layout.poster": "عرض صور الغلاف",
       "layout.toolbar": "شكل البطاقات",
       "panel.contentType": "نوع المحتوى",
+      "panel.filters": "التصفية والبحث",
       "loading.watchlist": "جاري تحميل القائمة…",
+      "a11y.skipToMain": "تخطي إلى المحتوى الرئيسي",
       "footer.hint":
         "قائمتك محفوظة على هذا الجهاز. من القائمة → مشاركة لإرسالها لصديق أو إضافة قائمته.",
       "preview.loading": "جاري تحميل المعاينة…",
       "stats.total": "{total} إجمالي · {watched} تمت مشاهدتها{sync}",
       "stats.totalWord": "إجمالي",
       "stats.watchedWord": "تمت مشاهدتها",
-      "sync.savingShort": "جاري المزامنة…",
-      "sync.failedShort": "لم تُنسخ للسحابة بعد",
-      "sync.savedShort": "نسخة سحابية",
+      "sync.savingShort": "جاري الحفظ…",
+      "sync.failedShort": "فشل النسخ الاحتياطي",
+      "sync.savedShort": "تم الحفظ",
+      "sync.offlineShort": "غير متصل",
+      "sync.retry": "إعادة المحاولة",
+      "sync.retryAria": "إعادة محاولة النسخ الاحتياطي",
       "sync.saving": " · جاري الحفظ…",
       "sync.failed": " · فشل الحفظ",
       "sync.saved": " · تم الحفظ",
       "empty.noTitles": "قائمتك فارغة",
       "empty.noTitlesHint":
         "ابحث عن عنوان، أو أضف عدة عناوين دفعة واحدة، أو أدخل التفاصيل يدوياً.",
+      "empty.firstTitle": "أضف عنوانك الأول",
+      "empty.firstSubtitle": "اختر أي طريقة — يمكنك الجمع بينها في أي وقت.",
+      "empty.hintSearch": "إضافة بالبحث — ابحث عن أفلام أو مسلسلات أو أنمي بالاسم",
+      "empty.hintLink": "إضافة يدوية — الصق رابط IMDb أو AniList",
+      "empty.hintBulk": "عناوين متعددة — الصق قائمة من ChatGPT أو ملاحظاتك",
+      "empty.ctaSearch": "ابحث عن عنوان",
+      "empty.ctaBulk": "الصق عدة عناوين",
+      "empty.ctaImport": "استيراد قائمة مشتركة",
+      "empty.clearFilters": "مسح التصفية",
       "empty.noMatch": "لا توجد عناوين تطابق التصفية",
       "empty.noMatchHint": "جرّب بحثاً أو تصنيفاً أو تبويباً مختلفاً.",
       "empty.ratingLoading": "جاري تحميل التقييمات من IMDb لقائمتك…",
@@ -550,6 +653,8 @@
       "card.markWatchedShort": "مشاهد",
       "card.markUnwatchedShort": "إلغاء",
       "card.edit": "تعديل",
+      "card.posterBroken":
+        "الغلاف غير متاح — قد يكون الرابط معطلاً. اضغط تعديل لاستبدال رابط IMDb أو AniList، أو احذف العنوان وأضفه مجدداً عبر البحث.",
       "card.moveToList": "نقل لقائمة أخرى",
       "card.moveToListShort": "نقل",
       "card.delete": "حذف",
@@ -579,6 +684,7 @@
       "search.mainGenre": "التصنيف الرئيسي",
       "search.noSummary": "لا يوجد ملخص.",
       "search.alreadyOnList": "في قائمتك",
+      "search.pickResult": "{title} — {meta}",
       "manual.hint":
         "<strong>الخطوة 1: الصق الرابط.</strong> IMDb أو AniList أو MyAnimeList. سنملأ التفاصيل لك.",
       "manual.link": "الرابط",
@@ -612,19 +718,65 @@
         "أفلامك تبقى كما هي. يتغير رمز الدخول فقط. 6 أحرف أو أكثر، حروف وأرقام، بدون مسافات. الأحرف الكبيرة لا تهم.",
       "changeCode.new": "الرمز الجديد",
       "changeCode.confirm": "تأكيد الرمز الجديد",
-      "share.title": "مشاركة القوائم مع الأصدقاء",
-      "share.tagline": "شاركوا المتعة!",
+      "changeCode.codesMismatch": "الرموز غير متطابقة.",
+      "changeCode.codeInUse": "هذا الرمز مستخدم بالفعل. اختر رمزاً آخر.",
+      "changeCode.cloudFailed": "تعذر تحديث الحساب في السحابة. حاول مرة أخرى.",
+      "share.title": "مشاركة قائمة",
+      "share.tagline": "أرسل رابطاً — وليس رمز حسابك",
       "share.intro":
-        "أرسل رابطاً. يفتحه صديقك، يسجّل الدخول أو ينشئ قائمة، ثم يختار كيف يستورد عناوينك وتقييماتك وملاحظاتك.",
+        "المشاركة تنشئ رابطاً يمكن لأي شخص فتحه. يسجل الدخول بحسابه ويختار كيفية استيراد العناوين والتقييمات والملاحظات.",
+      "share.note": "رمز الدخول الخاص بك لا يُرسل أبداً في رابط المشاركة.",
       "share.sendTitle": "إرسال قائمتي",
-      "share.sendDesc": "مشاركة رابط — العناوين وحالة المشاهدة والتقييمات وملاحظاتك",
+      "share.sendDesc": "إنشاء رابط مشاركة لهذه القائمة",
       "share.importTitle": "استيراد قائمة",
-      "share.importDesc": "اختر ملف .json أرسله لك أحدهم",
+      "share.importDesc": "افتح رابطاً أرسله لك أحدهم، أو اختر ملف نسخ احتياطي .json",
       "share.linkMessage": "قائمتي «{name}» — افتح هذا الرابط لاستيرادها في Our Movie Nights.",
+      "share.arrivalTitle": "قائمة مشتركة جاهزة للاستيراد",
+      "share.arrivalLoading": "جاري تحميل القائمة المشتركة…",
+      "share.arrivalText": "«{name}» تحتوي على {count} عنواناً. اختر كيف تستوردها إلى حسابك.",
+      "share.arrivalImport": "مراجعة الاستيراد",
+      "share.arrivalDismiss": "ليس الآن",
+      "share.arrivalExpired": "انتهت صلاحية رابط المشاركة.",
+      "share.arrivalInvalid": "رابط المشاركة غير صالح أو لم يعد متاحاً.",
+      "onboarding.title": "نصائح سريعة",
+      "onboarding.code": "رمز الدخول خاص بك — استخدمه فقط لفتح حسابك على أجهزتك.",
+      "onboarding.share": "لمشاركة قائمة، استخدم القائمة → مشاركة وأرسل الرابط. لا تعطِ أحداً رمزك.",
+      "onboarding.sync": "عند اتصالك بالإنترنت، تُنسخ قوائمك تلقائياً — لا حاجة لأي إجراء منك.",
+      "onboarding.dismiss": "فهمت",
+      "about.pageTitle": "حول — ليالينا السينمائية",
+      "about.title": "ليالينا السينمائية",
+      "about.tagline":
+        "قائمة مشاهدة شخصية مجانية للأفلام والمسلسلات والأنمي — مرتبة حسب التصنيف، متزامنة مع السحابة، وقابلة للمشاركة برابط.",
+      "about.whatTitle": "ماذا يمكنك أن تفعل",
+      "about.what1": "إنشاء عدة قوائم لكل حساب",
+      "about.what2": "البحث أو لصق الروابط أو إضافة عناوين دفعة واحدة",
+      "about.what3": "تعليم المشاهدة والتقييم وملاحظات خاصة",
+      "about.what4": "مشاركة قائمة برابط — المستلم يستوردها إلى حسابه",
+      "about.accountTitle": "حسابك",
+      "about.accountText":
+        "تسجّل الدخول برمز خاص تنشئه أنت. احتفظ به بأمان — لا يمكننا استعادة رمز مفقود. الرمز لا يُستخدم للمشاركة؛ روابط المشاركة منفصلة.",
+      "about.attributionTitle": "بيانات طرف ثالث",
+      "about.tmdbAttribution":
+        'يستخدم هذا المنتج <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer">واجهة TMDB</a> دون اعتماد أو تصديق من TMDB.',
+      "about.imdbAttribution":
+        "قد تأتي بيانات العناوين والأغلفة من IMDb عبر OMDb. يُستخدم المصدر للتعريف فقط وليس هناك ارتباط بـ IMDb.",
+      "about.anilistAttribution":
+        "قد تأتي بيانات الأنمي من AniList. هذا المنتج غير تابع لـ AniList.",
+      "about.supportTitle": "الدعم",
+      "about.supportText": "أسئلة أو ملاحظات:",
+      "about.supportFallback": "راجع README للمشروع",
+      "about.backGate": "تسجيل الدخول",
+      "about.openApp": "فتح التطبيق",
       "share.fileMessage":
         "نسخة احتياطية من قائمتي. افتح Our Movie Nights ← مشاركة ← استيراد قائمة.",
       "manage.title": "إدارة القوائم",
       "manage.create": "إنشاء قائمة جديدة",
+      "manage.unnamedList": "قائمة بدون اسم",
+      "manage.signedInNow": "مسجل الدخول الآن",
+      "manage.switchToList": "فتح القائمة",
+      "manage.editListName": "تعديل «{name}»",
+      "manage.deleteListName": "حذف «{name}»",
+      "manage.switchListName": "فتح «{name}»",
       "create.name": "الاسم",
       "create.namePlaceholder": "أفلام كلاسيكية",
       "create.about": "عن هذه القائمة",
@@ -654,6 +806,7 @@
       "rating.lower": "خفض التقييم 0.1",
       "rating.raise": "رفع التقييم 0.1",
       "rating.fineTune": "ضبط دقيق",
+      "rating.chooseStarFirst": "اضغط نجمة لاختيار التقييم أولاً.",
       "rating.note": "ملاحظة لنفسك",
       "rating.notePlaceholder": "ما الذي لفت انتباهك؟ هل ستشاهده مرة أخرى؟",
       "bulk.headline": "أضف عدة عناوين دفعة واحدة بالذكاء الاصطناعي",
@@ -670,12 +823,22 @@
         "انسخ ما أعاده الذكاء الاصطناعي والصقه هنا. سنضيف كل عنوان صالح دفعة واحدة.",
       "bulk.pastePlaceholder": "الصق هنا…",
       "bulk.pasteLabel": "الصق القائمة المعبأة من الذكاء الاصطناعي",
+      "bulk.readFailed": "تعذر قراءة ما لصقته.",
+      "bulk.allDuplicates": "كل العناوين موجودة في قائمتك بالفعل.",
+      "bulk.noneAdded": "لم يُضف أي عنوان.",
+      "bulk.duplicatesSkipped": "تم تخطي {count} مكرر.",
+      "bulk.duplicatesSkippedPlural": "تم تخطي {count} عنوان مكرر.",
+      "error.cloudSyncFailed": "حُفظ محلياً، لكن فشلت المزامنة مع السحابة. حاول مرة أخرى.",
+      "error.loadWatchlistFailed": "تعذر تحميل بيانات القائمة",
+      "error.loadWatchlistHint": "جرّب تسجيل الخروج والدخول مجدداً، أو امسح بيانات الموقع لهذه الصفحة.",
       "dialog.notice": "تنبيه",
       "dialog.sure": "هل أنت متأكد؟",
       "gate.title": "ليالينا السينمائية",
-      "gate.openList": "فتح قائمة",
-      "gate.newList": "قائمة جديدة",
-      "gate.access": "الوصول للقائمة",
+      "gate.openList": "تسجيل الدخول",
+      "gate.newList": "إنشاء حساب جديد",
+      "gate.access": "الدخول إلى الحساب",
+      "gate.codeSaveWarning":
+        "اكتب رمزك واحتفظ به في مكان آمن. إذا فقدته، لا يمكننا استعادة حسابك أو قوائمك.",
       "gate.rulesLabel": "متطلبات الرمز",
       "gate.ruleLength": "6 أحرف أو أكثر",
       "gate.ruleChars": "حروف وأرقام",
@@ -686,12 +849,12 @@
       "gate.yourCode": "رمزك",
       "gate.chooseCode": "اختر رمزاً",
       "gate.confirmCode": "تأكيد الرمز",
-      "gate.open": "فتح",
-      "gate.createList": "إنشاء قائمة",
-      "gate.noList": "لا توجد قائمة بهذا الرمز. أنشئ قائمة جديدة.",
+      "gate.open": "تسجيل الدخول",
+      "gate.createList": "إنشاء حساب",
+      "gate.noList": "لا يوجد حساب بهذا الرمز. أنشئ حساباً جديداً.",
       "gate.codesMismatch": "الرمزان غير متطابقين.",
-      "gate.codeExists": "قائمة بهذا الرمز موجودة. استخدم فتح قائمة بدلاً من ذلك.",
-      "gate.deleted": "تم حذف الحساب. يمكنك إنشاء قائمة جديدة بنفس الرمز.",
+      "gate.codeExists": "يوجد حساب بهذا الرمز. استخدم تسجيل الدخول بدلاً من ذلك.",
+      "gate.deleted": "تم حذف الحساب. يمكنك إنشاء حساباً جديداً بنفس الرمز.",
       "auth.spaces": "المسافات غير مسموحة.",
       "auth.minLength": "استخدم {n} أحرف على الأقل.",
       "auth.needLetter": "استخدم حرفاً واحداً على الأقل.",
@@ -761,7 +924,11 @@
         "تم الإنشاء محلياً، لكن فشلت المزامنة السحابية. قائمتك الجديدة على هذا الجهاز.",
       "alert.savedLocally":
         "تم الحفظ على هذا الجهاز، لكن فشلت المزامنة السحابية. تغييراتك ما زالت هنا محلياً.",
-      "alert.savedLocallyTitle": "حُفظ محلياً",
+      "alert.cloudSyncFailed":
+        "تغييراتك على هذا الجهاز، لكن فشل النسخ الاحتياطي. تحقق من اتصالك واضغط إعادة المحاولة في الأعلى.",
+      "alert.cloudSyncFailedDelete":
+        "تم الحذف على هذا الجهاز، لكن لم يُحدَّث النسخ الاحتياطي. اضغط إعادة المحاولة عندما تعود للاتصال.",
+      "alert.savedLocallyTitle": "على هذا الجهاز فقط",
       "alert.listShared":
         "إذا اكتملت المشاركة، يمكن لصديقك فتح الرابط وتسجيل الدخول واستيراد قائمتك.",
       "alert.listSharedTitle": "تمت مشاركة القائمة",
@@ -857,6 +1024,19 @@
     "Keep the name under 48 characters.": "auth.listNameLong",
   };
 
+  const APP_MESSAGE_MAP = {
+    "Codes do not match.": "changeCode.codesMismatch",
+    "That code is already in use. Pick another.": "changeCode.codeInUse",
+    "Could not update cloud account. Try again.": "changeCode.cloudFailed",
+    "Saved locally, but cloud sync failed. Try again.": "error.cloudSyncFailed",
+    "Could not read that paste.": "bulk.readFailed",
+    "Every title was already on your list.": "bulk.allDuplicates",
+    "No titles could be added.": "bulk.noneAdded",
+    "Tap a star to choose your score first.": "rating.chooseStarFirst",
+    "Could not load watchlist data": "error.loadWatchlistFailed",
+    "Make sure js/data.js is present.": "error.loadWatchlistHint",
+  };
+
   function getLang() {
     const saved = localStorage.getItem(STORAGE_KEY);
     return SUPPORTED.includes(saved) ? saved : "en";
@@ -910,6 +1090,12 @@
     return key ? t(key, vars) : message;
   }
 
+  function translateAppMessage(message, vars = {}) {
+    if (!message) return "";
+    const key = APP_MESSAGE_MAP[message];
+    return key ? t(key, vars) : message;
+  }
+
   function setText(sel, key, vars) {
     const el = typeof sel === "string" ? document.querySelector(sel) : sel;
     if (el) el.textContent = t(key, vars);
@@ -930,7 +1116,12 @@
     if (el) el.setAttribute("aria-label", t(key));
   }
 
+  function applySkipLinkText() {
+    setText(".skip-link", "a11y.skipToMain");
+  }
+
   function applyDocument() {
+    applySkipLinkText();
     document.querySelectorAll("[data-i18n]").forEach((el) => {
       el.textContent = t(el.dataset.i18n);
     });
@@ -949,6 +1140,7 @@
     setText("[data-action='manage-lists']", "menu.manageLists");
     setText("[data-action='share']", "menu.share");
     setText("[data-action='open-theme']", "menu.theme");
+    setText("[data-action='open-about']", "menu.about");
     setText("[data-action='change-code']", "menu.changeCode");
     setText("[data-action='delete-account']", "menu.deleteAccount");
     setText("[data-action='sign-out']", "menu.signOut");
@@ -1013,8 +1205,12 @@
     });
 
     setAria("#layoutToggles", "layout.toolbar");
-    setAria(".panel", "panel.contentType");
+    setAria(".panel", "panel.filters");
     setAria("#addModeTabs", "add.mode");
+    setAria("#formTypePicker", "form.type");
+    setAria("#searchConfirmTypePicker", "form.type");
+    setAria("#listSwitcher", "menu.switchList");
+    setText("label[for='listSwitcher']", "menu.switchList");
 
     setHtml("#searchAddStep .add-panel-hint", "search.hint");
     setText("#searchAddStep .form-field__label", "search.label");
@@ -1067,6 +1263,7 @@
     setText("#shareModalTitle", "share.title");
     setText(".share-modal__tagline", "share.tagline");
     setText(".share-modal__intro", "share.intro");
+    setText(".share-modal__note", "share.note");
     setText("[data-action='share-send'] .share-option__title", "share.sendTitle");
     setText("[data-action='share-send'] .share-option__desc", "share.sendDesc");
     setText("[data-action='share-receive'] .share-option__title", "share.importTitle");
@@ -1082,7 +1279,9 @@
     setText("label:has(#createListDescription) .form-field__label", "create.about");
     setPlaceholder("#createListDescription", "create.aboutPlaceholder");
     setText("#createListForm .btn--ghost", "btn.cancel");
+    setText("#createListSubmit", "btn.createList");
 
+    setText("#ratingModalTitle", "rating.title");
     setText("#moveListModal .btn--ghost", "btn.cancel");
     setText("#importShareModalTitle", "import.title");
     setText("#importShareModalHint", "import.hint");
@@ -1140,13 +1339,54 @@
     if (meta) meta.content = t("app.description");
   }
 
+  function applyAboutDocument() {
+    applySkipLinkText();
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+      el.textContent = t(el.dataset.i18n);
+    });
+    document.querySelectorAll("[data-i18n-html]").forEach((el) => {
+      el.innerHTML = t(el.dataset.i18nHtml);
+    });
+
+    const supportEl = document.getElementById("aboutSupportLink");
+    const supportUrl = String(window.WATCHLIST_CONFIG?.supportUrl || "").trim();
+    if (supportEl) {
+      if (supportUrl) {
+        supportEl.href = supportUrl;
+        supportEl.textContent = supportUrl.replace(/^mailto:/i, "");
+        supportEl.target = supportUrl.startsWith("http") ? "_blank" : "";
+        supportEl.rel = supportUrl.startsWith("http") ? "noopener noreferrer" : "";
+      } else {
+        supportEl.removeAttribute("href");
+        supportEl.removeAttribute("target");
+        supportEl.removeAttribute("rel");
+        supportEl.textContent = t("about.supportFallback");
+      }
+    }
+
+    const goAppBtn = document.querySelector("[data-action='go-app']");
+    if (goAppBtn) goAppBtn.textContent = t("about.openApp");
+
+    document.title = t("about.pageTitle");
+    const meta = document.querySelector('meta[name="description"]');
+    if (meta) meta.content = t("about.tagline");
+
+    document.querySelectorAll("[data-action='set-language']").forEach((btn) => {
+      btn.classList.toggle("about__lang-btn--active", btn.dataset.lang === getLang());
+    });
+  }
+
   function applyLanguage(lang) {
     const next = SUPPORTED.includes(lang) ? lang : "en";
     localStorage.setItem(STORAGE_KEY, next);
     const root = document.documentElement;
     root.lang = next;
     root.dir = next === "ar" ? "rtl" : "ltr";
-    applyDocument();
+    if (document.body?.dataset?.page === "about") {
+      applyAboutDocument();
+    } else {
+      applyDocument();
+    }
     listeners.forEach((fn) => fn(next));
   }
 
@@ -1155,6 +1395,7 @@
   }
 
   function applyGateDocument() {
+    applySkipLinkText();
     setText(".gate__title", "gate.title");
     setText(".gate__mode[data-mode='open']", "gate.openList");
     setText(".gate__mode[data-mode='create']", "gate.newList");
@@ -1172,6 +1413,7 @@
       });
     }
     setText("#createCodeHint", "gate.ruleCaps");
+    setText("#createCodeWarning", "gate.codeSaveWarning");
     document.querySelectorAll("[data-action='toggle-password']").forEach((btn) => {
       const pressed = btn.getAttribute("aria-pressed") === "true";
       btn.setAttribute("aria-label", t(pressed ? "gate.hideCode" : "gate.showCode"));
@@ -1181,6 +1423,7 @@
     setPlaceholder("#confirmCode", "gate.confirmCode");
     setText("#openForm .gate__submit", "gate.open");
     setText("#createForm .gate__submit", "gate.createList");
+    setText(".gate__about-link a", "menu.about");
     setText(".gate__theme-label", "menu.theme");
     setText("#themeModalTitle", "menu.theme");
     setText("#themeModalIntro", "theme.modalIntro");
@@ -1208,12 +1451,14 @@
     onChange,
     applyDocument,
     applyGateDocument,
+    applyAboutDocument,
     titleCount,
     listCountPhrase,
     titleCountPhrase,
     isolateLtr,
     genreLabel,
     translateAuthError,
+    translateAppMessage,
     MESSAGES,
   };
 

@@ -9,6 +9,15 @@
     return window.WatchlistI18n?.isolateLtr?.(text) ?? text;
   }
 
+  function localizeMessage(message) {
+    if (!message) return "";
+    return (
+      window.WatchlistI18n?.translateAppMessage?.(message) ||
+      window.WatchlistI18n?.translateAuthError?.(message) ||
+      message
+    );
+  }
+
   function listLabel(listId, fallbackKey = "list.myList") {
     return window.WatchlistAuth?.getListLabel?.(listId) || t(fallbackKey);
   }
@@ -99,19 +108,23 @@
     hoverHideTimer: null,
     hoverShowTimer: null,
     syncStatus: "local",
+    syncRetrying: false,
     addMode: "search",
     searchQuery: "",
     searchPage: 1,
     searchTotal: 0,
     searchResults: [],
+    searchResultFocusIndex: -1,
     searchLoading: false,
     searchPickDetails: null,
     searchConfirmSecondary: [],
     manualLinkMeta: null,
     manualLinkPreviewDetails: null,
     ratingItemId: null,
+    ratingHadScore: false,
     ratingPickerValue: null,
     ratingPickerChosen: false,
+    shareArrival: null,
   };
 
   const els = {
@@ -124,6 +137,15 @@
     watchedFilter: document.getElementById("watchedFilter"),
     ratingFilter: document.getElementById("ratingFilter"),
     ratingsBackfillBanner: document.getElementById("ratingsBackfillBanner"),
+    onboardingBanner: document.getElementById("onboardingBanner"),
+    onboardingBannerTitle: document.getElementById("onboardingBannerTitle"),
+    onboardingTipCode: document.getElementById("onboardingTipCode"),
+    onboardingTipShare: document.getElementById("onboardingTipShare"),
+    onboardingTipSync: document.getElementById("onboardingTipSync"),
+    shareArrivalBanner: document.getElementById("shareArrivalBanner"),
+    shareArrivalTitle: document.getElementById("shareArrivalTitle"),
+    shareArrivalText: document.getElementById("shareArrivalText"),
+    shareArrivalImportBtn: document.getElementById("shareArrivalImportBtn"),
     exportBtn: null,
     importBtn: null,
     manageListsBtn: null,
@@ -247,20 +269,36 @@
     }
   }
 
-  function getModalFocusableElements() {
-    if (!els.modalPanel) return [];
+  function getTopmostOpenModal() {
+    const candidates = [
+      { el: els.ratingModal, panel: els.ratingModal?.querySelector(".modal__panel") },
+      { el: els.createListModal, panel: els.createListModal?.querySelector(".modal__panel") },
+      { el: els.manageListsModal, panel: els.manageListsModal?.querySelector(".modal__panel") },
+      { el: els.moveListModal, panel: els.moveListModal?.querySelector(".modal__panel") },
+      { el: els.importShareModal, panel: els.importShareModal?.querySelector(".modal__panel") },
+      { el: els.changeCodeModal, panel: els.changeCodeModal?.querySelector(".modal__panel") },
+      { el: els.shareModal, panel: els.shareModal?.querySelector(".modal__panel") },
+      { el: els.themeModal, panel: els.themeModal?.querySelector(".modal__panel") },
+      { el: els.modal, panel: els.modalPanel },
+    ];
+    return candidates.find((entry) => entry.el && !entry.el.hidden) || null;
+  }
+
+  function getModalFocusableElements(panel = els.modalPanel) {
+    if (!panel) return [];
     return [
-      ...els.modalPanel.querySelectorAll(
+      ...panel.querySelectorAll(
         'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
       ),
     ].filter((el) => !el.closest("[hidden]") && el.getClientRects().length > 0);
   }
 
   function handleModalFocusTrap(event) {
-    if (els.modal?.hidden || isAppDialogOpen()) return;
+    const openModalEntry = getTopmostOpenModal();
+    if (!openModalEntry || isAppDialogOpen()) return;
     if (event.key !== "Tab") return;
 
-    const focusable = getModalFocusableElements();
+    const focusable = getModalFocusableElements(openModalEntry.panel);
     if (!focusable.length) return;
 
     const first = focusable[0];
@@ -268,7 +306,7 @@
     const active = document.activeElement;
 
     if (event.shiftKey) {
-      if (active === first || !els.modalPanel?.contains(active)) {
+      if (active === first || !openModalEntry.panel?.contains(active)) {
         event.preventDefault();
         last.focus();
       }
@@ -295,10 +333,24 @@
 
     if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
       if (event.isComposing || event.defaultPrevented) return;
-      if (!isSearchConfirmVisible()) return;
       if (shouldIgnoreAddEnterTarget(event.target)) return;
-      event.preventDefault();
-      handleSearchConfirmAdd();
+
+      if (isSearchConfirmVisible()) {
+        event.preventDefault();
+        handleSearchConfirmAdd();
+        return;
+      }
+
+      if (state.addMode === "bulk" && !els.bulkAddPanel?.hidden) {
+        event.preventDefault();
+        handleBulkAdd();
+        return;
+      }
+
+      if (state.addMode === "manual" && !els.form?.hidden && els.form?.checkValidity()) {
+        event.preventDefault();
+        els.form.requestSubmit();
+      }
     }
   }
 
@@ -377,11 +429,97 @@
           writeSyncMeta(listId, { syncedAt: Date.now() });
           state.syncStatus = "saved";
         } else {
-          state.syncStatus = "error";
+          state.syncStatus = resolveSyncFailureStatus();
         }
         updateStats();
       }
     );
+  }
+
+  function resolveSyncFailureStatus() {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      return "offline";
+    }
+    return "error";
+  }
+
+  async function notifyCloudSyncFailed(context = "default") {
+    state.syncStatus = resolveSyncFailureStatus();
+    updateStats();
+    const messageKey =
+      context === "delete" ? "alert.cloudSyncFailedDelete" : "alert.cloudSyncFailed";
+    await window.WatchlistDialog.alert(t(messageKey), {
+      title: t("alert.savedLocallyTitle"),
+    });
+  }
+
+  async function retryCloudSync() {
+    if (!window.WatchlistSync?.isConfigured() || state.syncRetrying) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      state.syncStatus = "offline";
+      updateStats();
+      return;
+    }
+
+    state.syncRetrying = true;
+    state.syncStatus = "pending";
+    updateStats();
+
+    try {
+      await syncAccountLists();
+      await reconcileWithCloud();
+
+      const listId = window.WatchlistAuth?.getProfile();
+      if (
+        listId &&
+        state.syncStatus !== "error" &&
+        state.syncStatus !== "offline" &&
+        !window.WatchlistAuth.isWatchlistEmpty(state.data)
+      ) {
+        const result = await window.WatchlistSync.pushSnapshot(
+          listId,
+          state.data,
+          state.watched,
+          listSyncMeta()
+        );
+        if (result?.ok) {
+          writeSyncMeta(listId, { syncedAt: Date.now() });
+          state.syncStatus = "saved";
+        } else {
+          state.syncStatus = resolveSyncFailureStatus();
+        }
+      } else if (state.syncStatus === "pending") {
+        state.syncStatus = "saved";
+      }
+
+      const { data, watched } = storageKeys();
+      localStorage.setItem(data, JSON.stringify(state.data));
+      localStorage.setItem(watched, JSON.stringify(state.watched));
+      updateHeaderTitle();
+      renderListSwitcher();
+      render();
+    } catch (error) {
+      console.warn("[sync] retry failed:", error);
+      state.syncStatus = resolveSyncFailureStatus();
+    } finally {
+      state.syncRetrying = false;
+      updateStats();
+    }
+  }
+
+  function bindOfflineSyncListeners() {
+    window.addEventListener("online", () => {
+      if (state.syncStatus === "offline") {
+        state.syncStatus = "error";
+        updateStats();
+      }
+    });
+    window.addEventListener("offline", () => {
+      if (state.syncStatus === "pending" || state.syncStatus === "error") {
+        state.syncStatus = "offline";
+        updateStats();
+      }
+    });
   }
 
   async function syncAccountLists() {
@@ -420,6 +558,8 @@
         if (result.ok) {
           writeSyncMeta(listId, { syncedAt: Date.now() });
           state.syncStatus = "saved";
+        } else {
+          state.syncStatus = resolveSyncFailureStatus();
         }
       }
       return;
@@ -460,6 +600,8 @@
       if (result.ok) {
         writeSyncMeta(listId, { syncedAt: Date.now() });
         state.syncStatus = "saved";
+      } else {
+        state.syncStatus = resolveSyncFailureStatus();
       }
     }
   }
@@ -595,7 +737,8 @@
 
     const suggested = window.WatchlistMetadata?.suggestGenres(
       meta.genres,
-      STANDARD_GENRES
+      STANDARD_GENRES,
+      normalizeContentType(meta.contentType || els.formType?.value)
     );
     if (suggested?.[0]) {
       els.formGenre.value = suggested[0];
@@ -952,9 +1095,7 @@
   }
 
   function adjustRatingPicker(delta) {
-    if (!state.ratingPickerChosen) {
-      chooseRatingPickerValue(defaultRatingPickerValue());
-    }
+    if (!state.ratingPickerChosen) return;
     chooseRatingPickerValue(state.ratingPickerValue + Number(delta));
   }
 
@@ -969,6 +1110,7 @@
     els.ratingValueDisplay.textContent = chosen
       ? formatWatchRating(value)
       : "—";
+    els.ratingValueDisplay.classList.add("text-num");
 
     els.ratingPicker?.querySelectorAll("[data-rating-star]").forEach((button) => {
       const star = Number(button.dataset.ratingStar);
@@ -986,7 +1128,7 @@
   function setRatingError(message) {
     if (!els.ratingError) return;
     els.ratingError.hidden = !message;
-    els.ratingError.textContent = message || "";
+    els.ratingError.textContent = localizeMessage(message);
     els.ratingError.classList.toggle("backup-modal__hint--error", Boolean(message));
   }
 
@@ -995,16 +1137,18 @@
     if (!item || !els.ratingModal) return;
 
     state.ratingItemId = itemId;
-    els.ratingModalTitle.textContent = t("rating.rateItem", { title: item.title });
     setRatingError("");
 
     const existing = getWatchEntry(itemId);
-    if (hasWatchRating(existing)) {
+    state.ratingHadScore = hasWatchRating(existing);
+    els.ratingModalTitle.textContent = t("rating.rateItem", { title: item.title });
+
+    if (state.ratingHadScore) {
       resetRatingPicker({ chosen: true, rating: existing.rating });
     } else {
       resetRatingPicker();
     }
-    els.ratingNote.value = existing.note || "";
+    els.ratingNote.value = existing?.note || "";
 
     els.ratingModal.hidden = false;
     updateBodyScrollLock();
@@ -1016,6 +1160,7 @@
     if (!els.ratingModal) return;
     els.ratingModal.hidden = true;
     state.ratingItemId = null;
+    state.ratingHadScore = false;
     setRatingError("");
     if (els.ratingForm) els.ratingForm.reset();
     resetRatingPicker();
@@ -1028,7 +1173,7 @@
 
     const parsedRating = parseWatchRating(rating);
     if (parsedRating == null) {
-      setRatingError("Tap a star to choose your score first.");
+      setRatingError(t("rating.chooseStarFirst"));
       return false;
     }
 
@@ -1041,6 +1186,14 @@
     closeRatingModal();
     render();
     return true;
+  }
+
+  function dismissRatingModal() {
+    if (state.ratingHadScore) {
+      closeRatingModal();
+      return;
+    }
+    markItemWatchedLater();
   }
 
   function markItemWatchedLater() {
@@ -1298,7 +1451,7 @@
     if (imdb) {
       parts.push(
         `<span class="card__score card__score--imdb" title="IMDb ${escapeHtml(imdb)}">
-          <span class="card__score-value">${escapeHtml(imdb)}</span>
+          <span class="card__score-value text-num">${escapeHtml(imdb)}</span>
           <img class="card__score-logo card__score-logo--imdb" src="${BRAND_IMDB_LOGO}" width="46" height="20" alt="" />
         </span>`
       );
@@ -1306,7 +1459,7 @@
     if (anilist) {
       parts.push(
         `<span class="card__score card__score--anilist" title="AniList ${escapeHtml(anilist)}">
-          <span class="card__score-value">${escapeHtml(anilist)}</span>
+          <span class="card__score-value text-num">${escapeHtml(anilist)}</span>
           <img class="card__score-logo card__score-logo--anilist" src="${BRAND_ANILIST_LOGO}" width="34" height="26" alt="" />
         </span>`
       );
@@ -1577,6 +1730,17 @@
   }
 
   function renderGenreFilterChips() {
+    const hasChips = state.selectedGenres.length > 0;
+    if (els.genreFilterChips) {
+      els.genreFilterChips.setAttribute(
+        "aria-label",
+        hasChips ? t("chip.activeFilters") : ""
+      );
+      if (!hasChips) {
+        els.genreFilterChips.removeAttribute("aria-label");
+      }
+    }
+
     els.genreFilterChips.innerHTML = state.selectedGenres
       .map(
         (genre) => `
@@ -1587,7 +1751,7 @@
             class="genre-chip__remove"
             data-action="remove-filter-genre"
             data-genre="${escapeHtml(genre)}"
-            aria-label="Remove ${escapeHtml(genreLabel(genre))} filter"
+            aria-label="${escapeHtml(t("chip.removeFilter", { genre: genreLabel(genre) }))}"
           >×</button>
         </span>`
       )
@@ -1630,6 +1794,248 @@
 
   function clearGenreFilters() {
     state.selectedGenres = [];
+  }
+
+  function hasActiveFilters() {
+    return (
+      state.type !== "all" ||
+      state.search.trim() !== "" ||
+      state.selectedGenres.length > 0 ||
+      state.watchedFilter !== "all" ||
+      state.ratingFilterSource !== "all"
+    );
+  }
+
+  function clearAllFilters() {
+    state.type = "all";
+    state.search = "";
+    clearGenreFilters();
+    state.watchedFilter = "all";
+    applyRatingFilter("all");
+    if (els.search) els.search.value = "";
+    if (els.watchedFilter) els.watchedFilter.value = "all";
+    if (els.ratingFilter) els.ratingFilter.value = "all";
+    els.typeTabs.forEach((tab) => {
+      const active = tab.dataset.type === "all";
+      tab.classList.toggle("type-tab--active", active);
+      tab.setAttribute("aria-selected", String(active));
+    });
+    updateGenreOptions();
+    updateRatingFilterOptions();
+    render();
+  }
+
+  function onboardingDismissKey() {
+    const accountId = window.WatchlistAuth?.getAccountId?.();
+    return accountId
+      ? `watchlist-onboarding-dismissed-${accountId}`
+      : "watchlist-onboarding-dismissed";
+  }
+
+  function isOnboardingDismissed() {
+    try {
+      return localStorage.getItem(onboardingDismissKey()) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function dismissOnboarding() {
+    try {
+      localStorage.setItem(onboardingDismissKey(), "1");
+    } catch {
+      /* ignore */
+    }
+    updateOnboardingBanner();
+  }
+
+  function updateOnboardingBanner() {
+    if (!els.onboardingBanner) return;
+    const show = !isOnboardingDismissed();
+    els.onboardingBanner.hidden = !show;
+    if (!show) return;
+
+    if (els.onboardingBannerTitle) {
+      els.onboardingBannerTitle.textContent = t("onboarding.title");
+    }
+    if (els.onboardingTipCode) {
+      els.onboardingTipCode.textContent = t("onboarding.code");
+    }
+    if (els.onboardingTipShare) {
+      els.onboardingTipShare.textContent = t("onboarding.share");
+    }
+    if (els.onboardingTipSync) {
+      els.onboardingTipSync.textContent = t("onboarding.sync");
+    }
+    els.onboardingBanner
+      .querySelector("[data-action='dismiss-onboarding']")
+      ?.replaceChildren(document.createTextNode(t("onboarding.dismiss")));
+  }
+
+  function dismissShareArrival() {
+    clearPendingShareId();
+    stripShareFromUrl();
+    state.shareArrival = null;
+    updateShareArrivalBanner();
+  }
+
+  function updateShareArrivalBanner() {
+    if (!els.shareArrivalBanner) return;
+    const arrival = state.shareArrival;
+    if (!arrival) {
+      els.shareArrivalBanner.hidden = true;
+      return;
+    }
+
+    els.shareArrivalBanner.hidden = false;
+    if (els.shareArrivalTitle) {
+      els.shareArrivalTitle.textContent = t("share.arrivalTitle");
+    }
+
+    const dismissBtn = els.shareArrivalBanner.querySelector(
+      "[data-action='dismiss-share-arrival']"
+    );
+    if (dismissBtn) dismissBtn.textContent = t("share.arrivalDismiss");
+
+    if (arrival.loading) {
+      if (els.shareArrivalText) {
+        els.shareArrivalText.textContent = t("share.arrivalLoading");
+      }
+      if (els.shareArrivalImportBtn) els.shareArrivalImportBtn.hidden = true;
+      return;
+    }
+
+    if (arrival.error) {
+      let message = t("share.arrivalInvalid");
+      if (arrival.error === "expired") message = t("share.arrivalExpired");
+      else if (arrival.error === "empty") message = t("alert.importEmptyList");
+      else if (arrival.error === "cloud") message = t("alert.shareNeedsCloud");
+      if (els.shareArrivalText) els.shareArrivalText.textContent = message;
+      if (els.shareArrivalImportBtn) els.shareArrivalImportBtn.hidden = true;
+      return;
+    }
+
+    const listName = arrival.payload?.listName || "Shared list";
+    const titleCount = countTitles(arrival.payload?.watchlist);
+    if (els.shareArrivalText) {
+      els.shareArrivalText.textContent = t("share.arrivalText", {
+        name: listName,
+        count: titleCount,
+      });
+    }
+    if (els.shareArrivalImportBtn) {
+      els.shareArrivalImportBtn.hidden = false;
+      els.shareArrivalImportBtn.textContent = t("share.arrivalImport");
+    }
+  }
+
+  function updateAppBanners() {
+    updateOnboardingBanner();
+    updateShareArrivalBanner();
+  }
+
+  async function openShareArrivalImport() {
+    const arrival = state.shareArrival;
+    if (!arrival?.payload) {
+      if (arrival?.error === "cloud") {
+        await window.WatchlistDialog.alert(t("alert.shareNeedsCloud"), {
+          title: t("alert.couldNotOpenFileTitle"),
+        });
+      }
+      return;
+    }
+    openImportShareModal(arrival.payload);
+  }
+
+  async function initShareArrival() {
+    const shareId = readPendingShareId();
+    if (!shareId) {
+      state.shareArrival = null;
+      updateShareArrivalBanner();
+      return;
+    }
+
+    state.shareArrival = { shareId, loading: true, payload: null, error: null };
+    updateShareArrivalBanner();
+
+    if (!window.WatchlistSync?.isConfigured?.()) {
+      state.shareArrival = { shareId, loading: false, payload: null, error: "cloud" };
+      updateShareArrivalBanner();
+      return;
+    }
+
+    const result = await window.WatchlistSync.fetchShareSnapshot(shareId);
+    if (!result.ok) {
+      state.shareArrival = {
+        shareId,
+        loading: false,
+        payload: null,
+        error: result.error === "expired" ? "expired" : "invalid",
+      };
+      updateShareArrivalBanner();
+      return;
+    }
+
+    if (!isImportPayloadValid(result.payload)) {
+      state.shareArrival = { shareId, loading: false, payload: null, error: "empty" };
+      updateShareArrivalBanner();
+      return;
+    }
+
+    state.shareArrival = {
+      shareId,
+      loading: false,
+      payload: result.payload,
+      error: null,
+    };
+    pendingImportPayload = result.payload;
+    updateShareArrivalBanner();
+  }
+
+  function renderEmptyListState() {
+    return `
+      <div class="empty-state">
+        <p class="empty-state__title">${escapeHtml(t("empty.firstTitle"))}</p>
+        <p class="empty-state__subtitle">${escapeHtml(t("empty.firstSubtitle"))}</p>
+        <ul class="empty-state__hints">
+          <li>${escapeHtml(t("empty.hintSearch"))}</li>
+          <li>${escapeHtml(t("empty.hintLink"))}</li>
+          <li>${escapeHtml(t("empty.hintBulk"))}</li>
+        </ul>
+        <div class="empty-state__actions">
+          <button type="button" class="btn btn--primary empty-state__btn" data-action="add">
+            ${escapeHtml(t("btn.addTitle"))}
+          </button>
+          <button type="button" class="btn btn--ghost empty-state__btn" data-action="open-add-search">
+            ${escapeHtml(t("empty.ctaSearch"))}
+          </button>
+          <button type="button" class="btn btn--ghost empty-state__btn" data-action="open-add-bulk">
+            ${escapeHtml(t("empty.ctaBulk"))}
+          </button>
+          <button type="button" class="btn btn--ghost empty-state__btn" data-action="share">
+            ${escapeHtml(t("empty.ctaImport"))}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderEmptyFilterState() {
+    const ratingHint = hasActiveFilters() ? null : emptyStateRatingHint();
+    const clearBtn = hasActiveFilters()
+      ? `<div class="empty-state__actions">
+          <button type="button" class="btn btn--primary empty-state__btn" data-action="clear-filters">
+            ${escapeHtml(t("empty.clearFilters"))}
+          </button>
+        </div>`
+      : "";
+    return `
+      <div class="empty-state">
+        <p class="empty-state__title">${escapeHtml(t("empty.noMatch"))}</p>
+        <p>${escapeHtml(ratingHint || t("empty.noMatchHint"))}</p>
+        ${clearBtn}
+      </div>
+    `;
   }
 
   function removeGenreFilter(genre) {
@@ -1701,7 +2107,7 @@
             class="genre-chip__remove"
             data-action="remove-secondary"
             data-genre="${escapeHtml(genre)}"
-            aria-label="Remove ${escapeHtml(genreLabel(genre))}"
+            aria-label="${escapeHtml(t("chip.removeGenre", { genre: genreLabel(genre) }))}"
           >×</button>
         </span>
       `
@@ -1737,7 +2143,7 @@
             class="genre-chip__remove"
             data-action="remove-lead"
             data-name="${escapeHtml(name)}"
-            aria-label="Remove ${escapeHtml(name)}"
+            aria-label="${escapeHtml(t("chip.removeLead", { name }))}"
           >×</button>
         </span>
       `
@@ -1747,13 +2153,30 @@
 
   function syncStatusMeta() {
     if (!window.WatchlistSync?.isConfigured()) return null;
-    if (state.syncStatus === "pending") {
-      return { status: "pending", label: t("sync.savingShort") };
+
+    let status = state.syncStatus === "local" ? "saved" : state.syncStatus;
+    if (
+      typeof navigator !== "undefined" &&
+      navigator.onLine === false &&
+      (status === "error" || status === "pending")
+    ) {
+      status = "offline";
     }
-    if (state.syncStatus === "error") {
-      return { status: "error", label: t("sync.failedShort") };
-    }
-    return null;
+
+    // Quiet when backed up — only show when something is in progress or needs action.
+    if (status === "saved" || status === "local") return null;
+
+    const labels = {
+      pending: t("sync.savingShort"),
+      error: t("sync.failedShort"),
+      offline: t("sync.offlineShort"),
+    };
+
+    return {
+      status,
+      label: labels[status] || labels.error,
+      showRetry: status === "error" || status === "offline",
+    };
   }
 
   function updateStats() {
@@ -1771,17 +2194,21 @@
     const syncMeta = syncStatusMeta();
     const syncHtml = syncMeta
       ? `<span class="header__stat-chip header__stat-chip--sync" data-status="${escapeHtml(syncMeta.status)}">
-           <span class="header__stat-label">${escapeHtml(syncMeta.label)}</span>
+           <span class="header__stat-label">${escapeHtml(syncMeta.label)}</span>${
+             syncMeta.showRetry
+               ? `<button type="button" class="header__sync-retry" data-action="sync-retry" aria-label="${escapeHtml(t("sync.retryAria"))}">${escapeHtml(t("sync.retry"))}</button>`
+               : ""
+           }
          </span>`
       : "";
 
     els.stats.innerHTML = `
       <span class="header__stat-chip">
-        <span class="header__stat-value">${total}</span>
+        <span class="header__stat-value text-num">${total}</span>
         <span class="header__stat-label">${escapeHtml(t("stats.totalWord"))}</span>
       </span>
       <span class="header__stat-chip">
-        <span class="header__stat-value">${watchedCount}</span>
+        <span class="header__stat-value text-num">${watchedCount}</span>
         <span class="header__stat-label">${escapeHtml(t("stats.watchedWord"))}</span>
       </span>
       ${syncHtml}
@@ -2126,7 +2553,9 @@
   }
 
   function setCardPoster(card, posterUrl) {
-    const slot = card.querySelector("[data-poster-slot]");
+    const slot = card.querySelector(
+      "[data-poster-slot], .card__poster--placeholder, .card__poster--broken, .card__poster"
+    );
     if (!slot || !posterUrl) return;
 
     const img = document.createElement("img");
@@ -2134,14 +2563,62 @@
     img.loading = "lazy";
     img.alt = "";
     img.src = posterUrl;
+    img.addEventListener(
+      "error",
+      () => {
+        const item = state.items.find((entry) => entry.id === card.dataset.id);
+        markCardPosterBroken(card, item);
+      },
+      { once: true }
+    );
     slot.replaceWith(img);
+  }
+
+  function posterPlaceholderMarkup(broken = false) {
+    if (broken) {
+      return `<div class="card__poster card__poster--placeholder card__poster--broken" data-poster-slot data-poster-broken="true" role="status">
+        <span class="card__poster-message">${escapeHtml(t("card.posterBroken"))}</span>
+      </div>`;
+    }
+    return `<div class="card__poster card__poster--placeholder" data-poster-slot aria-hidden="true">🎬</div>`;
+  }
+
+  function markCardPosterBroken(card, item) {
+    if (!card) return;
+    if (item) item.posterBroken = true;
+
+    const target = card.querySelector(
+      ".card__poster, [data-poster-slot], .card__poster--broken"
+    );
+    if (!target) return;
+
+    const replacement = posterPlaceholderMarkup(true);
+    if (target.outerHTML) {
+      target.outerHTML = replacement;
+    }
+  }
+
+  function bindPosterErrorHandlers() {
+    els.main.querySelectorAll(".card__poster[src]").forEach((img) => {
+      if (img.dataset.posterErrorBound === "1") return;
+      img.dataset.posterErrorBound = "1";
+      img.addEventListener(
+        "error",
+        () => {
+          const card = img.closest(".card");
+          const item = state.items.find((entry) => entry.id === card?.dataset?.id);
+          markCardPosterBroken(card, item);
+        },
+        { once: true }
+      );
+    });
   }
 
   async function hydratePosters() {
     const cards = els.main.querySelectorAll(".card--linked");
     for (const card of cards) {
       const item = state.items.find((entry) => entry.id === card.dataset.id);
-      if (!item?.link) continue;
+      if (!item?.link || item.posterBroken) continue;
 
       if (item.poster) {
         setCardPoster(card, item.poster);
@@ -2159,6 +2636,8 @@
       if (meta?.poster) {
         item.poster = meta.poster;
         setCardPoster(card, meta.poster);
+      } else {
+        markCardPosterBroken(card, item);
       }
     }
   }
@@ -2169,6 +2648,7 @@
 
   function applyPostRender() {
     applyCardLayout();
+    bindPosterErrorHandlers();
     if (shouldHydratePosters()) {
       hydratePosters();
     }
@@ -2180,7 +2660,7 @@
     const watchEntry = getWatchEntry(item.id);
     const rated = isWatched && hasWatchRating(watchEntry);
     const altTitle = item.altTitle
-      ? `<span class="card__alt">${escapeHtml(item.altTitle)}</span>`
+      ? `<span class="card__alt text-ltr">${escapeHtml(ltr(item.altTitle))}</span>`
       : "";
     const secondaryBadges = (item.secondaryGenres || [])
       .map(
@@ -2195,7 +2675,7 @@
     const imdbId = getImdbId(item);
     const linkedClass = item.link ? " card--linked" : "";
     const linkAttr = item.link
-      ? ` data-link="${escapeHtml(item.link)}" title="Open link"`
+      ? ` data-link="${escapeHtml(item.link)}" title="${escapeHtml(t("card.openLink"))}"`
       : "";
     const imdbAttr = imdbId ? ` data-imdb-id="${escapeHtml(imdbId)}"` : "";
     const externalScores = renderExternalRatings(item);
@@ -2203,7 +2683,7 @@
     const titleBlock = `
       <div class="card__top">
         <h3 class="card__title">
-          ${escapeHtml(item.title)}
+          <span class="text-ltr">${escapeHtml(ltr(item.title))}</span>
           ${altTitle}
         </h3>
       </div>
@@ -2222,9 +2702,11 @@
 
     const posterBlock = hasLink
       ? `<div class="card__media">${
-          item.poster
-            ? `<img class="card__poster" src="${escapeHtml(item.poster)}" alt="" loading="lazy" />`
-            : `<div class="card__poster card__poster--placeholder" data-poster-slot aria-hidden="true">🎬</div>`
+          item.posterBroken
+            ? posterPlaceholderMarkup(true)
+            : item.poster
+              ? `<img class="card__poster" src="${escapeHtml(item.poster)}" alt="" loading="lazy" />`
+              : posterPlaceholderMarkup(false)
         }<div class="card__overlay">${badgesBlock}${titleBlock}</div></div>`
       : "";
 
@@ -2244,7 +2726,7 @@
         >
           <div class="card__rating-top">
             <span class="card__rating-label">${escapeHtml(t("card.yourRating"))}</span>
-            <span class="card__rating-score">${escapeHtml(formatWatchRating(watchEntry.rating))}/10</span>
+            <span class="card__rating-score text-num">${escapeHtml(formatWatchRating(watchEntry.rating))}/10</span>
           </div>
           ${
             watchEntry.note
@@ -2374,31 +2856,12 @@
     updateStats();
 
     if (state.items.length === 0) {
-      els.main.innerHTML = `
-        <div class="empty-state">
-          <p class="empty-state__title">${escapeHtml(t("empty.noTitles"))}</p>
-          <p>${escapeHtml(t("empty.noTitlesHint"))}</p>
-          <div class="empty-state__actions">
-            <button type="button" class="btn btn--primary empty-state__btn" data-action="add">
-              ${escapeHtml(t("btn.addTitle"))}
-            </button>
-            <button type="button" class="btn btn--ghost empty-state__btn" data-action="share">
-              ${escapeHtml(t("menu.share"))}
-            </button>
-          </div>
-        </div>
-      `;
+      els.main.innerHTML = renderEmptyListState();
       return;
     }
 
     if (filtered.length === 0) {
-      const ratingHint = emptyStateRatingHint();
-      els.main.innerHTML = `
-        <div class="empty-state">
-          <p class="empty-state__title">${escapeHtml(t("empty.noMatch"))}</p>
-          <p>${escapeHtml(ratingHint || t("empty.noMatchHint"))}</p>
-        </div>
-      `;
+      els.main.innerHTML = renderEmptyFilterState();
       return;
     }
 
@@ -2454,8 +2917,13 @@
   function setBulkPasteError(message) {
     if (!els.bulkPasteError) return;
     els.bulkPasteError.hidden = !message;
-    els.bulkPasteError.textContent = message || "";
+    els.bulkPasteError.textContent = localizeMessage(message);
     els.bulkPasteError.classList.toggle("backup-modal__hint--error", Boolean(message));
+    if (message) {
+      els.bulkPasteError.setAttribute("role", "alert");
+    } else {
+      els.bulkPasteError.removeAttribute("role");
+    }
   }
 
   function getSearchConfirmPrimaryGenre() {
@@ -2518,7 +2986,7 @@
             class="genre-chip__remove"
             data-action="remove-search-secondary"
             data-genre="${escapeHtml(genre)}"
-            aria-label="Remove ${escapeHtml(genreLabel(genre))}"
+            aria-label="${escapeHtml(t("chip.removeGenre", { genre: genreLabel(genre) }))}"
           >×</button>
         </span>
       `
@@ -2680,11 +3148,15 @@
 
     if (!state.searchResults.length) {
       els.titleSearchResults.innerHTML = "";
+      state.searchResultFocusIndex = -1;
       return;
     }
 
+    els.titleSearchResults.setAttribute("role", "listbox");
+    els.titleSearchResults.setAttribute("aria-label", t("search.label"));
+
     els.titleSearchResults.innerHTML = state.searchResults
-      .map((result) => {
+      .map((result, index) => {
         const onList = isSearchResultOnList(result);
         const poster = result.poster
           ? `<img class="title-search__poster" src="${escapeHtml(result.poster)}" alt="" loading="lazy" />`
@@ -2692,10 +3164,14 @@
         const meta = [result.year, formatSearchResultType(result.type)]
           .filter(Boolean)
           .join(" · ");
+        const pickLabel = onList
+          ? `${result.title} — ${t("search.alreadyOnList")}`
+          : t("search.pickResult", { title: result.title, meta });
         const listBadge = onList
           ? `<span class="title-search__badge">${escapeHtml(t("search.alreadyOnList"))}</span>`
           : "";
-        return `<li>
+        const tabIndex = index === state.searchResultFocusIndex ? "0" : "-1";
+        return `<li role="presentation">
           <button
             type="button"
             class="title-search__item${onList ? " title-search__item--on-list" : ""}"
@@ -2705,11 +3181,16 @@
             data-anilist-id="${result.anilistId || ""}"
             data-tmdb-type="${escapeHtml(result.tmdbType || "")}"
             data-tmdb-id="${result.tmdbId || ""}"
-            ${onList ? 'aria-label="' + escapeHtml(result.title + " — " + t("search.alreadyOnList")) + '"' : ""}
+            role="option"
+            aria-selected="false"
+            aria-disabled="${onList ? "true" : "false"}"
+            aria-label="${escapeHtml(pickLabel)}"
+            tabindex="${tabIndex}"
+            ${onList ? "disabled" : ""}
           >
             ${poster}
             <span class="title-search__info">
-              <span class="title-search__title">${escapeHtml(result.title)}</span>
+              <span class="title-search__title text-ltr">${escapeHtml(ltr(result.title))}</span>
               <span class="title-search__meta">${escapeHtml(meta)}</span>
             </span>
             ${listBadge}
@@ -2724,12 +3205,64 @@
     }
   }
 
+  function getSearchResultButtons() {
+    return [
+      ...(els.titleSearchResults?.querySelectorAll(
+        "[data-action='pick-search-result']:not([disabled])"
+      ) || []),
+    ];
+  }
+
+  function focusSearchResult(index) {
+    const buttons = getSearchResultButtons();
+    if (!buttons.length) {
+      state.searchResultFocusIndex = -1;
+      return;
+    }
+    const next = Math.max(0, Math.min(index, buttons.length - 1));
+    state.searchResultFocusIndex = next;
+    buttons.forEach((button, buttonIndex) => {
+      button.tabIndex = buttonIndex === next ? 0 : -1;
+      button.setAttribute("aria-selected", String(buttonIndex === next));
+    });
+    buttons[next]?.focus();
+  }
+
+  function handleTitleSearchKeydown(event) {
+    if (els.modal?.hidden || state.addMode !== "search" || isSearchConfirmVisible()) return;
+
+    const buttons = getSearchResultButtons();
+    if (!buttons.length) return;
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusSearchResult(state.searchResultFocusIndex < 0 ? 0 : state.searchResultFocusIndex + 1);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusSearchResult(
+        state.searchResultFocusIndex <= 0 ? 0 : state.searchResultFocusIndex - 1
+      );
+      return;
+    }
+
+    if (event.key === "Enter" && state.searchResultFocusIndex >= 0) {
+      if (document.activeElement?.closest("#titleSearchResults")) {
+        event.preventDefault();
+        buttons[state.searchResultFocusIndex]?.click();
+      }
+    }
+  }
+
   function resetSearchAddState() {
     clearTimeout(searchDebounceTimer);
     state.searchQuery = "";
     state.searchPage = 1;
     state.searchTotal = 0;
     state.searchResults = [];
+    state.searchResultFocusIndex = -1;
     state.searchLoading = false;
     state.searchPickDetails = null;
     state.searchConfirmSecondary = [];
@@ -2761,22 +3294,29 @@
     els.searchAddStep.hidden = true;
     els.searchConfirmStep.hidden = false;
 
-    const suggested = window.WatchlistMetadata?.suggestGenres(
-      details.genres,
-      STANDARD_GENRES
-    );
-    const primaryGenre = suggested[0] || "";
     const defaultType =
       details.contentType ||
       (state.type !== "all" ? state.type : "movies");
+    const contentType = normalizeContentType(defaultType);
+
+    const suggested = window.WatchlistMetadata?.suggestGenres(
+      details.genres,
+      STANDARD_GENRES,
+      contentType
+    );
+    const primaryGenre = suggested[0] || "";
 
     populateSearchConfirmGenreSelect(primaryGenre);
     syncContentTypePicker(
       els.searchConfirmTypePicker,
       els.searchConfirmType,
-      normalizeContentType(defaultType)
+      contentType
     );
-    setSearchConfirmSecondary(suggested.slice(1));
+    setSearchConfirmSecondary(
+      contentType === "anime"
+        ? suggested.slice(1).filter((genre) => genre.toLowerCase() !== "animation")
+        : suggested.slice(1)
+    );
     renderSearchConfirmPreview(details);
 
     els.searchConfirmGenre?.focus();
@@ -2923,7 +3463,8 @@
     const genre = normalizeGenre(options.genre);
     const suggested = window.WatchlistMetadata?.suggestGenres(
       details.genres,
-      STANDARD_GENRES
+      STANDARD_GENRES,
+      contentType
     );
     const secondaryGenres = normalizeSecondaryGenres(
       genre,
@@ -3122,7 +3663,9 @@
     els.modal.hidden = false;
     updateBodyScrollLock();
     closeAllCardMenus();
-    if (state.addMode === "bulk") {
+    if (mode === "edit") {
+      els.formTitle?.focus();
+    } else if (state.addMode === "bulk") {
       els.bulkPasteInput?.focus();
     } else if (state.addMode === "search") {
       els.titleSearchInput?.focus();
@@ -3171,7 +3714,7 @@
   function setChangeCodeError(message) {
     if (!els.changeCodeError) return;
     els.changeCodeError.hidden = !message;
-    els.changeCodeError.textContent = message || "";
+    els.changeCodeError.textContent = localizeMessage(message);
     els.changeCodeError.classList.toggle("backup-modal__hint--error", Boolean(message));
   }
 
@@ -3338,18 +3881,31 @@
     els.manageListsBody.innerHTML = listIds
       .map((listId) => {
         const entry = library.find((item) => item.listId === listId);
-        const label = entry?.name || entry?.label || "Unnamed list";
+        const label = entry?.name || entry?.label || t("manage.unnamedList");
         const description = entry?.description || "";
         const titleCount = window.WatchlistAuth.getListTitleCount(listId);
         const isCurrent = listId === currentId;
         const badge = isCurrent
-          ? '<span class="manage-lists__badge">Signed in now</span>'
+          ? `<span class="manage-lists__badge">${escapeHtml(t("manage.signedInNow"))}</span>`
           : "";
-        const meta = `<span class="manage-lists__meta">${titleCount} titles</span>`;
+        const meta = `<span class="manage-lists__meta">${escapeHtml(
+          window.WatchlistI18n?.titleCountPhrase?.(titleCount) ?? `${titleCount} titles`
+        )}</span>`;
         const about = description
           ? `<span class="manage-lists__about">${escapeHtml(description)}</span>`
           : "";
-        return `<li class="manage-lists__item">
+        const switchBtn = isCurrent
+          ? ""
+          : `<button
+              type="button"
+              class="btn btn--ghost btn--sm"
+              data-action="switch-list"
+              data-list-id="${escapeHtml(listId)}"
+              aria-label="${escapeHtml(t("manage.switchListName", { name: label }))}"
+            >
+              ${escapeHtml(t("manage.switchToList"))}
+            </button>`;
+        return `<li class="manage-lists__item"${isCurrent ? ' aria-current="true"' : ""}>
           <div class="manage-lists__info">
             <span class="manage-lists__name">${escapeHtml(label)}</span>
             ${about}
@@ -3357,21 +3913,24 @@
             ${badge}
           </div>
           <div class="manage-lists__actions">
+            ${switchBtn}
             <button
               type="button"
               class="btn btn--ghost btn--sm"
               data-action="edit-list"
               data-list-id="${escapeHtml(listId)}"
+              aria-label="${escapeHtml(t("manage.editListName", { name: label }))}"
             >
-              Edit
+              ${escapeHtml(t("card.edit"))}
             </button>
             <button
               type="button"
               class="btn btn--ghost btn--danger btn--sm"
               data-action="delete-list"
               data-list-id="${escapeHtml(listId)}"
+              aria-label="${escapeHtml(t("manage.deleteListName", { name: label }))}"
             >
-              Delete
+              ${escapeHtml(t("card.delete"))}
             </button>
           </div>
         </li>`;
@@ -3384,6 +3943,9 @@
     renderManageLists();
     els.manageListsModal.hidden = false;
     updateBodyScrollLock();
+    els.manageListsModal
+      .querySelector("[data-action='create-new-list']")
+      ?.focus();
   }
 
   function closeManageListsModal() {
@@ -3550,7 +4112,7 @@
     els.moveListPicker.innerHTML = listIds
       .map((listId) => {
         const entry = library.find((item) => item.listId === listId);
-        const label = entry?.name || entry?.label || "Unnamed list";
+        const label = entry?.name || entry?.label || t("manage.unnamedList");
         const titleCount = window.WatchlistAuth.getListTitleCount(listId);
         return `<li>
           <button
@@ -3560,7 +4122,9 @@
             data-list-id="${escapeHtml(listId)}"
           >
             <span class="move-list-picker__name">${escapeHtml(label)}</span>
-            <span class="move-list-picker__meta">${titleCount} titles</span>
+            <span class="move-list-picker__meta">${escapeHtml(
+              window.WatchlistI18n?.titleCountPhrase?.(titleCount) ?? `${titleCount} titles`
+            )}</span>
           </button>
         </li>`;
       })
@@ -3620,7 +4184,7 @@
   function setCreateListError(message) {
     if (!els.createListError) return;
     els.createListError.hidden = !message;
-    els.createListError.textContent = message || "";
+    els.createListError.textContent = localizeMessage(message);
     els.createListError.classList.toggle("backup-modal__hint--error", Boolean(message));
   }
 
@@ -3697,7 +4261,14 @@
           description.trim()
         );
         if (!cloud.ok) {
-          setCreateListError("Saved locally, but cloud sync failed. Try again.");
+          closeCreateListModal();
+          openManageListsModal();
+          if (editedId === window.WatchlistAuth.getProfile()) {
+            const headerTitle = document.getElementById("headerTitle");
+            if (headerTitle) headerTitle.textContent = name.trim();
+          }
+          renderListSwitcher();
+          await notifyCloudSyncFailed();
           return;
         }
       }
@@ -3729,7 +4300,9 @@
         description.trim()
       );
       if (!cloud.ok) {
-        setCreateListError("Saved locally, but cloud sync failed. Try again.");
+        closeCreateListModal();
+        await notifyCloudSyncFailed();
+        window.location.reload();
         return;
       }
     }
@@ -3768,9 +4341,7 @@
     window.WatchlistAuth.purgeAccount(accountId);
 
     if (!cloudOk) {
-      await window.WatchlistDialog.alert(t("alert.partialDeleteAccount"), {
-        title: t("alert.partialDeleteAccountTitle"),
-      });
+      await notifyCloudSyncFailed("delete");
     }
 
     window.WatchlistAuth.signOut({ deleted: true });
@@ -3826,9 +4397,7 @@
     renderListSwitcher();
 
     if (!cloudOk) {
-      await window.WatchlistDialog.alert(t("alert.partialDeleteList"), {
-        title: t("alert.partialDeleteListTitle"),
-      });
+      await notifyCloudSyncFailed("delete");
     }
   }
 
@@ -3883,6 +4452,12 @@
         item.anilistRating = state.manualLinkMeta.anilistRating;
       }
       if (state.manualLinkMeta.year) item.year = state.manualLinkMeta.year;
+      item.posterBroken = false;
+    }
+
+    if (existing && normalizeLink(existing.link) !== link) {
+      delete item.poster;
+      item.posterBroken = false;
     }
 
     return item;
@@ -4007,7 +4582,9 @@
             [
               ...(skipped
                 ? [
-                    `${skipped} duplicate${skipped === 1 ? "" : "s"} skipped.`,
+                    skipped === 1
+                      ? t("bulk.duplicatesSkipped", { count: skipped })
+                      : t("bulk.duplicatesSkippedPlural", { count: skipped }),
                   ]
                 : []),
               ...(parsed.errors || []),
@@ -4103,6 +4680,7 @@
       const active = tab.dataset.type === type;
       tab.classList.toggle("type-tab--active", active);
       tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
     });
     updateGenreOptions();
     render();
@@ -4144,7 +4722,7 @@
     els.listSwitcher.innerHTML = library
       .map((entry) => {
         const selected = entry.listId === currentId ? " selected" : "";
-        return `<option value="${escapeHtml(entry.listId)}"${selected}>${escapeHtml(entry.name || entry.label || "My list")}</option>`;
+        return `<option value="${escapeHtml(entry.listId)}"${selected}>${escapeHtml(entry.name || entry.label || t("list.myList"))}</option>`;
       })
       .join("");
   }
@@ -4241,9 +4819,7 @@
         description
       );
       if (!cloud.ok) {
-        await window.WatchlistDialog.alert(t("alert.savedLocallyCloudFail"), {
-          title: t("alert.savedLocallyTitle"),
-        });
+        await notifyCloudSyncFailed();
       }
     }
 
@@ -4467,35 +5043,7 @@
   }
 
   async function consumePendingShare() {
-    const shareId = readPendingShareId();
-    if (!shareId) return;
-
-    clearPendingShareId();
-    stripShareFromUrl();
-
-    if (!window.WatchlistSync?.isConfigured?.()) {
-      await window.WatchlistDialog.alert(t("alert.shareNeedsCloud"), {
-        title: t("alert.couldNotOpenFileTitle"),
-      });
-      return;
-    }
-
-    const result = await window.WatchlistSync.fetchShareSnapshot(shareId);
-    if (!result.ok) {
-      const message =
-        result.error === "expired" ? t("alert.shareLinkExpired") : t("alert.shareLinkInvalid");
-      await window.WatchlistDialog.alert(message, {
-        title: t("alert.couldNotOpenFileTitle"),
-      });
-      return;
-    }
-
-    if (!isImportPayloadValid(result.payload)) {
-      await alertEmptyImport();
-      return;
-    }
-
-    openImportShareModal(result.payload);
+    await initShareArrival();
   }
 
   async function exportBackup() {
@@ -4537,9 +5085,7 @@
       updateStats();
 
       if (!cloud.ok) {
-        await window.WatchlistDialog.alert(t("alert.savedLocally"), {
-          title: t("alert.savedLocallyTitle"),
-        });
+        await notifyCloudSyncFailed();
       }
 
       const message =
@@ -4552,6 +5098,7 @@
       await window.WatchlistDialog.alert(message, {
         title: t("alert.listUpdatedTitle"),
       });
+      dismissShareArrival();
       return;
     } else {
       applyImportToCurrentList(payload);
@@ -4566,9 +5113,8 @@
     render();
 
     if (!cloud.ok) {
-      await window.WatchlistDialog.alert(t("alert.savedLocally"), {
-        title: t("alert.savedLocallyTitle"),
-      });
+      await notifyCloudSyncFailed();
+      dismissShareArrival();
       return;
     }
 
@@ -4582,6 +5128,7 @@
       title:
         mode === "new-list" ? t("alert.newListCreatedTitle") : t("alert.listUpdatedTitle"),
     });
+    dismissShareArrival();
   }
 
   async function importBackup(file) {
@@ -4643,8 +5190,48 @@
   }
 
   function bindEvents() {
+    document.getElementById("app")?.addEventListener("click", async (event) => {
+      const target = event.target.closest("[data-action]");
+      if (!target || target.closest("#mainContent")) return;
+
+      const action = target.dataset.action;
+      if (action === "dismiss-onboarding") {
+        dismissOnboarding();
+        return;
+      }
+      if (action === "sync-retry") {
+        await retryCloudSync();
+        return;
+      }
+      if (action === "dismiss-share-arrival") {
+        dismissShareArrival();
+        return;
+      }
+      if (action === "share-arrival-import") {
+        await openShareArrivalImport();
+      }
+    });
+
     els.typeTabs.forEach((tab) => {
       tab.addEventListener("click", () => setType(tab.dataset.type));
+    });
+
+    document.querySelector(".type-tabs")?.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const tabs = [...els.typeTabs];
+      const current = tabs.findIndex((tab) => tab.dataset.type === state.type);
+      if (current < 0) return;
+      event.preventDefault();
+      const rtl = document.documentElement.getAttribute("dir") === "rtl";
+      const delta = event.key === "ArrowRight" ? 1 : -1;
+      const step = rtl ? -delta : delta;
+      const next = tabs[(current + step + tabs.length) % tabs.length];
+      setType(next.dataset.type);
+      next.focus();
+    });
+
+    els.typeTabs.forEach((tab) => {
+      tab.tabIndex = tab.dataset.type === state.type ? 0 : -1;
     });
 
     els.search.addEventListener("input", () => {
@@ -4698,6 +5285,11 @@
 
       if (action === "open-theme") {
         openThemeModal();
+        return;
+      }
+
+      if (action === "open-about") {
+        window.location.href = "about.html";
         return;
       }
 
@@ -4789,6 +5381,15 @@
       if (action === "edit-list") {
         const listId = event.target.closest("[data-list-id]")?.dataset.listId;
         openEditListModal(listId);
+        return;
+      }
+
+      if (action === "switch-list") {
+        const listId = event.target.closest("[data-list-id]")?.dataset.listId;
+        if (listId && listId !== window.WatchlistAuth?.getProfile()) {
+          window.WatchlistAuth.switchList(listId);
+          window.location.reload();
+        }
         return;
       }
 
@@ -5025,6 +5626,54 @@
       }
     });
 
+    els.ratingPicker?.addEventListener("keydown", (event) => {
+      const stars = [
+        ...(els.ratingPicker?.querySelectorAll("[data-rating-star]") || []),
+      ];
+      if (!stars.length) return;
+
+      const rtl = document.documentElement.getAttribute("dir") === "rtl";
+      const activeIndex = stars.indexOf(document.activeElement);
+
+      if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+        event.preventDefault();
+        const delta = event.key === "ArrowRight" ? 1 : -1;
+        const step = rtl ? -delta : delta;
+        const nextIndex = Math.min(
+          stars.length - 1,
+          Math.max(0, (activeIndex >= 0 ? activeIndex : 4) + step)
+        );
+        chooseRatingPickerValue(Number(stars[nextIndex].dataset.ratingStar));
+        stars[nextIndex]?.focus();
+        return;
+      }
+
+      if (event.key === "Home") {
+        event.preventDefault();
+        chooseRatingPickerValue(Number(stars[0].dataset.ratingStar));
+        stars[0]?.focus();
+        return;
+      }
+
+      if (event.key === "End") {
+        event.preventDefault();
+        chooseRatingPickerValue(Number(stars[stars.length - 1].dataset.ratingStar));
+        stars[stars.length - 1]?.focus();
+        return;
+      }
+
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        adjustRatingPicker(0.1);
+        return;
+      }
+
+      if (event.key === "-" || event.key === "_") {
+        event.preventDefault();
+        adjustRatingPicker(-0.1);
+      }
+    });
+
     els.ratingForm?.addEventListener("submit", (event) => {
       event.preventDefault();
       saveWatchRating({
@@ -5036,10 +5685,10 @@
     els.ratingModal?.addEventListener("click", (event) => {
       const action = event.target.closest("[data-action]")?.dataset.action;
       if (action === "close-rating-modal") {
-        markItemWatchedLater();
+        dismissRatingModal();
       }
       if (action === "rate-later") {
-        markItemWatchedLater();
+        dismissRatingModal();
       }
     });
 
@@ -5084,7 +5733,7 @@
         return;
       }
       if (!els.ratingModal?.hidden) {
-        markItemWatchedLater();
+        dismissRatingModal();
         return;
       }
       if (!els.modal.hidden) {
@@ -5099,6 +5748,8 @@
 
     document.addEventListener("keydown", handleModalFocusTrap);
     els.modal?.addEventListener("keydown", handleAddModalKeydown);
+    els.titleSearchInput?.addEventListener("keydown", handleTitleSearchKeydown);
+    els.titleSearchResults?.addEventListener("keydown", handleTitleSearchKeydown);
 
     document.addEventListener("scroll", hideLinkPreviewPopover, true);
     window.addEventListener("resize", hideLinkPreviewPopover);
@@ -5222,10 +5873,58 @@
         return;
       }
 
+      if (action === "clear-filters") {
+        clearAllFilters();
+        return;
+      }
+
+      if (action === "open-add-search") {
+        openModal("add");
+        setAddMode("search");
+        return;
+      }
+
+      if (action === "open-add-bulk") {
+        openModal("add");
+        setAddMode("bulk");
+        return;
+      }
+
       if (action === "add") {
         openModal("add");
       }
     });
+  }
+
+  function renderLoadingSkeletonHtml() {
+    const cards = Array.from(
+      { length: 6 },
+      () => `<div class="list-skeleton__card" aria-hidden="true">
+        <div class="list-skeleton__poster"></div>
+        <div class="list-skeleton__body">
+          <div class="list-skeleton__line list-skeleton__line--title"></div>
+          <div class="list-skeleton__line list-skeleton__line--short"></div>
+          <div class="list-skeleton__line"></div>
+        </div>
+      </div>`
+    ).join("");
+
+    return `
+      <div class="list-skeleton" role="status" aria-live="polite" aria-busy="true">
+        <div class="list-skeleton__heading" aria-hidden="true"></div>
+        <div class="list-skeleton__grid">${cards}</div>
+        <p class="list-skeleton__status">${escapeHtml(t("loading.watchlist"))}</p>
+      </div>`;
+  }
+
+  function showLoadingSkeleton() {
+    if (!els.loading) return;
+    els.loading.className = "list-skeleton-wrap";
+    els.loading.innerHTML = renderLoadingSkeletonHtml();
+  }
+
+  function hideLoadingSkeleton() {
+    els.loading?.remove();
   }
 
   async function init() {
@@ -5246,6 +5945,7 @@
     state.data = itemsToNested(state.items);
 
     if (window.WatchlistSync?.isConfigured()) {
+      showLoadingSkeleton();
       state.syncStatus = "pending";
       updateStats();
       try {
@@ -5253,7 +5953,7 @@
         await reconcileWithCloud();
       } catch (error) {
         console.warn("[sync] reconcile failed:", error);
-        state.syncStatus = "error";
+        state.syncStatus = resolveSyncFailureStatus();
       }
     }
 
@@ -5266,16 +5966,17 @@
     }
 
     if (!state.data) {
+      hideLoadingSkeleton();
       els.main.innerHTML = `
         <div class="empty-state">
-          <p class="empty-state__title">Could not load watchlist data</p>
-          <p>Make sure js/data.js is present.</p>
+          <p class="empty-state__title">${escapeHtml(t("error.loadWatchlistFailed"))}</p>
+          <p>${escapeHtml(t("error.loadWatchlistHint"))}</p>
         </div>
       `;
       return;
     }
 
-    els.loading?.remove();
+    hideLoadingSkeleton();
     const headerTitle = document.getElementById("headerTitle");
     if (headerTitle) {
       headerTitle.textContent = window.WatchlistAuth.getListLabel();
@@ -5287,6 +5988,7 @@
     });
     updateGenreOptions();
     bindEvents();
+    bindOfflineSyncListeners();
     syncContentTypePicker(els.formTypePicker, els.formType, els.formType?.value || "movies");
     renderListSwitcher();
     if (els.ratingFilter?.value === "rt-best" || els.ratingFilter?.value === "rt-worst") {
@@ -5295,12 +5997,14 @@
     }
     updateRatingFilterOptions();
     updateStats();
+    updateAppBanners();
     render();
     backfillMissingRatings();
     await consumePendingShare();
 
     window.WatchlistI18n?.onChange(() => {
       window.WatchlistI18n.applyDocument();
+      updateAppBanners();
       updateGenreOptions();
       updateRatingFilterOptions();
       renderListSwitcher();
@@ -5310,6 +6014,8 @@
         els.modalTitle.textContent = state.editingId
           ? t("modal.editTitle")
           : t("modal.addTitle");
+        renderSecondaryChips();
+        renderLeadChips();
       }
       if (!els.createListModal.hidden) {
         const isEdit = Boolean(state.editingListId);
@@ -5318,6 +6024,8 @@
           : t("create.newList");
         els.createListSubmit.textContent = isEdit ? t("btn.save") : t("btn.createList");
       }
+      if (!els.manageListsModal?.hidden) renderManageLists();
+      if (!els.moveListModal?.hidden) renderMoveListPicker();
     });
 
     if (window.WatchlistAuth.needsCodeUpgrade()) {
@@ -5331,7 +6039,7 @@
       const status = event.detail?.status;
       if (status === "pending") state.syncStatus = "pending";
       if (status === "saved") state.syncStatus = "saved";
-      if (status === "error") state.syncStatus = "error";
+      if (status === "error") state.syncStatus = resolveSyncFailureStatus();
       if (status === "saving") state.syncStatus = "pending";
       updateStats();
     });

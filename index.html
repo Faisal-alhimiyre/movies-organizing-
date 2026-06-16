@@ -10,7 +10,36 @@
       name="description"
       content="Personal watchlist of movies, TV series, and anime organized by genre."
     />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Our Movie Nights" />
+    <meta property="og:title" content="Our Movie Nights" />
+    <meta
+      property="og:description"
+      content="Personal watchlist of movies, TV series, and anime organized by genre."
+    />
+    <meta property="og:image" content="assets/og/og-image.svg" />
+    <meta property="og:image:type" content="image/svg+xml" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Our Movie Nights — movies, TV, and anime watchlists"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Our Movie Nights" />
+    <meta
+      name="twitter:description"
+      content="Personal watchlist of movies, TV series, and anime organized by genre."
+    />
+    <meta name="twitter:image" content="assets/og/og-image.svg" />
+    <meta name="theme-color" content="#141416" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Movie Nights" />
     <title>Our Movie Nights</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="assets/icons/icon-maskable.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="assets/icons/icon-maskable.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -22,6 +51,10 @@
     <link rel="stylesheet" href="css/theme-light.css" />
     <link rel="stylesheet" href="css/theme-purple.css" />
     <link rel="stylesheet" href="css/theme-brown.css" />
+    <link rel="stylesheet" href="css/theme-consistency.css" />
+    <link rel="stylesheet" href="css/typography.css" />
+    <link rel="stylesheet" href="css/reduced-motion.css" />
+    <link rel="stylesheet" href="css/accessibility.css" />
     <link rel="stylesheet" href="css/rtl.css" />
     <script src="js/themes.js"></script>
     <link
@@ -31,6 +64,7 @@
     />
   </head>
   <body>
+    <a href="#mainContent" class="skip-link">Skip to main content</a>
     <div class="app" id="app">
       <header class="header">
         <div class="header__main">
@@ -103,6 +137,9 @@
                     </button>
                   </div>
                 </div>
+                <button type="button" class="account-menu__item" role="menuitem" data-action="open-about">
+                  About
+                </button>
                 <hr class="account-menu__divider" />
                 <button type="button" class="account-menu__item" role="menuitem" data-action="change-code">
                   Change code
@@ -180,6 +217,12 @@
 
         <div class="panel__filters">
           <label class="search" for="searchInput">
+            <span class="search__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2" />
+                <path d="M16 16l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </span>
             <input
               type="search"
               id="searchInput"
@@ -259,7 +302,36 @@
         </div>
       </div>
 
-      <main class="main" id="mainContent">
+      <div class="app-banner" id="onboardingBanner" hidden role="region" aria-labelledby="onboardingBannerTitle">
+        <div class="app-banner__body">
+          <h2 class="app-banner__title" id="onboardingBannerTitle">Quick tips</h2>
+          <ul class="app-banner__list" id="onboardingBannerList">
+            <li id="onboardingTipCode"></li>
+            <li id="onboardingTipShare"></li>
+            <li id="onboardingTipSync"></li>
+          </ul>
+        </div>
+        <button type="button" class="btn btn--ghost btn--sm app-banner__dismiss" data-action="dismiss-onboarding">
+          Got it
+        </button>
+      </div>
+
+      <div class="app-banner app-banner--share" id="shareArrivalBanner" hidden role="region" aria-labelledby="shareArrivalTitle">
+        <div class="app-banner__body">
+          <h2 class="app-banner__title" id="shareArrivalTitle">Shared list ready to import</h2>
+          <p class="app-banner__text" id="shareArrivalText"></p>
+        </div>
+        <div class="app-banner__actions">
+          <button type="button" class="btn btn--primary btn--sm" data-action="share-arrival-import" id="shareArrivalImportBtn">
+            Review import
+          </button>
+          <button type="button" class="btn btn--ghost btn--sm" data-action="dismiss-share-arrival">
+            Not now
+          </button>
+        </div>
+      </div>
+
+      <main class="main" id="mainContent" tabindex="-1">
         <div class="loading" id="loading">Loading watchlist…</div>
       </main>
 
@@ -341,7 +413,7 @@
         aria-labelledby="shareModalTitle"
       >
         <header class="modal__header">
-          <h2 class="modal__title" id="shareModalTitle">Share lists with friends</h2>
+          <h2 class="modal__title" id="shareModalTitle">Share a list</h2>
           <button
             type="button"
             class="modal__close"
@@ -352,18 +424,21 @@
           </button>
         </header>
         <div class="modal__body">
-          <p class="share-modal__tagline">Share the fun!</p>
+          <p class="share-modal__tagline">Send a link — not your account code</p>
           <p class="backup-modal__text share-modal__intro">
-            Lists are shared as a link. Your friend signs in, then picks how to import your titles, ratings, and notes. You can still import a .json file below.
+            Sharing creates a link anyone can open. They log in with their own account and choose how to import your titles, ratings, and notes.
+          </p>
+          <p class="backup-modal__text share-modal__note">
+            Your private login code is never included in a share link.
           </p>
           <div class="share-options">
             <button type="button" class="share-option" data-action="share-send">
               <span class="share-option__title">Send my list</span>
-              <span class="share-option__desc">Includes titles, watched state, ratings, and your notes</span>
+              <span class="share-option__desc">Create a share link for this list</span>
             </button>
             <button type="button" class="share-option" data-action="share-receive">
               <span class="share-option__title">Import a list</span>
-              <span class="share-option__desc">Pick the file your friend sent (.json)</span>
+              <span class="share-option__desc">Open a link someone sent you, or pick a .json backup file</span>
             </button>
           </div>
           <footer class="modal__footer modal__footer--simple">
@@ -640,13 +715,21 @@
             </p>
             <label class="form-field form-field--full">
               <span class="form-field__label">Search movies &amp; shows</span>
-              <input
-                type="search"
-                id="titleSearchInput"
-                class="form-input"
-                placeholder="e.g. Avengers, Demon Slayer…"
-                autocomplete="off"
-              />
+              <span class="search title-search__query">
+                <span class="search__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2" />
+                    <path d="M16 16l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                </span>
+                <input
+                  type="search"
+                  id="titleSearchInput"
+                  class="search__input"
+                  placeholder="e.g. Avengers, Demon Slayer…"
+                  autocomplete="off"
+                />
+              </span>
             </label>
             <div class="title-search__filters">
               <label class="title-search__filter">
@@ -950,7 +1033,7 @@
             <textarea
               id="ratingNote"
               class="form-textarea"
-              rows="3"
+              rows="2"
               placeholder="What stood out? Would you watch again?"
             ></textarea>
           </label>
@@ -970,6 +1053,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <script src="js/config.js"></script>
     <script src="js/i18n.js"></script>
+    <script src="js/accessibility.js"></script>
     <script src="js/dialog.js"></script>
     <script src="js/metadata.js"></script>
     <script src="js/auth.js"></script>
@@ -979,5 +1063,6 @@
     <script src="js/data.js"></script>
     <script src="js/mobile.js"></script>
     <script src="js/app.js"></script>
+    <script src="js/pwa.js"></script>
   </body>
 </html>

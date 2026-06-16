@@ -1,0 +1,39 @@
+---
+description: Product phase order and deferred auth/security — UX polish first
+alwaysApply: true
+---
+
+# Project roadmap priorities
+
+## Do now (Phase 1)
+
+Refine UI/UX, design, and features. Ensure existing flows work well (add, search, filters, ratings, share, import, mobile, RTL/i18n).
+
+## Defer until later (Phase 4)
+
+- Email + username/password authentication (Supabase Auth)
+- Supabase RLS hardening, API key proxying, legal pages
+- Do **not** start auth/security refactors unless the user explicitly asks
+
+## Account model (today)
+
+- Each user has a **private personal account code** they create at signup — not shared with other users or the developer
+- **List sharing** is via the app’s share link / import feature (`list_snapshots`), not by giving someone your account code
+
+## Auth plan (when Phase 4 starts)
+
+- First-time registration: collect **email**
+- Login: **username or email** + **password**
+- Replace personal-code model; migrate existing accounts
+
+## Product vision (after UX + app launch)
+
+Social community: profiles, public shared lists, ratings and comments on lists in a community tab.
+
+## Monetization
+
+Core app stays free. Future: affiliate “where to watch”, optional supporter tier — not current work.
+
+## Platform target
+
+Web (GitHub Pages) + iOS + Android (Capacitor). See `ROADMAP.md` for budget and phase details.

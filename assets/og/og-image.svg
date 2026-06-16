@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-label="Our Movie Nights">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141416"/>
+      <stop offset="55%" stop-color="#1c1a22"/>
+      <stop offset="100%" stop-color="#0e0e10"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="30%" cy="20%" r="55%">
+      <stop offset="0%" stop-color="#c4a882" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#c4a882" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <rect x="120" y="130" width="220" height="220" rx="48" fill="#141416" stroke="#c4a882" stroke-width="4"/>
+  <rect x="152" y="168" width="156" height="144" rx="16" fill="#c4a882" opacity="0.18"/>
+  <rect x="168" y="188" width="124" height="104" rx="10" fill="#141416"/>
+  <circle cx="214" cy="240" r="22" fill="#6898b8"/>
+  <circle cx="286" cy="240" r="22" fill="#8f7eb8"/>
+  <text x="390" y="210" fill="#ebeae6" font-family="Plus Jakarta Sans, Segoe UI, sans-serif" font-size="56" font-weight="700">Our Movie Nights</text>
+  <text x="390" y="278" fill="#a4a4b0" font-family="Plus Jakarta Sans, Segoe UI, sans-serif" font-size="30" font-weight="500">Movies · TV · Anime watchlists</text>
+  <text x="390" y="340" fill="#c4a882" font-family="Plus Jakarta Sans, Segoe UI, sans-serif" font-size="24" font-weight="500">Organized by genre · Cloud sync · Share by link</text>
+</svg>

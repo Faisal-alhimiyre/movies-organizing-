@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Our Movie Nights">
+  <rect width="512" height="512" rx="112" fill="#141416"/>
+  <rect x="72" y="120" width="368" height="272" rx="28" fill="#c4a882"/>
+  <rect x="108" y="156" width="296" height="200" rx="12" fill="#141416"/>
+  <circle cx="196" cy="256" r="36" fill="#6898b8"/>
+  <circle cx="316" cy="256" r="36" fill="#8f7eb8"/>
+  <path fill="#ebeae6" d="M156 88h56l-20 32h-56zm144 0h56l-20 32h-56z"/>
+</svg>

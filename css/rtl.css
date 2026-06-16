@@ -74,11 +74,13 @@ html[dir="rtl"] .genre-section__count {
 }
 
 html[dir="rtl"] .genre-filter__select,
+html[dir="rtl"] .watched-filter__select,
+html[dir="rtl"] .rating-filter__select,
 html[dir="rtl"] .select,
 html[dir="rtl"] .filter {
   background-position: left 0.65rem center;
-  padding-left: 2rem;
-  padding-right: 0.75rem;
+  padding-inline-start: 2rem;
+  padding-inline-end: 0.75rem;
 }
 
 html[dir="rtl"] .title-search-confirm__back::before {
@@ -110,11 +112,6 @@ html[dir="rtl"] .title-search-confirm__rating {
 
 html[dir="rtl"] .title-search-confirm__actor {
   direction: rtl;
-}
-
-html[dir="rtl"] .add-panel-hint {
-  border-left: none;
-  border-right: 3px solid var(--accent);
 }
 
 html[dir="rtl"] .modal__footer-right {
@@ -176,7 +173,13 @@ html[dir="rtl"] .type-tab__count {
 }
 
 html[dir="rtl"] .card__rating-score,
-html[dir="rtl"] .card__rating-placeholder,
+html[dir="rtl"] .empty-state__hints {
+  text-align: start;
+}
+
+html[dir="rtl"] .app-banner__list {
+  padding-inline-start: 1.15rem;
+}
 html[dir="rtl"] .card__rate-btn {
   margin-left: 0;
   margin-right: auto;
@@ -203,4 +206,26 @@ html[dir="rtl"] .rating-picker__value {
 html[dir="rtl"] .mobile-card-focus__rating-label {
   text-transform: none;
   letter-spacing: 0;
+}
+
+html[dir="rtl"] .rating-picker {
+  direction: rtl;
+}
+
+html[dir="rtl"] .rating-picker__stars {
+  direction: ltr;
+}
+
+html[dir="rtl"] .genre-filter__chips,
+html[dir="rtl"] .genre-chip {
+  direction: rtl;
+}
+
+html[dir="rtl"] .manage-lists__item {
+  direction: rtl;
+  text-align: right;
+}
+
+html[dir="rtl"] .manage-lists__actions {
+  direction: rtl;
 }

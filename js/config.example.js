@@ -13,4 +13,7 @@ window.WATCHLIST_CONFIG = {
   // Public site URL (GitHub Pages). Share links always use this — required when testing on localhost.
   // Example: "https://yourname.github.io/movies-organizing/"
   publicAppUrl: "",
+
+  // Optional — shown on About page (mailto:, GitHub issues URL, etc.)
+  supportUrl: "",
 };

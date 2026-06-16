@@ -1,0 +1,80 @@
+/* Skip link — visible on keyboard focus only */
+.skip-link {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 0 0 var(--radius-sm) 0;
+  box-shadow: var(--shadow);
+  transform: translateY(-120%);
+  transition: transform 0.15s ease;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+  outline: none;
+}
+
+html[dir="rtl"] .skip-link {
+  left: auto;
+  right: 0;
+  border-radius: 0 0 0 var(--radius-sm);
+}
+
+:root {
+  --focus-ring: 0 0 0 3px rgba(196, 168, 130, 0.38);
+}
+
+html[data-theme="light"] {
+  --focus-ring: 0 0 0 3px rgba(138, 109, 66, 0.28);
+}
+
+.gate__mode:focus-visible,
+.gate__lang-btn:focus-visible,
+.about__lang-btn:focus-visible,
+.genre-filter__select:focus-visible,
+.watched-filter__select:focus-visible,
+.rating-filter__select:focus-visible,
+#genreSelect:focus-visible,
+.account-menu__select:focus-visible,
+.add-mode-tab:focus-visible,
+.genre-chip__remove:focus-visible,
+.modal__close:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.gate__mode:focus-visible {
+  border-radius: 6px;
+}
+
+.genre-filter__select:focus-visible,
+.watched-filter__select:focus-visible,
+.rating-filter__select:focus-visible,
+#genreSelect:focus-visible,
+.account-menu__select:focus-visible {
+  border-color: rgba(196, 168, 130, 0.45);
+}
+
+html[data-theme="light"] .genre-filter__select:focus-visible,
+html[data-theme="light"] .watched-filter__select:focus-visible,
+html[data-theme="light"] .rating-filter__select:focus-visible,
+html[data-theme="light"] #genreSelect:focus-visible,
+html[data-theme="light"] .account-menu__select:focus-visible {
+  border-color: rgba(138, 109, 66, 0.4);
+}
+
+.modal__close:focus-visible {
+  border-radius: 6px;
+}
+
+.genre-chip__remove:focus-visible {
+  border-radius: 999px;
+}

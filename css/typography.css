@@ -1,0 +1,49 @@
+/* Sprint E — mixed EN/AR titles, numbers, ratings */
+
+.text-ltr,
+.text-num {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.text-num {
+  font-variant-numeric: tabular-nums;
+}
+
+html[dir="rtl"] .card__title,
+html[dir="rtl"] .mobile-card-focus__title,
+html[dir="rtl"] .title-search__title,
+html[dir="rtl"] .manage-lists__name {
+  unicode-bidi: plaintext;
+}
+
+html[dir="rtl"] .card__alt {
+  display: inline-block;
+  margin-inline-start: 0.35rem;
+}
+
+html[dir="rtl"] .header__stat-value,
+html[dir="rtl"] .type-tab__count,
+html[dir="rtl"] .genre-section__count {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+html[dir="rtl"] .card__rating-score,
+html[dir="rtl"] .card__score-value,
+html[dir="rtl"] .rating-picker__score,
+html[dir="rtl"] .mobile-card-focus__rating-score {
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-variant-numeric: tabular-nums;
+}
+
+html[lang="ar"] body {
+  line-height: 1.55;
+}
+
+html[lang="ar"] .card__summary,
+html[lang="ar"] .modal__title,
+html[lang="ar"] .empty-state__subtitle {
+  line-height: 1.65;
+}

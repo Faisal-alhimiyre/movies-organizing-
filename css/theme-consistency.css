@@ -1,0 +1,118 @@
+/* Cross-theme polish — modals, buttons, sync chip, banners (Sprint E) */
+
+html[data-theme="light"] .header__stat-chip--sync[data-status="pending"] {
+  border-color: rgba(138, 109, 66, 0.28);
+  background: rgba(138, 109, 66, 0.08);
+}
+
+html[data-theme="light"] .header__stat-chip--sync[data-status="pending"] .header__stat-label {
+  color: #8a6d42;
+}
+
+html[data-theme="light"] .header__stat-chip--sync[data-status="saved"] {
+  border-color: rgba(45, 154, 82, 0.28);
+  background: rgba(45, 154, 82, 0.08);
+}
+
+html[data-theme="light"] .header__stat-chip--sync[data-status="saved"] .header__stat-label {
+  color: #2d7a48;
+}
+
+html[data-theme="light"] .header__stat-chip--sync[data-status="error"] {
+  border-color: rgba(200, 80, 80, 0.28);
+  background: rgba(200, 80, 80, 0.08);
+}
+
+html[data-theme="light"] .header__stat-chip--sync[data-status="error"] .header__stat-label {
+  color: #b84a4a;
+}
+
+html[data-theme="light"] .header__stat-chip--sync[data-status="offline"] {
+  border-color: rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.05);
+}
+
+html[data-theme="light"] .header__stat-chip--sync[data-status="offline"] .header__stat-label {
+  color: #6a6a74;
+}
+
+html[data-theme="purple"] .header__stat-chip--sync[data-status="saved"] {
+  border-color: rgba(98, 224, 144, 0.28);
+  background: rgba(98, 224, 144, 0.08);
+}
+
+html[data-theme="purple"] .header__stat-chip--sync[data-status="saved"] .header__stat-label {
+  color: #8ee8b0;
+}
+
+html[data-theme="brown"] .header__stat-chip--sync[data-status="saved"] {
+  border-color: rgba(110, 208, 144, 0.28);
+  background: rgba(110, 208, 144, 0.08);
+}
+
+html[data-theme="brown"] .header__stat-chip--sync[data-status="saved"] .header__stat-label {
+  color: #9ed8b4;
+}
+
+html[data-theme="light"] .btn--danger,
+html[data-theme="purple"] .btn--danger,
+html[data-theme="brown"] .btn--danger {
+  color: #e05555;
+  background: rgba(224, 85, 85, 0.1);
+  border-color: rgba(224, 85, 85, 0.28);
+}
+
+html[data-theme="light"] .btn--danger:hover,
+html[data-theme="purple"] .btn--danger:hover,
+html[data-theme="brown"] .btn--danger:hover {
+  background: rgba(224, 85, 85, 0.16);
+  border-color: rgba(224, 85, 85, 0.38);
+}
+
+html[data-theme="light"] .modal__backdrop {
+  background: rgba(20, 20, 24, 0.45);
+}
+
+html[data-theme="purple"] .modal__backdrop,
+html[data-theme="brown"] .modal__backdrop {
+  background: rgba(0, 0, 0, 0.72);
+}
+
+html[data-theme="light"] .modal__footer,
+html[data-theme="purple"] .modal__footer,
+html[data-theme="brown"] .modal__footer {
+  border-top-color: var(--border);
+}
+
+html[data-theme="light"] .share-modal__tagline,
+html[data-theme="purple"] .share-modal__tagline,
+html[data-theme="brown"] .share-modal__tagline {
+  color: var(--accent);
+}
+
+html[data-theme="light"] .modal__close:hover,
+html[data-theme="purple"] .modal__close:hover,
+html[data-theme="brown"] .modal__close:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+html[data-theme="light"] .modal__close:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+html[data-theme="light"] .app-banner,
+html[data-theme="purple"] .app-banner,
+html[data-theme="brown"] .app-banner {
+  border-color: var(--border-strong);
+}
+
+html[data-theme="purple"] .btn--ghost:hover,
+html[data-theme="brown"] .btn--ghost:hover {
+  border-color: rgba(232, 192, 120, 0.28);
+}
+
+html[data-theme="light"] .header__sync-retry:hover {
+  background: rgba(0, 0, 0, 0.06);
+}

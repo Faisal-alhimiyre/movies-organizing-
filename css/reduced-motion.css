@@ -1,0 +1,50 @@
+/* Sprint E — respect prefers-reduced-motion */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+
+  .btn--loading::after {
+    animation: none;
+    border-right-color: currentColor;
+    opacity: 0.55;
+  }
+
+  .form-input--loading {
+    animation: none;
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  html[data-theme="light"] .form-input--loading {
+    background: rgba(0, 0, 0, 0.04);
+  }
+
+  .list-skeleton__heading,
+  .list-skeleton__poster,
+  .list-skeleton__line {
+    animation: none;
+    background: rgba(255, 255, 255, 0.07);
+  }
+
+  html[data-theme="light"] .list-skeleton__heading,
+  html[data-theme="light"] .list-skeleton__poster,
+  html[data-theme="light"] .list-skeleton__line {
+    background: rgba(0, 0, 0, 0.06);
+  }
+
+  .card:hover,
+  .card--linked:hover {
+    transform: none;
+  }
+
+  .link-preview-popover {
+    transition: none;
+  }
+
+  .rating-picker__star:active {
+    transform: none;
+  }
+}

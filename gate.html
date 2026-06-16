@@ -6,7 +6,40 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
+    <meta name="theme-color" content="#141416" />
+    <meta
+      name="description"
+      content="Sign in to Our Movie Nights — your personal movie, TV, and anime watchlist."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Our Movie Nights" />
+    <meta property="og:title" content="Our Movie Nights" />
+    <meta
+      property="og:description"
+      content="Free personal watchlist for movies, TV series, and anime. Organized by genre, synced to the cloud, shared by link."
+    />
+    <meta property="og:image" content="assets/og/og-image.svg" />
+    <meta property="og:image:type" content="image/svg+xml" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Our Movie Nights — movies, TV, and anime watchlists"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Our Movie Nights" />
+    <meta
+      name="twitter:description"
+      content="Free personal watchlist for movies, TV series, and anime. Organized by genre, synced to the cloud, shared by link."
+    />
+    <meta name="twitter:image" content="assets/og/og-image.svg" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Movie Nights" />
     <title>Our Movie Nights</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="assets/icons/icon-maskable.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="assets/icons/icon-maskable.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -18,10 +51,15 @@
     <link rel="stylesheet" href="css/theme-light.css" />
     <link rel="stylesheet" href="css/theme-purple.css" />
     <link rel="stylesheet" href="css/theme-brown.css" />
+    <link rel="stylesheet" href="css/theme-consistency.css" />
+    <link rel="stylesheet" href="css/typography.css" />
+    <link rel="stylesheet" href="css/reduced-motion.css" />
+    <link rel="stylesheet" href="css/accessibility.css" />
     <link rel="stylesheet" href="css/rtl.css" />
     <script src="js/themes.js"></script>
   </head>
   <body>
+    <a href="#gateMain" class="skip-link">Skip to main content</a>
     <div class="gate">
       <div class="gate__card">
         <div class="gate__toolbar">
@@ -51,24 +89,27 @@
 
         <h1 class="gate__title">Our Movie Nights</h1>
 
-        <div class="gate__modes" role="tablist" aria-label="List access">
+        <div id="gateMain" class="gate__main" tabindex="-1">
+        <div class="gate__modes" role="tablist" aria-label="Account access">
           <button
             type="button"
             class="gate__mode gate__mode--active"
             role="tab"
             aria-selected="true"
+            tabindex="0"
             data-mode="open"
           >
-            Open list
+            Log in
           </button>
           <button
             type="button"
             class="gate__mode"
             role="tab"
             aria-selected="false"
+            tabindex="-1"
             data-mode="create"
           >
-            New list
+            Create new account
           </button>
         </div>
 
@@ -98,10 +139,13 @@
               </svg>
             </button>
           </div>
-          <button type="submit" class="btn btn--primary gate__submit">Open</button>
+          <button type="submit" class="btn btn--primary gate__submit">Log in</button>
         </form>
 
         <form id="createForm" class="gate__panel" hidden novalidate>
+          <p class="gate__warning" id="createCodeWarning" role="note">
+            Write your code down and keep it safe. If you lose it, we cannot recover your account or lists.
+          </p>
           <div class="gate__field">
             <input
               type="password"
@@ -158,10 +202,11 @@
               </svg>
             </button>
           </div>
-          <button type="submit" class="btn btn--primary gate__submit">Create list</button>
+          <button type="submit" class="btn btn--primary gate__submit">Create account</button>
         </form>
 
         <p class="gate__error" id="gateError" hidden></p>
+        </div>
 
         <div class="gate__theme-row">
           <span class="gate__theme-label">Theme</span>
@@ -200,6 +245,9 @@
             ></button>
           </div>
         </div>
+        <p class="gate__about-link">
+          <a href="about.html" data-i18n="menu.about">About</a>
+        </p>
       </div>
     </div>
 
@@ -256,9 +304,11 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <script src="js/config.js"></script>
     <script src="js/i18n.js"></script>
+    <script src="js/accessibility.js"></script>
     <script src="js/dialog.js"></script>
     <script src="js/auth.js"></script>
     <script src="js/sync.js"></script>
     <script src="js/gate.js"></script>
+    <script src="js/pwa.js"></script>
   </body>
 </html>

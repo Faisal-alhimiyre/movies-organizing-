@@ -24,15 +24,15 @@
 
   function getTypeBadge(item) {
     if (item.contentType === "anime") {
-      return { label: "Anime", className: "anime" };
+      return { label: t("type.anime"), className: "anime" };
     }
     if (item.kind === "film series") {
-      return { label: "Film series", className: "franchise" };
+      return { label: t("type.filmSeries"), className: "franchise" };
     }
     if (item.contentType === "tvSeries") {
-      return { label: "TV Series", className: "tvSeries" };
+      return { label: t("type.tvSeries"), className: "tvSeries" };
     }
-    return { label: "Movie", className: "movie" };
+    return { label: t("type.movie"), className: "movie" };
   }
 
   function formatRating(rating) {
@@ -105,6 +105,10 @@
     return window.WatchlistI18n?.t(key, vars) ?? key;
   }
 
+  function ltr(text) {
+    return window.WatchlistI18n?.isolateLtr?.(text) ?? text;
+  }
+
   function genreLabel(genre) {
     return window.WatchlistI18n?.genreLabel?.(genre) ?? genre;
   }
@@ -149,6 +153,27 @@
         const itemId = action.dataset.id;
         closeCardFocus();
         triggerCardAction(itemId, "rate");
+        return;
+      }
+
+      if (action.dataset.action === "mobile-card-edit") {
+        const itemId = action.dataset.id;
+        closeCardFocus();
+        triggerCardAction(itemId, "edit");
+        return;
+      }
+
+      if (action.dataset.action === "mobile-card-delete") {
+        const itemId = action.dataset.id;
+        closeCardFocus();
+        triggerCardAction(itemId, "delete");
+        return;
+      }
+
+      if (action.dataset.action === "mobile-card-toggle-watched") {
+        const itemId = action.dataset.id;
+        closeCardFocus();
+        triggerCardAction(itemId, "toggle-watched");
       }
     });
   }
@@ -178,7 +203,7 @@
     if (imdb) {
       parts.push(
         `<span class="card__score card__score--imdb" title="IMDb ${escapeHtml(imdb)}">
-          <span class="card__score-value">${escapeHtml(imdb)}</span>
+          <span class="card__score-value text-num">${escapeHtml(imdb)}</span>
           <img class="card__score-logo card__score-logo--imdb" src="assets/brand/imdb.svg" width="46" height="20" alt="" />
         </span>`
       );
@@ -186,7 +211,7 @@
     if (anilist) {
       parts.push(
         `<span class="card__score card__score--anilist" title="AniList ${escapeHtml(anilist)}">
-          <span class="card__score-value">${escapeHtml(anilist)}</span>
+          <span class="card__score-value text-num">${escapeHtml(anilist)}</span>
           <img class="card__score-logo card__score-logo--anilist" src="assets/brand/anilist.svg" width="34" height="26" alt="" />
         </span>`
       );
@@ -208,11 +233,15 @@
       ? `<span class="badge badge--genre-primary">${escapeHtml(genreLabel(item.genre))}</span>`
       : "";
     const altTitle = item.altTitle
-      ? `<span class="mobile-card-focus__alt">${escapeHtml(item.altTitle)}</span>`
+      ? `<span class="mobile-card-focus__alt text-ltr">${escapeHtml(ltr(item.altTitle))}</span>`
       : "";
-    const poster = item.poster
-      ? `<img class="mobile-card-focus__poster" src="${escapeHtml(item.poster)}" alt="" />`
-      : `<div class="mobile-card-focus__poster mobile-card-focus__poster--empty" aria-hidden="true">🎬</div>`;
+    const poster = item.posterBroken
+      ? `<div class="mobile-card-focus__poster mobile-card-focus__poster--empty mobile-card-focus__poster--broken" role="status">
+          <span class="card__poster-message">${escapeHtml(t("card.posterBroken"))}</span>
+        </div>`
+      : item.poster
+        ? `<img class="mobile-card-focus__poster" src="${escapeHtml(item.poster)}" alt="" />`
+        : `<div class="mobile-card-focus__poster mobile-card-focus__poster--empty" aria-hidden="true">🎬</div>`;
     const leads = (item.leads || []).filter(Boolean);
     const leadBlock = leads.length
       ? `<p class="mobile-card-focus__lead">${escapeHtml(leads.join(", "))}</p>`
@@ -223,7 +252,7 @@
       ratingBlock = `
         <div class="mobile-card-focus__rating-top">
           <span class="mobile-card-focus__rating-label">${escapeHtml(t("card.yourRating"))}</span>
-          <span class="mobile-card-focus__rating-score">${escapeHtml(formatRating(watchEntry.rating))}/10</span>
+          <span class="mobile-card-focus__rating-score text-num">${escapeHtml(formatRating(watchEntry.rating))}/10</span>
         </div>
         ${
           watchEntry.note
@@ -249,7 +278,7 @@
         </div>
       </div>
       <h2 class="mobile-card-focus__title" id="mobileCardFocusTitle">
-        ${escapeHtml(item.title)}
+        <span class="text-ltr">${escapeHtml(ltr(item.title))}</span>
         ${altTitle}
       </h2>
       ${leadBlock}
@@ -261,12 +290,13 @@
 
   function buildFocusActions(item, watchEntry) {
     const parts = [];
+    const watched = Boolean(watchEntry);
 
     if (item.link) {
       parts.push(`
         <button
           type="button"
-          class="btn btn--primary mobile-card-focus__link-btn"
+          class="btn btn--primary btn--sm mobile-card-focus__btn"
           data-action="open-mobile-card-link"
           data-link="${escapeHtml(item.link)}"
         >
@@ -275,11 +305,33 @@
       `);
     }
 
+    parts.push(`
+      <button
+        type="button"
+        class="btn btn--ghost btn--sm mobile-card-focus__btn"
+        data-action="mobile-card-edit"
+        data-id="${escapeHtml(item.id)}"
+      >
+        ${escapeHtml(t("card.edit"))}
+      </button>
+    `);
+
+    parts.push(`
+      <button
+        type="button"
+        class="btn btn--ghost btn--sm mobile-card-focus__btn"
+        data-action="mobile-card-toggle-watched"
+        data-id="${escapeHtml(item.id)}"
+      >
+        ${escapeHtml(watched ? t("card.markUnwatched") : t("card.markWatched"))}
+      </button>
+    `);
+
     if (watchEntry && !hasWatchRating(watchEntry)) {
       parts.push(`
         <button
           type="button"
-          class="btn btn--ghost mobile-card-focus__rate-btn"
+          class="btn btn--ghost btn--sm mobile-card-focus__btn"
           data-action="mobile-card-rate"
           data-id="${escapeHtml(item.id)}"
         >
@@ -290,7 +342,7 @@
       parts.push(`
         <button
           type="button"
-          class="btn btn--ghost mobile-card-focus__rate-btn"
+          class="btn btn--ghost btn--sm mobile-card-focus__btn"
           data-action="mobile-card-rate"
           data-id="${escapeHtml(item.id)}"
         >
@@ -298,6 +350,17 @@
         </button>
       `);
     }
+
+    parts.push(`
+      <button
+        type="button"
+        class="btn btn--ghost btn--sm btn--danger mobile-card-focus__btn"
+        data-action="mobile-card-delete"
+        data-id="${escapeHtml(item.id)}"
+      >
+        ${escapeHtml(t("card.delete"))}
+      </button>
+    `);
 
     return parts.join("");
   }

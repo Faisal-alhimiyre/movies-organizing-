@@ -229,7 +229,15 @@
     return mapGenreToStandard(genre, standardGenres);
   }
 
-  function suggestGenres(rawGenres, standardGenres = []) {
+  const ANIME_GENRE_FALLBACK = "Action";
+
+  function normalizeSuggestContentType(contentType) {
+    const value = String(contentType || "").trim();
+    return value === "anime" || value === "movies" || value === "tvSeries" ? value : "";
+  }
+
+  function suggestGenres(rawGenres, standardGenres = [], contentType = "") {
+    const type = normalizeSuggestContentType(contentType);
     const mapped = [];
     for (const raw of parseGenreList(rawGenres)) {
       const genre =
@@ -237,7 +245,14 @@
         mapGenreToStandard(raw, standardGenres);
       if (genre && !mapped.includes(genre)) mapped.push(genre);
     }
-    return mapped;
+
+    if (type !== "anime") return mapped;
+
+    const withoutAnimation = mapped.filter(
+      (genre) => genre.toLowerCase() !== "animation"
+    );
+    if (withoutAnimation.length) return withoutAnimation;
+    return mapped.length ? mapped : [ANIME_GENRE_FALLBACK];
   }
 
   function isAnimatedContent(genres) {
