@@ -203,8 +203,10 @@
           </select>
 
           <div class="rating-filter">
-            <select id="ratingFilter" class="genre-filter__select rating-filter__select" aria-label="Sort by rating">
-              <option value="all">All ratings</option>
+            <select id="ratingFilter" class="genre-filter__select rating-filter__select" aria-label="Sort by">
+              <option value="all">Default order</option>
+              <option value="added-newest">Recently added</option>
+              <option value="added-oldest">Oldest first</option>
               <option value="imdb-best">IMDb — highest first</option>
               <option value="imdb-worst">IMDb — lowest first</option>
               <option value="anilist-best">AniList — highest first</option>
@@ -213,6 +215,8 @@
               <option value="personal-worst">My rating — lowest first</option>
             </select>
           </div>
+
+          <p class="ratings-backfill-banner" id="ratingsBackfillBanner" hidden aria-live="polite"></p>
         </div>
       </section>
 
@@ -721,7 +725,10 @@
               <p class="form-field__status" id="formLinkStatus" aria-live="polite"></p>
             </label>
 
-            <p class="form-filled-banner" id="formFilledBanner" hidden role="status" aria-live="polite"></p>
+            <div class="form-link-preview" id="formLinkPreview" hidden role="status" aria-live="polite">
+              <p class="form-link-preview__hint" id="formLinkPreviewHint"></p>
+              <div class="title-search-confirm__preview form-link-preview__card" id="formLinkPreviewCard"></div>
+            </div>
 
             <label class="form-field form-field--full">
               <span class="form-field__label">Type</span>

@@ -428,6 +428,123 @@
     color: #2a1e12;
     -webkit-text-fill-color: #2a1e12;
   }
+
+  /* Add modal — search, confirm step, type picker */
+  .add-mode-tabs {
+    margin-inline: 0.85rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .add-mode-tab {
+    min-height: 44px;
+    padding: 0.45rem 0.35rem;
+    font-size: 0.76rem;
+    line-height: 1.25;
+  }
+
+  .modal__search,
+  .modal__form {
+    padding-inline: 0.85rem;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .title-search__results {
+    max-height: 14rem;
+  }
+
+  .title-search__filter {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .title-search__filter .select {
+    min-height: 44px;
+  }
+
+  .title-search__item {
+    min-height: 56px;
+    padding: 0.65rem 0.7rem;
+  }
+
+  .title-search__badge {
+    font-size: 0.62rem;
+    padding: 0.16rem 0.38rem;
+  }
+
+  .title-search-confirm__preview,
+  .form-link-preview__card {
+    gap: 0.65rem;
+    padding: 0.65rem;
+  }
+
+  .title-search-confirm__poster {
+    width: 3.75rem;
+  }
+
+  .title-search-confirm__poster--empty {
+    width: 3.75rem;
+    min-height: 5.25rem;
+  }
+
+  .title-search-confirm__name {
+    font-size: 0.92rem;
+  }
+
+  .title-search-confirm__plot {
+    font-size: 0.78rem;
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .content-type-picker__btn {
+    min-height: 44px;
+    padding: 0.5rem 0.3rem;
+    font-size: 0.74rem;
+  }
+
+  .title-search-confirm .modal__footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding-bottom: 0.25rem;
+  }
+
+  .title-search-confirm .modal__footer .btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  .form-link-preview__hint {
+    font-size: 0.82rem;
+    padding: 0.55rem 0.7rem;
+  }
+}
+
+@media (max-width: 380px) {
+  .title-search-confirm__preview,
+  .form-link-preview__card {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .title-search-confirm__poster,
+  .title-search-confirm__poster--empty {
+    width: 4.5rem;
+  }
+
+  .title-search-confirm__actors {
+    justify-content: center;
+  }
+
+  html[dir="rtl"] .title-search-confirm__body {
+    text-align: center;
+  }
 }
 
 /* --------------------------------------------------------------------------

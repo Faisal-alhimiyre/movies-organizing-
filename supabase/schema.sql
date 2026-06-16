@@ -138,6 +138,12 @@ create policy "list_snapshots_insert"
 --
 -- Already have watchlist_items but no anilist_rating? Run once:
 --   supabase/migrate-anilist-rating.sql
+--
+-- Upgrading an older project? Run once:
+--   supabase/migrate-incremental.sql
+--
+-- "addedAt" (recently-added sort) is stored inside each title in the JSON
+-- watchlist payload, not as a watchlist_items column.
 
 -- Wipe all cloud data (run ONLY after migrate-to-accounts.sql or full schema.sql):
 -- delete from public.watchlist_items;

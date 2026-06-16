@@ -77,6 +77,8 @@
   let searchDebounceTimer = null;
   let formLinkLookupTimer = null;
   let addSaveInFlight = false;
+  let searchPickLoading = false;
+  let searchConfirmReturnFocus = null;
   let ratingsBackfillRunning = false;
 
   const state = {
@@ -106,6 +108,7 @@
     searchPickDetails: null,
     searchConfirmSecondary: [],
     manualLinkMeta: null,
+    manualLinkPreviewDetails: null,
     ratingItemId: null,
     ratingPickerValue: null,
     ratingPickerChosen: false,
@@ -120,6 +123,7 @@
     genreFilterChips: document.getElementById("genreFilterChips"),
     watchedFilter: document.getElementById("watchedFilter"),
     ratingFilter: document.getElementById("ratingFilter"),
+    ratingsBackfillBanner: document.getElementById("ratingsBackfillBanner"),
     exportBtn: null,
     importBtn: null,
     manageListsBtn: null,
@@ -164,6 +168,7 @@
     addBtn: document.getElementById("addBtn"),
     typeTabs: document.querySelectorAll(".type-tab"),
     modal: document.getElementById("itemModal"),
+    modalPanel: document.querySelector("#itemModal .modal__panel"),
     addModeTabs: document.getElementById("addModeTabs"),
     searchAddPanel: document.getElementById("searchAddPanel"),
     searchAddStep: document.getElementById("searchAddStep"),
@@ -205,11 +210,112 @@
     formLeadChips: document.getElementById("formLeadChips"),
     formLink: document.getElementById("formLink"),
     formLinkStatus: document.getElementById("formLinkStatus"),
-    formFilledBanner: document.getElementById("formFilledBanner"),
+    formLinkPreview: document.getElementById("formLinkPreview"),
+    formLinkPreviewHint: document.getElementById("formLinkPreviewHint"),
+    formLinkPreviewCard: document.getElementById("formLinkPreviewCard"),
     formSummary: document.getElementById("formSummary"),
     formSecondaryAdd: document.getElementById("formSecondaryAdd"),
     formSecondaryChips: document.getElementById("formSecondaryChips"),
   };
+
+  function isAppDialogOpen() {
+    return Boolean(document.querySelector(".app-dialog:not([hidden])"));
+  }
+
+  function isSearchConfirmVisible() {
+    return Boolean(els.searchConfirmStep && !els.searchConfirmStep.hidden);
+  }
+
+  function setButtonLoading(button, loading, { loadingKey } = {}) {
+    if (!button) return;
+    if (loading) {
+      if (!button.dataset.defaultLabel) {
+        button.dataset.defaultLabel = button.textContent.trim();
+      }
+      button.disabled = true;
+      button.classList.add("btn--loading");
+      button.setAttribute("aria-busy", "true");
+      if (loadingKey) button.textContent = t(loadingKey);
+    } else {
+      button.disabled = false;
+      button.classList.remove("btn--loading");
+      button.removeAttribute("aria-busy");
+      if (button.dataset.defaultLabel) {
+        button.textContent = button.dataset.defaultLabel;
+        delete button.dataset.defaultLabel;
+      }
+    }
+  }
+
+  function getModalFocusableElements() {
+    if (!els.modalPanel) return [];
+    return [
+      ...els.modalPanel.querySelectorAll(
+        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      ),
+    ].filter((el) => !el.closest("[hidden]") && el.getClientRects().length > 0);
+  }
+
+  function handleModalFocusTrap(event) {
+    if (els.modal?.hidden || isAppDialogOpen()) return;
+    if (event.key !== "Tab") return;
+
+    const focusable = getModalFocusableElements();
+    if (!focusable.length) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (event.shiftKey) {
+      if (active === first || !els.modalPanel?.contains(active)) {
+        event.preventDefault();
+        last.focus();
+      }
+      return;
+    }
+
+    if (active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  function shouldIgnoreAddEnterTarget(target) {
+    if (!target) return true;
+    if (target.tagName === "TEXTAREA") return true;
+    if (target.tagName === "SELECT") return true;
+    if (target.tagName === "BUTTON") return true;
+    if (target.closest(".content-type-picker")) return true;
+    return false;
+  }
+
+  function handleAddModalKeydown(event) {
+    if (els.modal?.hidden || isAppDialogOpen()) return;
+
+    if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+      if (event.isComposing || event.defaultPrevented) return;
+      if (!isSearchConfirmVisible()) return;
+      if (shouldIgnoreAddEnterTarget(event.target)) return;
+      event.preventDefault();
+      handleSearchConfirmAdd();
+    }
+  }
+
+  function setSearchPickLoading(loading) {
+    searchPickLoading = loading;
+    if (els.searchAddStep) {
+      els.searchAddStep.classList.toggle("title-search--loading", loading);
+      els.searchAddStep.setAttribute("aria-busy", String(loading));
+    }
+    els.searchAddPanel
+      ?.querySelectorAll("[data-action='pick-search-result']")
+      .forEach((button) => {
+        button.disabled = loading;
+      });
+    if (els.titleSearchMore) els.titleSearchMore.disabled = loading;
+    if (els.titleSearchInput) els.titleSearchInput.readOnly = loading;
+  }
 
   function loadJson(key, fallback) {
     try {
@@ -454,15 +560,22 @@
     els.formLinkStatus.classList.toggle("form-field__status--error", Boolean(error));
   }
 
-  function setFormFilledBanner(visible) {
-    if (!els.formFilledBanner) return;
-    if (!visible) {
-      els.formFilledBanner.hidden = true;
-      els.formFilledBanner.innerHTML = "";
+  function setFormLinkPreview(details) {
+    if (!els.formLinkPreview) return;
+    if (!details?.title) {
+      els.formLinkPreview.hidden = true;
+      if (els.formLinkPreviewCard) els.formLinkPreviewCard.innerHTML = "";
+      if (els.formLinkPreviewHint) els.formLinkPreviewHint.innerHTML = "";
+      state.manualLinkPreviewDetails = null;
       return;
     }
-    els.formFilledBanner.innerHTML = t("manual.filled");
-    els.formFilledBanner.hidden = false;
+
+    state.manualLinkPreviewDetails = details;
+    if (els.formLinkPreviewHint) {
+      els.formLinkPreviewHint.innerHTML = t("manual.filled");
+    }
+    renderTitlePreview(els.formLinkPreviewCard, details);
+    els.formLinkPreview.hidden = false;
   }
 
   function applyMetadataToManualForm(meta) {
@@ -504,14 +617,14 @@
     if (!link) {
       state.manualLinkMeta = null;
       setFormLinkStatus("");
-      setFormFilledBanner(false);
+      setFormLinkPreview(null);
       return;
     }
 
     if (!window.WatchlistMetadata?.isSupportedLink(link)) {
       state.manualLinkMeta = null;
       setFormLinkStatus("");
-      setFormFilledBanner(false);
+      setFormLinkPreview(null);
       return;
     }
 
@@ -530,9 +643,21 @@
       return;
     }
 
-    setFormFilledBanner(false);
+    setFormLinkPreview(null);
     setFormLinkStatus(t("manual.lookingUp"));
-    const meta = await window.WatchlistMetadata.resolveMetadataFromLink(link);
+    if (els.formLink) {
+      els.formLink.setAttribute("aria-busy", "true");
+      els.formLink.classList.add("form-input--loading");
+    }
+    let meta;
+    try {
+      meta = await window.WatchlistMetadata.resolveMetadataFromLink(link);
+    } finally {
+      if (els.formLink) {
+        els.formLink.removeAttribute("aria-busy");
+        els.formLink.classList.remove("form-input--loading");
+      }
+    }
     if (!meta?.title) {
       state.manualLinkMeta = null;
       const isAnime =
@@ -547,7 +672,7 @@
 
     applyMetadataToManualForm(meta);
     setFormLinkStatus("");
-    setFormFilledBanner(true);
+    setFormLinkPreview(meta);
   }
 
   function queueFormLinkLookup() {
@@ -638,6 +763,12 @@
       if (item.secondaryGenres?.length) {
         entry.secondaryGenres = item.secondaryGenres;
       }
+      if (item.poster) entry.poster = item.poster;
+      if (item.imdbRating) entry.imdbRating = item.imdbRating;
+      if (item.anilistRating) entry.anilistRating = item.anilistRating;
+      if (item.year) entry.year = item.year;
+      if (item.link) entry.link = item.link;
+      entry.addedAt = item.addedAt || Date.now();
 
       merged[item.contentType][item.genre].push(entry);
     }
@@ -943,6 +1074,24 @@
     delete item.imdbRating;
   }
 
+  function backfillMissingAddedAt(items) {
+    const now = Date.now();
+    items.forEach((item, index) => {
+      if (!item.addedAt) {
+        item.addedAt = now - (items.length - index) * 1000;
+      }
+    });
+  }
+
+  function stampItemAddedAt(item, { existing = null, at = null } = {}) {
+    if (existing?.addedAt) {
+      item.addedAt = existing.addedAt;
+    } else if (!item.addedAt) {
+      item.addedAt = at ?? Date.now();
+    }
+    return item;
+  }
+
   function flattenWatchlist(data) {
     const items = [];
 
@@ -973,6 +1122,7 @@
       }
     }
 
+    backfillMissingAddedAt(items);
     return items;
   }
 
@@ -999,6 +1149,7 @@
       if (item.imdbRating) entry.imdbRating = item.imdbRating;
       if (item.anilistRating) entry.anilistRating = item.anilistRating;
       if (item.year) entry.year = item.year;
+      if (item.addedAt) entry.addedAt = item.addedAt;
       if (item.secondaryGenres?.length) {
         entry.secondaryGenres = item.secondaryGenres;
       }
@@ -1168,7 +1319,17 @@
   function isRatingSortActive() {
     const source = state.ratingFilterSource;
     const sort = state.ratingFilterSort;
-    return Boolean(source && source !== "all" && sort && sort !== "default");
+    return Boolean(
+      source && source !== "all" && source !== "added" && sort && sort !== "default"
+    );
+  }
+
+  function isAddedSortActive() {
+    return state.ratingFilterSource === "added";
+  }
+
+  function isFlatSortActive() {
+    return (isRatingSortActive() || isAddedSortActive()) && state.selectedGenres.length === 0;
   }
 
   function sortItemsByRating(items) {
@@ -1187,15 +1348,27 @@
     });
   }
 
+  function sortItemsByAdded(items) {
+    const newest = state.ratingFilterSort !== "oldest";
+    return [...items].sort((a, b) => {
+      const aTime = a.addedAt || 0;
+      const bTime = b.addedAt || 0;
+      if (aTime !== bTime) return newest ? bTime - aTime : aTime - bTime;
+      return a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+    });
+  }
+
   function itemMatchesRatingFilter(item) {
     const source = state.ratingFilterSource;
-    if (!source || source === "all") return true;
+    if (!source || source === "all" || source === "added") return true;
     return getRatingSortScore(item) != null;
   }
 
   function ratingFilterOptions() {
     return [
       { value: "all", labelKey: "filter.ratingOptionAll" },
+      { value: "added-newest", labelKey: "filter.ratingOptionAddedNewest" },
+      { value: "added-oldest", labelKey: "filter.ratingOptionAddedOldest" },
       { value: "imdb-best", labelKey: "filter.ratingOptionImdbBest" },
       { value: "imdb-worst", labelKey: "filter.ratingOptionImdbWorst" },
       { value: "anilist-best", labelKey: "filter.ratingOptionAnilistBest" },
@@ -1209,6 +1382,12 @@
     if (!value || value === "all") {
       return { source: "all", sort: "default" };
     }
+    if (value === "added-newest") {
+      return { source: "added", sort: "newest" };
+    }
+    if (value === "added-oldest") {
+      return { source: "added", sort: "oldest" };
+    }
     const [source, sort] = String(value).split("-");
     if (!source || source === "rt") {
       return { source: "all", sort: "default" };
@@ -1221,6 +1400,9 @@
 
   function getRatingFilterValue() {
     if (state.ratingFilterSource === "all") return "all";
+    if (state.ratingFilterSource === "added") {
+      return state.ratingFilterSort === "oldest" ? "added-oldest" : "added-newest";
+    }
     const sort = state.ratingFilterSort === "worst" ? "worst" : "best";
     return `${state.ratingFilterSource}-${sort}`;
   }
@@ -1266,6 +1448,9 @@
   }
 
   function sortItemsInGroup(items) {
+    if (isAddedSortActive()) {
+      return sortItemsByAdded(items);
+    }
     if (isRatingSortActive()) {
       return sortItemsByRating(items);
     }
@@ -1286,14 +1471,17 @@
   }
 
   function groupItems(items) {
-    if (isRatingSortActive() && state.selectedGenres.length === 0) {
+    if (isFlatSortActive()) {
+      const sorted = isAddedSortActive()
+        ? sortItemsByAdded(items)
+        : sortItemsByRating(items);
       return [
         {
           contentType: null,
           genre: null,
           isAllMatch: false,
           isRatingSorted: true,
-          items: sortItemsByRating(items),
+          items: sorted,
         },
       ];
     }
@@ -1685,6 +1873,25 @@
     return null;
   }
 
+  function updateRatingsBackfillBanner({ running, done = 0, total = 0, phase = "" } = {}) {
+    if (!els.ratingsBackfillBanner) return;
+    const active = running ?? ratingsBackfillRunning;
+    if (!active || total <= 0) {
+      els.ratingsBackfillBanner.hidden = true;
+      els.ratingsBackfillBanner.textContent = "";
+      return;
+    }
+
+    const key =
+      phase === "anilist"
+        ? "ratings.backfillAnilist"
+        : phase === "imdb"
+          ? "ratings.backfillImdb"
+          : "ratings.backfillProgress";
+    els.ratingsBackfillBanner.textContent = t(key, { done, total });
+    els.ratingsBackfillBanner.hidden = false;
+  }
+
   async function backfillMissingRatings() {
     if (ratingsBackfillRunning) return;
 
@@ -1693,6 +1900,9 @@
     if (!anilistQueue.length && !imdbQueue.length) return;
 
     ratingsBackfillRunning = true;
+    const total = anilistQueue.length + imdbQueue.length;
+    let done = 0;
+    updateRatingsBackfillBanner({ running: true, done, total, phase: "anilist" });
     if (state.ratingFilterSource !== "all") render();
 
     let updated = 0;
@@ -1716,7 +1926,13 @@
       } catch (error) {
         console.warn("[ratings] anilist backfill failed:", item.title, error);
       }
+      done += 1;
+      updateRatingsBackfillBanner({ running: true, done, total, phase: "anilist" });
       await new Promise((resolve) => setTimeout(resolve, 320));
+    }
+
+    if (imdbQueue.length) {
+      updateRatingsBackfillBanner({ running: true, done, total, phase: "imdb" });
     }
 
     for (const item of imdbQueue) {
@@ -1738,10 +1954,13 @@
         console.warn("[ratings] imdb backfill failed:", item.title, error);
       }
 
+      done += 1;
+      updateRatingsBackfillBanner({ running: true, done, total, phase: "imdb" });
       await new Promise((resolve) => setTimeout(resolve, 280));
     }
 
     ratingsBackfillRunning = false;
+    updateRatingsBackfillBanner({ running: false });
 
     if (updated > 0) {
       state.data = itemsToNested(state.items);
@@ -2317,8 +2536,8 @@
     return score ? `${score}/10` : "";
   }
 
-  function renderSearchConfirmPreview(details) {
-    if (!els.searchConfirmPreview || !details) return;
+  function renderTitlePreview(container, details) {
+    if (!container || !details) return;
 
     const poster = details.poster
       ? `<img class="title-search-confirm__poster" src="${escapeHtml(details.poster)}" alt="" />`
@@ -2344,7 +2563,7 @@
           .join("")}</span>`
       : "";
 
-    els.searchConfirmPreview.innerHTML = `
+    container.innerHTML = `
       ${poster}
       <div class="title-search-confirm__body">
         <h3 class="title-search-confirm__name">${escapeHtml(details.title)}</h3>
@@ -2356,6 +2575,10 @@
         <p class="title-search-confirm__plot">${escapeHtml(details.plot || t("search.noSummary"))}</p>
       </div>
     `;
+  }
+
+  function renderSearchConfirmPreview(details) {
+    renderTitlePreview(els.searchConfirmPreview, details);
   }
 
   function populateSearchConfirmGenreSelect(selected) {
@@ -2398,6 +2621,60 @@
     return Boolean(pick?.imdbId || pick?.anilistId || pick?.tmdbId);
   }
 
+  function normalizeTitleKey(title) {
+    return String(title || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
+  function searchResultFromPick(pick) {
+    if (!pick) return null;
+    return (
+      state.searchResults.find((result) => {
+        if (pick.imdbId && result.imdbId) {
+          return result.imdbId.toLowerCase() === pick.imdbId.toLowerCase();
+        }
+        if (pick.anilistId && result.anilistId) {
+          return Number(result.anilistId) === Number(pick.anilistId);
+        }
+        if (pick.tmdbId && result.tmdbId) {
+          return (
+            Number(result.tmdbId) === Number(pick.tmdbId) &&
+            (!pick.tmdbType || result.tmdbType === pick.tmdbType)
+          );
+        }
+        return false;
+      }) || null
+    );
+  }
+
+  function isSearchResultOnList(result) {
+    if (!result?.title) return false;
+
+    const imdbId = result.imdbId ? String(result.imdbId).toLowerCase() : "";
+    const anilistId = result.anilistId ? String(result.anilistId) : "";
+    const titleKey = normalizeTitleKey(result.title);
+    const resultYear = String(result.year || "").slice(0, 4);
+
+    return state.items.some((item) => {
+      if (imdbId) {
+        const itemImdb = getImdbId(item);
+        if (itemImdb && itemImdb === imdbId) return true;
+      }
+      if (anilistId) {
+        const itemAnilist = getAnilistId(item);
+        if (itemAnilist && itemAnilist === anilistId) return true;
+      }
+      if (!titleKey) return false;
+      if (normalizeTitleKey(item.title) !== titleKey) return false;
+      if (resultYear && item.year) {
+        return String(item.year).slice(0, 4) === resultYear;
+      }
+      return true;
+    });
+  }
+
   function renderTitleSearchResults() {
     if (!els.titleSearchResults) return;
 
@@ -2408,28 +2685,34 @@
 
     els.titleSearchResults.innerHTML = state.searchResults
       .map((result) => {
+        const onList = isSearchResultOnList(result);
         const poster = result.poster
           ? `<img class="title-search__poster" src="${escapeHtml(result.poster)}" alt="" loading="lazy" />`
           : `<div class="title-search__poster title-search__poster--empty" aria-hidden="true">🎬</div>`;
         const meta = [result.year, formatSearchResultType(result.type)]
           .filter(Boolean)
           .join(" · ");
+        const listBadge = onList
+          ? `<span class="title-search__badge">${escapeHtml(t("search.alreadyOnList"))}</span>`
+          : "";
         return `<li>
           <button
             type="button"
-            class="title-search__item"
+            class="title-search__item${onList ? " title-search__item--on-list" : ""}"
             data-action="pick-search-result"
             data-pick-source="${escapeHtml(result.source || "omdb")}"
             data-imdb-id="${escapeHtml(result.imdbId || "")}"
             data-anilist-id="${result.anilistId || ""}"
             data-tmdb-type="${escapeHtml(result.tmdbType || "")}"
             data-tmdb-id="${result.tmdbId || ""}"
+            ${onList ? 'aria-label="' + escapeHtml(result.title + " — " + t("search.alreadyOnList")) + '"' : ""}
           >
             ${poster}
             <span class="title-search__info">
               <span class="title-search__title">${escapeHtml(result.title)}</span>
               <span class="title-search__meta">${escapeHtml(meta)}</span>
             </span>
+            ${listBadge}
           </button>
         </li>`;
       })
@@ -2473,6 +2756,7 @@
   function showSearchConfirmStep(details) {
     if (!els.searchAddStep || !els.searchConfirmStep || !details) return;
 
+    searchConfirmReturnFocus = document.activeElement;
     state.searchPickDetails = details;
     els.searchAddStep.hidden = true;
     els.searchConfirmStep.hidden = false;
@@ -2503,7 +2787,13 @@
     state.searchConfirmSecondary = [];
     if (els.searchAddStep) els.searchAddStep.hidden = false;
     if (els.searchConfirmStep) els.searchConfirmStep.hidden = true;
-    els.titleSearchInput?.focus();
+    const restore = searchConfirmReturnFocus;
+    searchConfirmReturnFocus = null;
+    if (restore?.focus && els.modalPanel?.contains(restore)) {
+      restore.focus();
+    } else {
+      els.titleSearchInput?.focus();
+    }
   }
 
   async function runTitleSearch({ append = false } = {}) {
@@ -2586,17 +2876,30 @@
 
   async function handleSearchResultPick(pickButton) {
     const pick = searchPickFromButton(pickButton);
-    if (!hasLookupId(pick)) return;
+    if (!hasLookupId(pick) || searchPickLoading) return;
 
-    setTitleSearchStatus(t("search.loadingDetails"));
-    const details = await window.WatchlistMetadata.getDetailsForPick(pick);
-    if (!details?.title) {
-      setTitleSearchStatus(t("search.loadFailed"), { error: true });
+    const result = searchResultFromPick(pick);
+    if (result && isSearchResultOnList(result)) {
+      await window.WatchlistDialog.alert(t("alert.duplicateOnList"), {
+        title: t("alert.duplicateTitle"),
+      });
       return;
     }
 
-    setTitleSearchStatus("");
-    showSearchConfirmStep(details);
+    setSearchPickLoading(true);
+    setTitleSearchStatus(t("search.loadingDetails"));
+    try {
+      const details = await window.WatchlistMetadata.getDetailsForPick(pick);
+      if (!details?.title) {
+        setTitleSearchStatus(t("search.loadFailed"), { error: true });
+        return;
+      }
+
+      setTitleSearchStatus("");
+      showSearchConfirmStep(details);
+    } finally {
+      setSearchPickLoading(false);
+    }
   }
 
   function applyRatingsFromDetails(details, item) {
@@ -2650,6 +2953,7 @@
     applyRatingsFromDetails(details, item);
     if (details.year) item.year = details.year;
     item.id = makeId(contentType, genre, item.title);
+    stampItemAddedAt(item);
     return item;
   }
 
@@ -2698,7 +3002,9 @@
     }
 
     addSaveInFlight = true;
-    if (els.searchConfirmAdd) els.searchConfirmAdd.disabled = true;
+    setButtonLoading(els.searchConfirmAdd, true, { loadingKey: "btn.adding" });
+    if (els.searchConfirmBack) els.searchConfirmBack.disabled = true;
+    if (els.searchConfirmStep) els.searchConfirmStep.setAttribute("aria-busy", "true");
 
     try {
       state.items.push(item);
@@ -2709,7 +3015,9 @@
       render();
     } finally {
       addSaveInFlight = false;
-      if (els.searchConfirmAdd) els.searchConfirmAdd.disabled = false;
+      setButtonLoading(els.searchConfirmAdd, false);
+      if (els.searchConfirmBack) els.searchConfirmBack.disabled = false;
+      if (els.searchConfirmStep) els.searchConfirmStep.removeAttribute("aria-busy");
     }
   }
 
@@ -2782,6 +3090,8 @@
 
     els.form.reset();
     populateFormGenreSelect();
+    setFormLinkPreview(null);
+    state.manualLinkMeta = null;
 
     if (item) {
       syncContentTypePicker(
@@ -2824,6 +3134,8 @@
   function closeModal() {
     els.modal.hidden = true;
     addSaveInFlight = false;
+    setSearchPickLoading(false);
+    searchConfirmReturnFocus = null;
     updateBodyScrollLock();
     state.editingId = null;
     state.addMode = "search";
@@ -2833,7 +3145,7 @@
     clearTimeout(searchDebounceTimer);
     clearTimeout(formLinkLookupTimer);
     setFormLinkStatus("");
-    setFormFilledBanner(false);
+    setFormLinkPreview(null);
     resetSearchAddState();
     setBulkPasteError("");
     if (els.form) els.form.hidden = true;
@@ -3181,6 +3493,7 @@
     const targetItems = flattenWatchlist(payload.watchlist);
     const copy = structuredClone(item);
     copy.id = makeId(copy.contentType, copy.genre, copy.title);
+    stampItemAddedAt(copy);
 
     if (findDuplicateInItems(targetItems, copy)) {
       return {
@@ -3548,9 +3861,17 @@
       secondaryGenres,
     };
 
-    if (state.editingId) {
-      const existing = state.items.find((i) => i.id === state.editingId);
-      if (existing?.altTitle) item.altTitle = existing.altTitle;
+    if (state.editingId && existing) {
+      if (existing.altTitle) item.altTitle = existing.altTitle;
+      if (existing?.poster && !item.poster) item.poster = existing.poster;
+      if (existing?.imdbRating && !item.imdbRating) item.imdbRating = existing.imdbRating;
+      if (existing?.anilistRating && !item.anilistRating) {
+        item.anilistRating = existing.anilistRating;
+      }
+      if (existing?.year && !item.year) item.year = existing.year;
+      stampItemAddedAt(item, { existing });
+    } else {
+      stampItemAddedAt(item);
     }
 
     item.id = makeId(contentType, genre, title);
@@ -3582,6 +3903,8 @@
       if (index === -1) return false;
 
       const oldId = state.editingId;
+      const previous = state.items[index];
+      stampItemAddedAt(item, { existing: previous });
       state.items[index] = item;
 
       if (oldId !== item.id && state.watched[oldId]) {
@@ -3590,6 +3913,7 @@
         saveWatched();
       }
     } else {
+      stampItemAddedAt(item);
       state.items.push(item);
     }
 
@@ -3642,12 +3966,16 @@
 
     let added = 0;
     let skipped = 0;
+    const batchStart = Date.now();
 
     for (const entry of parsed.items) {
-      const item = {
-        ...entry,
-        id: makeId(entry.contentType, entry.genre, entry.title),
-      };
+      const item = stampItemAddedAt(
+        {
+          ...entry,
+          id: makeId(entry.contentType, entry.genre, entry.title),
+        },
+        { at: batchStart + added }
+      );
 
       if (findDuplicate(item, null)) {
         skipped += 1;
@@ -3732,7 +4060,7 @@
 
     addSaveInFlight = true;
     const saveBtn = els.form?.querySelector('button[type="submit"]');
-    if (saveBtn) saveBtn.disabled = true;
+    setButtonLoading(saveBtn, true, { loadingKey: "btn.saving" });
 
     try {
       saveItem(item);
@@ -3742,7 +4070,7 @@
       render();
     } finally {
       addSaveInFlight = false;
-      if (saveBtn) saveBtn.disabled = false;
+      setButtonLoading(saveBtn, false);
     }
   }
 
@@ -3782,6 +4110,16 @@
 
   function countTitles(data) {
     return flattenWatchlist(data || emptyWatchlist()).length;
+  }
+
+  function isImportPayloadValid(payload) {
+    return Boolean(payload?.watchlist && countTitles(payload.watchlist) > 0);
+  }
+
+  async function alertEmptyImport() {
+    await window.WatchlistDialog.alert(t("alert.importEmptyList"), {
+      title: t("alert.importEmptyListTitle"),
+    });
   }
 
   function closeImportShareModal() {
@@ -3828,6 +4166,10 @@
 
   function openImportShareModal(payload) {
     if (!els.importShareModal) return;
+    if (!isImportPayloadValid(payload)) {
+      void alertEmptyImport();
+      return;
+    }
 
     pendingImportPayload = payload;
     const listName = payload.listName || "Shared list";
@@ -3848,7 +4190,7 @@
       if (els.importMergeBtn) els.importMergeBtn.hidden = false;
       if (els.importReplaceBtn) {
         els.importReplaceBtn.hidden = false;
-        els.importReplaceBtn.textContent = "Replace my current list";
+        els.importReplaceBtn.textContent = t("import.replace");
         els.importReplaceBtn.classList.remove("btn--ghost");
         els.importReplaceBtn.classList.add("btn--danger");
       }
@@ -3863,7 +4205,7 @@
       if (els.importMergeBtn) els.importMergeBtn.hidden = true;
       if (els.importReplaceBtn) {
         els.importReplaceBtn.hidden = false;
-        els.importReplaceBtn.textContent = "Add to this list";
+        els.importReplaceBtn.textContent = t("import.addToList");
         els.importReplaceBtn.classList.remove("btn--danger");
         els.importReplaceBtn.classList.add("btn--ghost");
       }
@@ -3878,7 +4220,7 @@
   async function importAsNewList(payload) {
     const titleCount = countTitles(payload.watchlist);
     const name = uniqueImportedListName(payload.listName);
-    const description = `Imported ${titleCount} title${titleCount === 1 ? "" : "s"}`;
+    const description = t("import.listDescription", { count: titleCount });
 
     const result = window.WatchlistAuth.createList(name, description);
     if (!result.ok) {
@@ -4148,6 +4490,11 @@
       return;
     }
 
+    if (!isImportPayloadValid(result.payload)) {
+      await alertEmptyImport();
+      return;
+    }
+
     openImportShareModal(result.payload);
   }
 
@@ -4179,8 +4526,33 @@
       cloud = result;
       importedListName = result.listName;
     } else if (mode === "merge") {
-      mergeImportIntoCurrentList(payload);
+      const mergeResult = mergeImportIntoCurrentList(payload);
       cloud = await syncCurrentListToCloud();
+      pendingImportPayload = null;
+      closeImportShareModal();
+      updateGenreOptions();
+      renderListSwitcher();
+      updateHeaderTitle();
+      render();
+      updateStats();
+
+      if (!cloud.ok) {
+        await window.WatchlistDialog.alert(t("alert.savedLocally"), {
+          title: t("alert.savedLocallyTitle"),
+        });
+      }
+
+      const message =
+        mergeResult.skipped > 0
+          ? t("alert.importMergedSkips", {
+              added: mergeResult.added,
+              skipped: mergeResult.skipped,
+            })
+          : t("alert.importMerged");
+      await window.WatchlistDialog.alert(message, {
+        title: t("alert.listUpdatedTitle"),
+      });
+      return;
     } else {
       applyImportToCurrentList(payload);
       cloud = await syncCurrentListToCloud();
@@ -4219,7 +4591,7 @@
     reader.onload = async () => {
       try {
         const payload = JSON.parse(reader.result);
-        if (!payload?.watchlist) {
+        if (!isImportPayloadValid(payload)) {
           throw new Error("Invalid backup");
         }
 
@@ -4235,13 +4607,23 @@
   }
 
   function mergeImportIntoCurrentList(payload) {
+    const beforeKeys = new Set(
+      flattenWatchlist(state.data).map((item) => itemKey(item.contentType, item.title))
+    );
+    const importItems = flattenWatchlist(remapWatchlistGenres(payload.watchlist));
+    let skipped = 0;
+    for (const item of importItems) {
+      if (beforeKeys.has(itemKey(item.contentType, item.title))) {
+        skipped += 1;
+      }
+    }
+
     const merged = mergeLegacyWithBundled(payload.watchlist, state.data);
     state.data = applyBundledGenreCorrections(merged, null);
     state.items = flattenWatchlist(state.data);
     state.data = itemsToNested(state.items);
 
-    const importedItems = flattenWatchlist(remapWatchlistGenres(payload.watchlist));
-    for (const item of importedItems) {
+    for (const item of importItems) {
       const watchEntry = findImportedWatchEntry(item, payload.watched);
       if (!watchEntry) continue;
 
@@ -4251,6 +4633,13 @@
     window.WatchlistAuth?.clearEmptyListFlag();
     saveData();
     saveWatched();
+
+    const afterCount = state.items.length;
+    const beforeCount = beforeKeys.size;
+    return {
+      added: Math.max(0, afterCount - beforeCount),
+      skipped,
+    };
   }
 
   function bindEvents() {
@@ -4699,9 +5088,17 @@
         return;
       }
       if (!els.modal.hidden) {
+        if (isSearchConfirmVisible()) {
+          hideSearchConfirmStep();
+          return;
+        }
         closeModal();
+        return;
       }
     });
+
+    document.addEventListener("keydown", handleModalFocusTrap);
+    els.modal?.addEventListener("keydown", handleAddModalKeydown);
 
     document.addEventListener("scroll", hideLinkPreviewPopover, true);
     window.addEventListener("resize", hideLinkPreviewPopover);

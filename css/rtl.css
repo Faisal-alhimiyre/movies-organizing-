@@ -85,9 +85,41 @@ html[dir="rtl"] .title-search-confirm__back::before {
   content: "→";
 }
 
+html[dir="rtl"] .add-mode-tabs,
+html[dir="rtl"] .modal__search,
+html[dir="rtl"] .title-search,
+html[dir="rtl"] .title-search-confirm,
+html[dir="rtl"] .title-search-confirm__fields,
+html[dir="rtl"] .form-link-preview,
+html[dir="rtl"] .content-type-picker {
+  direction: rtl;
+}
+
+html[dir="rtl"] .title-search__item,
+html[dir="rtl"] .title-search__info,
+html[dir="rtl"] .title-search-confirm__body,
+html[dir="rtl"] .form-link-preview__hint {
+  text-align: right;
+}
+
+html[dir="rtl"] .title-search-confirm__year,
+html[dir="rtl"] .title-search-confirm__rating {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+html[dir="rtl"] .title-search-confirm__actor {
+  direction: rtl;
+}
+
 html[dir="rtl"] .add-panel-hint {
   border-left: none;
   border-right: 3px solid var(--accent);
+}
+
+html[dir="rtl"] .modal__footer-right {
+  margin-left: 0;
+  margin-inline-start: auto;
 }
 
 html[dir="rtl"] .mobile-card-focus__close {

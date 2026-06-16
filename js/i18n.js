@@ -13,6 +13,8 @@
       "btn.addTitle": "Add title",
       "btn.cancel": "Cancel",
       "btn.save": "Save",
+      "btn.saving": "Saving…",
+      "btn.adding": "Adding…",
       "btn.close": "Close",
       "btn.delete": "Delete",
       "btn.ok": "OK",
@@ -55,10 +57,12 @@
       "filter.all": "All",
       "filter.watched": "Watched",
       "filter.unwatched": "Not watched",
-      "filter.byGenre": "Filter by genre",
+      "filter.byGenre": "Filter by genre (primary or secondary)",
       "filter.byWatched": "Filter by watched status",
-      "filter.byRating": "Sort by rating",
-      "filter.ratingOptionAll": "All ratings",
+      "filter.byRating": "Sort by",
+      "filter.ratingOptionAll": "Default order",
+      "filter.ratingOptionAddedNewest": "Recently added",
+      "filter.ratingOptionAddedOldest": "Oldest first",
       "filter.ratingOptionImdbBest": "IMDb — highest first",
       "filter.ratingOptionImdbWorst": "IMDb — lowest first",
       "filter.ratingOptionAnilistBest": "AniList — highest first",
@@ -93,6 +97,10 @@
       "empty.anilistRatingLoading": "Loading AniList scores for your anime…",
       "empty.anilistRatingMissing":
         "AniList scores are not saved yet. They load automatically for anime — give it a moment, or open the app again in a minute.",
+      "ratings.backfillProgress": "Loading ratings… {done}/{total}",
+      "ratings.backfillAnilist": "Loading AniList scores… {done}/{total}",
+      "ratings.backfillImdb": "Loading IMDb ratings… {done}/{total}",
+      "import.listDescription": "Imported {count} titles",
       "genre.oneTitle": "1 title",
       "genre.otherTitles": "{count} titles",
       "genre.allSelected": "All selected",
@@ -158,6 +166,7 @@
       "search.chooseGenre": "Choose genre",
       "search.mainGenre": "Main genre",
       "search.noSummary": "No summary available.",
+      "search.alreadyOnList": "On your list",
       "manual.hint":
         "<strong>Step 1: Paste your link.</strong> IMDb, AniList, or MyAnimeList. We'll fill in the details for you.",
       "manual.link": "Link",
@@ -339,6 +348,8 @@
       "alert.deleteTitleConfirm":
         "Remove “{name}” from your watchlist? This cannot be undone.",
       "alert.deleteTitleTitle": "Delete title",
+      "alert.importEmptyList": "That file or link has no titles to import.",
+      "alert.importEmptyListTitle": "Nothing to import",
       "alert.importFailedTitle": "Import failed",
       "alert.couldNotCreateList": "Could not create a new list.",
       "alert.savedLocallyCloudFail":
@@ -371,6 +382,7 @@
       "alert.importOpenedNewList":
         "Opened “{name}” as a new list. Your previous list is unchanged.",
       "alert.importMerged": "New titles were added to your current list.",
+      "alert.importMergedSkips": "{added} added. {skipped} duplicate titles were already on your list.",
       "alert.importReplaced": "Your current list was updated with the imported file.",
       "alert.newListCreatedTitle": "New list created",
       "alert.listUpdatedTitle": "List updated",
@@ -413,6 +425,8 @@
       "btn.addTitle": "إضافة عنوان",
       "btn.cancel": "إلغاء",
       "btn.save": "حفظ",
+      "btn.saving": "جاري الحفظ…",
+      "btn.adding": "جاري الإضافة…",
       "btn.close": "إغلاق",
       "btn.delete": "حذف",
       "btn.ok": "حسناً",
@@ -455,10 +469,12 @@
       "filter.all": "الكل",
       "filter.watched": "تمت المشاهدة",
       "filter.unwatched": "لم تُشاهد",
-      "filter.byGenre": "تصفية حسب التصنيف",
+      "filter.byGenre": "تصفية حسب التصنيف (رئيسي أو ثانوي)",
       "filter.byWatched": "تصفية حسب حالة المشاهدة",
-      "filter.byRating": "ترتيب حسب التقييم",
-      "filter.ratingOptionAll": "كل التقييمات",
+      "filter.byRating": "ترتيب حسب",
+      "filter.ratingOptionAll": "الترتيب الافتراضي",
+      "filter.ratingOptionAddedNewest": "المضاف مؤخراً",
+      "filter.ratingOptionAddedOldest": "الأقدم أولاً",
       "filter.ratingOptionImdbBest": "IMDb — الأعلى أولاً",
       "filter.ratingOptionImdbWorst": "IMDb — الأقل أولاً",
       "filter.ratingOptionAnilistBest": "AniList — الأعلى أولاً",
@@ -493,6 +509,10 @@
       "empty.anilistRatingLoading": "جاري تحميل تقييمات AniList للأنمي…",
       "empty.anilistRatingMissing":
         "تقييمات AniList غير محفوظة بعد. تُحمّل تلقائياً للأنمي — انتظر قليلاً أو أعد فتح التطبيق بعد دقيقة.",
+      "ratings.backfillProgress": "جاري تحميل التقييمات… {done}/{total}",
+      "ratings.backfillAnilist": "جاري تحميل تقييمات AniList… {done}/{total}",
+      "ratings.backfillImdb": "جاري تحميل تقييمات IMDb… {done}/{total}",
+      "import.listDescription": "تم استيراد {count} عنواناً",
       "genre.oneTitle": "عنوان واحد",
       "genre.otherTitles": "{count} عناوين",
       "genre.allSelected": "كل المحدد",
@@ -558,6 +578,7 @@
       "search.chooseGenre": "اختر التصنيف",
       "search.mainGenre": "التصنيف الرئيسي",
       "search.noSummary": "لا يوجد ملخص.",
+      "search.alreadyOnList": "في قائمتك",
       "manual.hint":
         "<strong>الخطوة 1: الصق الرابط.</strong> IMDb أو AniList أو MyAnimeList. سنملأ التفاصيل لك.",
       "manual.link": "الرابط",
@@ -767,12 +788,15 @@
       "alert.importOpenedNewList":
         "تم فتح «{name}» كقائمة جديدة. قائمتك السابقة لم تتغير.",
       "alert.importMerged": "تمت إضافة عناوين جديدة لقائمتك الحالية.",
+      "alert.importMergedSkips": "تمت إضافة {added}. {skipped} عنواناً مكرراً كان موجوداً مسبقاً.",
       "alert.importReplaced": "تم تحديث قائمتك الحالية بالملف المستورد.",
       "alert.newListCreatedTitle": "قائمة جديدة",
       "alert.listUpdatedTitle": "تم تحديث القائمة",
       "alert.couldNotOpenFile":
         "تعذر قراءة هذا الملف. اطلب من صديقك إرسال ملف منزّل من هذا التطبيق.",
       "alert.couldNotOpenFileTitle": "تعذر فتح الملف",
+      "alert.importEmptyList": "لا توجد عناوين في هذا الملف أو الرابط للاستيراد.",
+      "alert.importEmptyListTitle": "لا شيء للاستيراد",
       "alert.importMergeConfirm":
         "إضافة {count} عنواناً من «{listName}» إلى «{currentName}»؟ سيتم تخطي المكررات.",
       "alert.importMergeTitle": "إضافة للقائمة الحالية؟",
@@ -1064,6 +1088,7 @@
     setText("#importShareModalHint", "import.hint");
     setText("[data-action='import-new-list']", "import.newList");
     setText("#importMergeBtn", "import.merge");
+    setText("#importReplaceBtn", "import.replace");
     setText("#importShareModal .btn--text", "btn.cancel");
 
     setText("#searchAddPanel .modal__footer .btn--ghost", "btn.cancel");
