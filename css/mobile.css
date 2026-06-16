@@ -167,6 +167,8 @@
     position: relative;
     cursor: pointer;
     overflow: hidden;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .card:has(.card-menu__panel:not([hidden])) {
@@ -198,17 +200,16 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    flex: 0 0 auto;
-    max-width: 100%;
+    flex: 0 1 auto;
     min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     box-sizing: border-box;
-    padding-block: 0.16rem;
-    padding-inline: 0.44rem;
-    font-size: 0.56rem;
+    padding: 0.22rem 0.55rem;
+    font-size: 0.44rem;
     font-weight: 600;
-    line-height: 1.2;
+    line-height: 1;
     text-align: center;
     color: var(--text-muted, #9ca3af);
     background: rgba(255, 255, 255, 0.04);
@@ -330,8 +331,12 @@
   .card__footer {
     display: flex;
     align-items: center;
-    gap: 0.22rem;
+    justify-content: flex-start;
+    gap: clamp(0.14rem, 1.2vw, 0.22rem);
+    width: 100%;
+    max-width: 100%;
     min-width: 0;
+    box-sizing: border-box;
     margin-top: 0.2rem;
     padding: 0.32rem 0 0.28rem;
     border-top: 1px solid var(--border);
@@ -339,10 +344,15 @@
 
   .card__footer-mobile {
     display: flex;
-    flex: 0 0 auto;
+    flex: 1 1 auto;
     align-items: center;
     min-width: 0;
-    overflow: hidden;
+    max-width: 100%;
+  }
+
+  .card__footer .card-menu {
+    margin-inline-start: 0;
+    flex: 0 0 auto;
   }
 
   .card-menu {
@@ -366,10 +376,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.6rem;
-    height: 1.6rem;
-    min-width: 1.6rem;
-    min-height: 1.6rem;
+    width: clamp(1.3rem, 5.8vw, 1.6rem);
+    height: clamp(1.3rem, 5.8vw, 1.6rem);
+    min-width: clamp(1.3rem, 5.8vw, 1.6rem);
+    min-height: clamp(1.3rem, 5.8vw, 1.6rem);
     padding: 0;
     flex-shrink: 0;
     border-radius: 6px;
@@ -378,9 +388,9 @@
   .card__footer:has(.card__watch-rating) .card__footer-mobile {
     display: block;
     flex: 1 1 auto;
-    width: auto;
     min-width: 0;
-    max-width: calc(100% - 1.82rem);
+    max-width: 100%;
+    overflow: hidden;
   }
 
   .card-menu__panel {
@@ -960,7 +970,7 @@
   }
 }
 
-@media (max-width: 380px) {
+@media (max-width: 420px) {
   .title-search-confirm__preview,
   .form-link-preview__card {
     flex-direction: column;
@@ -1019,7 +1029,8 @@
   }
 
   .cards,
-  .app[data-layout="poster"] .cards {
+  .app[data-layout="poster"] .cards,
+  .app[data-layout="hover"] .cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.35rem;
   }
@@ -1030,7 +1041,7 @@
   }
 
   .app[data-layout="poster"] .card__body {
-    padding: 0.28rem 0.26rem 0.32rem;
+    padding: 0.28rem 0.22rem 0.32rem;
   }
 
   .app[data-layout="hover"] .card {

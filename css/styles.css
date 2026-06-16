@@ -1305,7 +1305,13 @@ html[data-theme] .header__toolbar .btn--primary:hover {
 .card-menu {
   position: relative;
   flex-shrink: 0;
-  margin-inline-start: auto;
+  margin-inline-start: 0;
+}
+
+@media (min-width: 641px) {
+  .card-menu {
+    margin-inline-start: auto;
+  }
 }
 
 .card-menu__trigger-icon--desktop {
