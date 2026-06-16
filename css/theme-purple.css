@@ -12,6 +12,10 @@ html[data-theme="purple"] {
   --text-muted: #9a8ab0;
   --accent: #e8c078;
   --accent-dim: rgba(232, 192, 120, 0.14);
+  --title-accent: #e8c078;
+  --tab-active-fg: #e8c078;
+  --search-field-bg: rgba(10, 4, 20, 0.55);
+  --filter-field-bg: rgba(32, 18, 52, 0.88);
   --movie: #6ec8ff;
   --movie-dim: rgba(110, 200, 255, 0.14);
   --tv: #c49cff;
@@ -55,12 +59,6 @@ html[data-theme="purple"] .header__toolbar {
   border-color: rgba(180, 140, 255, 0.14);
 }
 
-html[data-theme="purple"] .header__toolbar .btn--primary {
-  color: #1a0828;
-  background: linear-gradient(180deg, #f0d498 0%, #e8c078 55%, #d4a85c 100%);
-  box-shadow: 0 0 20px rgba(232, 192, 120, 0.25);
-}
-
 html[data-theme="purple"] .header__toolbar .account-menu__trigger:hover,
 html[data-theme="purple"] .header__toolbar .account-menu__trigger:focus-visible {
   background: rgba(180, 140, 255, 0.12);
@@ -78,23 +76,11 @@ html[data-theme="purple"] .type-tabs {
   border-bottom-color: rgba(180, 140, 255, 0.1);
 }
 
-html[data-theme="purple"] .type-tab--active {
-  color: #1a0828;
-  background: linear-gradient(180deg, #f0d498 0%, #e8c078 100%);
-  box-shadow: 0 0 16px rgba(232, 192, 120, 0.2);
-}
-
-html[data-theme="purple"] .type-tab--active:hover {
-  color: #1a0828;
-  background: linear-gradient(180deg, #f5ddb0 0%, #ecc888 100%);
-}
-
 html[data-theme="purple"] .search__input,
-html[data-theme="purple"] .filter,
 html[data-theme="purple"] .gate__input,
 html[data-theme="purple"] .form-input,
 html[data-theme="purple"] .form-textarea {
-  background-color: rgba(10, 4, 20, 0.55);
+  background-color: var(--search-field-bg);
   border-color: rgba(180, 140, 255, 0.14);
 }
 
@@ -102,7 +88,7 @@ html[data-theme="purple"] .genre-filter__select,
 html[data-theme="purple"] .watched-filter__select,
 html[data-theme="purple"] .rating-filter__select,
 html[data-theme="purple"] .select {
-  background-color: rgba(10, 4, 20, 0.55);
+  background-color: var(--filter-field-bg);
   background-image: var(--select-chevron);
   background-repeat: no-repeat;
   background-position: right 0.65rem center;
@@ -110,7 +96,6 @@ html[data-theme="purple"] .select {
 }
 
 html[data-theme="purple"] .search__input:focus,
-html[data-theme="purple"] .filter:focus,
 html[data-theme="purple"] .select:focus,
 html[data-theme="purple"] .form-input:focus,
 html[data-theme="purple"] .form-textarea:focus {
@@ -128,6 +113,18 @@ html[data-theme="purple"] .account-menu__select {
 html[data-theme="purple"] select option,
 html[data-theme="purple"] .select option {
   background-color: #140a26;
+}
+
+html[data-theme="purple"] .genre-filter__select,
+html[data-theme="purple"] .watched-filter__select,
+html[data-theme="purple"] .rating-filter__select {
+  background-color: var(--filter-field-bg);
+}
+
+html[data-theme="purple"] .panel__filters #genreSelect,
+html[data-theme="purple"] .panel__filters #watchedFilter,
+html[data-theme="purple"] .panel__filters #ratingFilter {
+  background-color: var(--filter-field-bg);
 }
 
 html[data-theme="purple"] select option:checked,

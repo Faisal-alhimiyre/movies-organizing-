@@ -36,16 +36,17 @@
       "menu.signOut": "Sign out",
       "menu.language": "Language",
       "menu.theme": "Theme",
-      "menu.about": "About",
       "theme.dark": "Dark",
       "theme.light": "Light",
       "theme.purple": "Purple",
       "theme.brown": "Brown",
+      "theme.pink": "Pink",
       "theme.modalIntro": "Pick how the app looks. Your choice is saved on this device.",
-      "theme.desc.midnight": "Warm dark default",
+      "theme.desc.midnight": "Clean dark UI",
       "theme.desc.light": "Clean paper white",
       "theme.desc.purple": "Deep jewel tones",
-      "theme.desc.brown": "Cocoa & beige",
+      "theme.desc.brown": "Creamy chocolate latte",
+      "theme.desc.pink": "Strawberry jam gloss",
       "lang.en": "English",
       "lang.ar": "العربية",
       "tab.all": "All",
@@ -243,35 +244,6 @@
       "share.arrivalDismiss": "Not now",
       "share.arrivalExpired": "This share link has expired.",
       "share.arrivalInvalid": "This share link is invalid or no longer available.",
-      "onboarding.title": "Quick tips",
-      "onboarding.code": "Your login code is private — use it only to open your account on your devices.",
-      "onboarding.share": "To share a list, use Menu → Share and send the link. Never give anyone your code.",
-      "onboarding.sync": "When you're online, your lists back up automatically — nothing to tap or check.",
-      "onboarding.dismiss": "Got it",
-      "about.pageTitle": "About — Our Movie Nights",
-      "about.title": "Our Movie Nights",
-      "about.tagline":
-        "A free personal watchlist for movies, TV series, and anime — organized by genre, synced to the cloud, and shareable by link.",
-      "about.whatTitle": "What you can do",
-      "about.what1": "Build multiple lists per account",
-      "about.what2": "Search, paste links, or bulk-add titles",
-      "about.what3": "Mark watched, rate, and add private notes",
-      "about.what4": "Share a list with a link — recipients import into their own account",
-      "about.accountTitle": "Your account",
-      "about.accountText":
-        "You sign in with a private code you create. Keep it safe — we cannot recover a lost code. Your code is not used for sharing; share links are separate.",
-      "about.attributionTitle": "Third-party data",
-      "about.tmdbAttribution":
-        'This product uses the <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer">TMDB API</a> but is not endorsed or certified by TMDB.',
-      "about.imdbAttribution":
-        "Title metadata and posters may come from IMDb via the OMDb API. This product uses these sources for identification only and is not affiliated with IMDb.",
-      "about.anilistAttribution":
-        "Anime metadata may come from AniList. This product is not affiliated with AniList.",
-      "about.supportTitle": "Support",
-      "about.supportText": "Questions or feedback:",
-      "about.supportFallback": "See project README",
-      "about.backGate": "Log in",
-      "about.openApp": "Open app",
       "share.fileMessage":
         "My watchlist backup. Open Our Movie Nights → Share → Import a list.",
       "manage.title": "Manage lists",
@@ -532,16 +504,17 @@
       "menu.signOut": "تسجيل الخروج",
       "menu.language": "اللغة",
       "menu.theme": "المظهر",
-      "menu.about": "حول التطبيق",
       "theme.dark": "داكن",
       "theme.light": "فاتح",
       "theme.purple": "بنفسجي",
       "theme.brown": "بني",
+      "theme.pink": "وردي",
       "theme.modalIntro": "اختر شكل التطبيق. يُحفظ اختيارك على هذا الجهاز.",
-      "theme.desc.midnight": "داكن دافئ افتراضي",
+      "theme.desc.midnight": "واجهة داكنة نظيفة",
       "theme.desc.light": "أبيض نظيف",
       "theme.desc.purple": "ألوان عميقة زاهية",
-      "theme.desc.brown": "كاكاو وبيج",
+      "theme.desc.brown": "لاتيه شوكولاتة كريمي",
+      "theme.desc.pink": "وردي مربى الفراولة",
       "lang.en": "English",
       "lang.ar": "العربية",
       "tab.all": "الكل",
@@ -738,35 +711,6 @@
       "share.arrivalDismiss": "ليس الآن",
       "share.arrivalExpired": "انتهت صلاحية رابط المشاركة.",
       "share.arrivalInvalid": "رابط المشاركة غير صالح أو لم يعد متاحاً.",
-      "onboarding.title": "نصائح سريعة",
-      "onboarding.code": "رمز الدخول خاص بك — استخدمه فقط لفتح حسابك على أجهزتك.",
-      "onboarding.share": "لمشاركة قائمة، استخدم القائمة → مشاركة وأرسل الرابط. لا تعطِ أحداً رمزك.",
-      "onboarding.sync": "عند اتصالك بالإنترنت، تُنسخ قوائمك تلقائياً — لا حاجة لأي إجراء منك.",
-      "onboarding.dismiss": "فهمت",
-      "about.pageTitle": "حول — ليالينا السينمائية",
-      "about.title": "ليالينا السينمائية",
-      "about.tagline":
-        "قائمة مشاهدة شخصية مجانية للأفلام والمسلسلات والأنمي — مرتبة حسب التصنيف، متزامنة مع السحابة، وقابلة للمشاركة برابط.",
-      "about.whatTitle": "ماذا يمكنك أن تفعل",
-      "about.what1": "إنشاء عدة قوائم لكل حساب",
-      "about.what2": "البحث أو لصق الروابط أو إضافة عناوين دفعة واحدة",
-      "about.what3": "تعليم المشاهدة والتقييم وملاحظات خاصة",
-      "about.what4": "مشاركة قائمة برابط — المستلم يستوردها إلى حسابه",
-      "about.accountTitle": "حسابك",
-      "about.accountText":
-        "تسجّل الدخول برمز خاص تنشئه أنت. احتفظ به بأمان — لا يمكننا استعادة رمز مفقود. الرمز لا يُستخدم للمشاركة؛ روابط المشاركة منفصلة.",
-      "about.attributionTitle": "بيانات طرف ثالث",
-      "about.tmdbAttribution":
-        'يستخدم هذا المنتج <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer">واجهة TMDB</a> دون اعتماد أو تصديق من TMDB.',
-      "about.imdbAttribution":
-        "قد تأتي بيانات العناوين والأغلفة من IMDb عبر OMDb. يُستخدم المصدر للتعريف فقط وليس هناك ارتباط بـ IMDb.",
-      "about.anilistAttribution":
-        "قد تأتي بيانات الأنمي من AniList. هذا المنتج غير تابع لـ AniList.",
-      "about.supportTitle": "الدعم",
-      "about.supportText": "أسئلة أو ملاحظات:",
-      "about.supportFallback": "راجع README للمشروع",
-      "about.backGate": "تسجيل الدخول",
-      "about.openApp": "فتح التطبيق",
       "share.fileMessage":
         "نسخة احتياطية من قائمتي. افتح Our Movie Nights ← مشاركة ← استيراد قائمة.",
       "manage.title": "إدارة القوائم",
@@ -1140,7 +1084,6 @@
     setText("[data-action='manage-lists']", "menu.manageLists");
     setText("[data-action='share']", "menu.share");
     setText("[data-action='open-theme']", "menu.theme");
-    setText("[data-action='open-about']", "menu.about");
     setText("[data-action='change-code']", "menu.changeCode");
     setText("[data-action='delete-account']", "menu.deleteAccount");
     setText("[data-action='sign-out']", "menu.signOut");
@@ -1331,49 +1274,13 @@
     });
 
     const headerTitle = document.getElementById("headerTitle");
-    if (headerTitle && !window.WatchlistAuth?.getListLabel?.()) {
-      headerTitle.textContent = t("app.title");
+    const listName = window.WatchlistAuth?.getListLabel?.();
+    if (headerTitle && listName) {
+      headerTitle.textContent = listName;
     }
-    document.title = t("app.title");
+    document.title = listName || t("app.title");
     const meta = document.querySelector('meta[name="description"]');
     if (meta) meta.content = t("app.description");
-  }
-
-  function applyAboutDocument() {
-    applySkipLinkText();
-    document.querySelectorAll("[data-i18n]").forEach((el) => {
-      el.textContent = t(el.dataset.i18n);
-    });
-    document.querySelectorAll("[data-i18n-html]").forEach((el) => {
-      el.innerHTML = t(el.dataset.i18nHtml);
-    });
-
-    const supportEl = document.getElementById("aboutSupportLink");
-    const supportUrl = String(window.WATCHLIST_CONFIG?.supportUrl || "").trim();
-    if (supportEl) {
-      if (supportUrl) {
-        supportEl.href = supportUrl;
-        supportEl.textContent = supportUrl.replace(/^mailto:/i, "");
-        supportEl.target = supportUrl.startsWith("http") ? "_blank" : "";
-        supportEl.rel = supportUrl.startsWith("http") ? "noopener noreferrer" : "";
-      } else {
-        supportEl.removeAttribute("href");
-        supportEl.removeAttribute("target");
-        supportEl.removeAttribute("rel");
-        supportEl.textContent = t("about.supportFallback");
-      }
-    }
-
-    const goAppBtn = document.querySelector("[data-action='go-app']");
-    if (goAppBtn) goAppBtn.textContent = t("about.openApp");
-
-    document.title = t("about.pageTitle");
-    const meta = document.querySelector('meta[name="description"]');
-    if (meta) meta.content = t("about.tagline");
-
-    document.querySelectorAll("[data-action='set-language']").forEach((btn) => {
-      btn.classList.toggle("about__lang-btn--active", btn.dataset.lang === getLang());
-    });
   }
 
   function applyLanguage(lang) {
@@ -1382,11 +1289,7 @@
     const root = document.documentElement;
     root.lang = next;
     root.dir = next === "ar" ? "rtl" : "ltr";
-    if (document.body?.dataset?.page === "about") {
-      applyAboutDocument();
-    } else {
-      applyDocument();
-    }
+    applyDocument();
     listeners.forEach((fn) => fn(next));
   }
 
@@ -1423,7 +1326,6 @@
     setPlaceholder("#confirmCode", "gate.confirmCode");
     setText("#openForm .gate__submit", "gate.open");
     setText("#createForm .gate__submit", "gate.createList");
-    setText(".gate__about-link a", "menu.about");
     setText(".gate__theme-label", "menu.theme");
     setText("#themeModalTitle", "menu.theme");
     setText("#themeModalIntro", "theme.modalIntro");
@@ -1451,7 +1353,6 @@
     onChange,
     applyDocument,
     applyGateDocument,
-    applyAboutDocument,
     titleCount,
     listCountPhrase,
     titleCountPhrase,

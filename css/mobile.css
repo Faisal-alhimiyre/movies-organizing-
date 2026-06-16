@@ -594,6 +594,26 @@
     -webkit-text-fill-color: #2a1e12;
   }
 
+  html[data-theme="pink"] .add-mode-tab--active,
+  html[data-theme="pink"] .add-mode-tab--active:hover,
+  html[data-theme="pink"] .add-mode-tab--active:focus,
+  html[data-theme="pink"] .add-mode-tab--active:focus-visible {
+    color: #ffffff;
+    -webkit-text-fill-color: #ffffff;
+  }
+
+  html[data-theme="dark"] .add-mode-tab--active,
+  html:not([data-theme]) .add-mode-tab--active,
+  html[data-theme="dark"] .add-mode-tab--active:hover,
+  html:not([data-theme]) .add-mode-tab--active:hover,
+  html[data-theme="dark"] .add-mode-tab--active:focus,
+  html:not([data-theme]) .add-mode-tab--active:focus,
+  html[data-theme="dark"] .add-mode-tab--active:focus-visible,
+  html:not([data-theme]) .add-mode-tab--active:focus-visible {
+    color: #ffffff;
+    -webkit-text-fill-color: #ffffff;
+  }
+
   /* Compact modals — tighter forms on phone */
   .modal__header {
     padding: 0.65rem 0.75rem 0.25rem;
@@ -960,7 +980,7 @@
   }
 
   .header__title {
-    font-size: 1.15rem;
+    font-size: clamp(1.45rem, 4vw, 1.75rem);
   }
 
   .header__stat-chip {

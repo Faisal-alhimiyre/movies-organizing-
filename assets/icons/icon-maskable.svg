@@ -1,10 +1,31 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Our Movie Nights">
   <rect width="512" height="512" fill="#141416"/>
   <g transform="translate(51.2 51.2) scale(0.8)">
-    <rect x="72" y="120" width="368" height="272" rx="28" fill="#c4a882"/>
-    <rect x="108" y="156" width="296" height="200" rx="12" fill="#141416"/>
-    <circle cx="196" cy="256" r="36" fill="#6898b8"/>
-    <circle cx="316" cy="256" r="36" fill="#8f7eb8"/>
-    <path fill="#ebeae6" d="M156 88h56l-20 32h-56zm144 0h56l-20 32h-56z"/>
+    <path
+      d="M76 208C76 118 128 68 256 68s180 50 180 140l-10 196c0 38-34 60-170 60s-170-22-170-60Z"
+      fill="#c4a882"
+    />
+    <path
+      d="M116 206C116 142 158 112 256 112s140 30 140 94l-8 168c0 28-26 44-132 44s-132-16-132-44Z"
+      fill="#141416"
+    />
+    <circle cx="196" cy="278" r="36" fill="#6898b8"/>
+    <circle cx="316" cy="278" r="36" fill="#8f7eb8"/>
+    <path
+      d="M200 90C196 120 206 160 218 190C228 210 238 216 246 220"
+      fill="none"
+      stroke="#ebeae6"
+      stroke-width="9"
+      stroke-linecap="round"
+    />
+    <circle cx="246" cy="220" r="14" fill="#ebeae6"/>
+    <path
+      d="M312 90L358 18"
+      fill="none"
+      stroke="#ebeae6"
+      stroke-width="10"
+      stroke-linecap="round"
+    />
+    <circle cx="358" cy="18" r="14" fill="#ebeae6"/>
   </g>
 </svg>

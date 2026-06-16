@@ -137,11 +137,6 @@
     watchedFilter: document.getElementById("watchedFilter"),
     ratingFilter: document.getElementById("ratingFilter"),
     ratingsBackfillBanner: document.getElementById("ratingsBackfillBanner"),
-    onboardingBanner: document.getElementById("onboardingBanner"),
-    onboardingBannerTitle: document.getElementById("onboardingBannerTitle"),
-    onboardingTipCode: document.getElementById("onboardingTipCode"),
-    onboardingTipShare: document.getElementById("onboardingTipShare"),
-    onboardingTipSync: document.getElementById("onboardingTipSync"),
     shareArrivalBanner: document.getElementById("shareArrivalBanner"),
     shareArrivalTitle: document.getElementById("shareArrivalTitle"),
     shareArrivalText: document.getElementById("shareArrivalText"),
@@ -1825,53 +1820,6 @@
     render();
   }
 
-  function onboardingDismissKey() {
-    const accountId = window.WatchlistAuth?.getAccountId?.();
-    return accountId
-      ? `watchlist-onboarding-dismissed-${accountId}`
-      : "watchlist-onboarding-dismissed";
-  }
-
-  function isOnboardingDismissed() {
-    try {
-      return localStorage.getItem(onboardingDismissKey()) === "1";
-    } catch {
-      return false;
-    }
-  }
-
-  function dismissOnboarding() {
-    try {
-      localStorage.setItem(onboardingDismissKey(), "1");
-    } catch {
-      /* ignore */
-    }
-    updateOnboardingBanner();
-  }
-
-  function updateOnboardingBanner() {
-    if (!els.onboardingBanner) return;
-    const show = !isOnboardingDismissed();
-    els.onboardingBanner.hidden = !show;
-    if (!show) return;
-
-    if (els.onboardingBannerTitle) {
-      els.onboardingBannerTitle.textContent = t("onboarding.title");
-    }
-    if (els.onboardingTipCode) {
-      els.onboardingTipCode.textContent = t("onboarding.code");
-    }
-    if (els.onboardingTipShare) {
-      els.onboardingTipShare.textContent = t("onboarding.share");
-    }
-    if (els.onboardingTipSync) {
-      els.onboardingTipSync.textContent = t("onboarding.sync");
-    }
-    els.onboardingBanner
-      .querySelector("[data-action='dismiss-onboarding']")
-      ?.replaceChildren(document.createTextNode(t("onboarding.dismiss")));
-  }
-
   function dismissShareArrival() {
     clearPendingShareId();
     stripShareFromUrl();
@@ -1930,7 +1878,6 @@
   }
 
   function updateAppBanners() {
-    updateOnboardingBanner();
     updateShareArrivalBanner();
   }
 
@@ -4830,9 +4777,11 @@
 
   function updateHeaderTitle() {
     const headerTitle = document.getElementById("headerTitle");
+    const name = window.WatchlistAuth?.getListLabel() || t("list.myList");
     if (headerTitle) {
-      headerTitle.textContent = window.WatchlistAuth?.getListLabel() || "My list";
+      headerTitle.textContent = name;
     }
+    document.title = name;
   }
 
   async function syncCurrentListToCloud() {
@@ -5195,10 +5144,6 @@
       if (!target || target.closest("#mainContent")) return;
 
       const action = target.dataset.action;
-      if (action === "dismiss-onboarding") {
-        dismissOnboarding();
-        return;
-      }
       if (action === "sync-retry") {
         await retryCloudSync();
         return;
@@ -5285,11 +5230,6 @@
 
       if (action === "open-theme") {
         openThemeModal();
-        return;
-      }
-
-      if (action === "open-about") {
-        window.location.href = "about.html";
         return;
       }
 
@@ -5936,6 +5876,8 @@
       return;
     }
 
+    updateHeaderTitle();
+
     state.watched = loadWatchedState();
     state.cardLayout = loadCardLayout();
     applyCardLayout();
@@ -5977,10 +5919,7 @@
     }
 
     hideLoadingSkeleton();
-    const headerTitle = document.getElementById("headerTitle");
-    if (headerTitle) {
-      headerTitle.textContent = window.WatchlistAuth.getListLabel();
-    }
+    updateHeaderTitle();
     window.WatchlistAuth?.registerList(window.WatchlistAuth.getProfile(), {
       accountId: window.WatchlistAuth.getAccountId(),
       name: window.WatchlistAuth.getListLabel(),
@@ -6004,6 +5943,7 @@
 
     window.WatchlistI18n?.onChange(() => {
       window.WatchlistI18n.applyDocument();
+      updateHeaderTitle();
       updateAppBanners();
       updateGenreOptions();
       updateRatingFilterOptions();

@@ -12,12 +12,35 @@
   </defs>
   <rect width="1200" height="630" fill="url(#bg)"/>
   <rect width="1200" height="630" fill="url(#glow)"/>
-  <rect x="120" y="130" width="220" height="220" rx="48" fill="#141416" stroke="#c4a882" stroke-width="4"/>
-  <rect x="152" y="168" width="156" height="144" rx="16" fill="#c4a882" opacity="0.18"/>
-  <rect x="168" y="188" width="124" height="104" rx="10" fill="#141416"/>
-  <circle cx="214" cy="240" r="22" fill="#6898b8"/>
-  <circle cx="286" cy="240" r="22" fill="#8f7eb8"/>
+  <g transform="translate(230 240) scale(0.42)">
+    <path
+      d="M76 208C76 118 128 68 256 68s180 50 180 140l-10 196c0 38-34 60-170 60s-170-22-170-60Z"
+      fill="#c4a882"
+    />
+    <path
+      d="M116 206C116 142 158 112 256 112s140 30 140 94l-8 168c0 28-26 44-132 44s-132-16-132-44Z"
+      fill="#141416"
+    />
+    <circle cx="196" cy="278" r="36" fill="#6898b8"/>
+    <circle cx="316" cy="278" r="36" fill="#8f7eb8"/>
+    <path
+      d="M200 90C196 120 206 160 218 190C228 210 238 216 246 220"
+      fill="none"
+      stroke="#ebeae6"
+      stroke-width="9"
+      stroke-linecap="round"
+    />
+    <circle cx="246" cy="220" r="14" fill="#ebeae6"/>
+    <path
+      d="M312 90L358 18"
+      fill="none"
+      stroke="#ebeae6"
+      stroke-width="10"
+      stroke-linecap="round"
+    />
+    <circle cx="358" cy="18" r="14" fill="#ebeae6"/>
+  </g>
   <text x="390" y="210" fill="#ebeae6" font-family="Plus Jakarta Sans, Segoe UI, sans-serif" font-size="56" font-weight="700">Our Movie Nights</text>
-  <text x="390" y="278" fill="#a4a4b0" font-family="Plus Jakarta Sans, Segoe UI, sans-serif" font-size="30" font-weight="500">Movies ∑ TV ∑ Anime watchlists</text>
-  <text x="390" y="340" fill="#c4a882" font-family="Plus Jakarta Sans, Segoe UI, sans-serif" font-size="24" font-weight="500">Organized by genre ∑ Cloud sync ∑ Share by link</text>
+  <text x="390" y="278" fill="#a4a4b0" font-family="Plus Jakarta Sans, Segoe UI, sans-serif" font-size="30" font-weight="500">Movies ù TV ù Anime watchlists</text>
+  <text x="390" y="340" fill="#c4a882" font-family="Plus Jakarta Sans, Segoe UI, sans-serif" font-size="24" font-weight="500">Organized by genre ù Cloud sync ù Share by link</text>
 </svg>

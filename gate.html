@@ -51,6 +51,7 @@
     <link rel="stylesheet" href="css/theme-light.css" />
     <link rel="stylesheet" href="css/theme-purple.css" />
     <link rel="stylesheet" href="css/theme-brown.css" />
+    <link rel="stylesheet" href="css/theme-pink.css" />
     <link rel="stylesheet" href="css/theme-consistency.css" />
     <link rel="stylesheet" href="css/typography.css" />
     <link rel="stylesheet" href="css/reduced-motion.css" />
@@ -87,7 +88,17 @@
           </div>
         </div>
 
-        <h1 class="gate__title">Our Movie Nights</h1>
+        <div class="gate__brand">
+          <img
+            class="gate__logo"
+            src="assets/icons/icon.svg"
+            width="96"
+            height="96"
+            alt=""
+            aria-hidden="true"
+          />
+          <h1 class="gate__title" data-i18n="gate.title">Our Movie Nights</h1>
+        </div>
 
         <div id="gateMain" class="gate__main" tabindex="-1">
         <div class="gate__modes" role="tablist" aria-label="Account access">
@@ -243,11 +254,16 @@
               aria-label="Brown"
               title="Brown"
             ></button>
+            <button
+              type="button"
+              class="gate__theme-swatch gate__theme-swatch--pink"
+              data-action="set-theme"
+              data-theme="pink"
+              aria-label="Pink"
+              title="Pink"
+            ></button>
           </div>
         </div>
-        <p class="gate__about-link">
-          <a href="about.html" data-i18n="menu.about">About</a>
-        </p>
       </div>
     </div>
 
@@ -290,6 +306,10 @@
             <button type="button" class="theme-option" data-action="set-theme" data-theme="brown">
               <span class="theme-option__preview theme-option__preview--brown" aria-hidden="true"></span>
               <span class="theme-option__title" data-theme-label="brown">Brown</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="pink">
+              <span class="theme-option__preview theme-option__preview--pink" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="pink">Pink</span>
             </button>
           </div>
           <footer class="modal__footer modal__footer--simple">

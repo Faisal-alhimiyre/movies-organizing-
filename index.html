@@ -51,6 +51,7 @@
     <link rel="stylesheet" href="css/theme-light.css" />
     <link rel="stylesheet" href="css/theme-purple.css" />
     <link rel="stylesheet" href="css/theme-brown.css" />
+    <link rel="stylesheet" href="css/theme-pink.css" />
     <link rel="stylesheet" href="css/theme-consistency.css" />
     <link rel="stylesheet" href="css/typography.css" />
     <link rel="stylesheet" href="css/reduced-motion.css" />
@@ -69,7 +70,38 @@
       <header class="header">
         <div class="header__main">
           <div class="header__brand">
-            <h1 class="header__title" id="headerTitle">Our Movie Nights</h1>
+            <h1 class="header__title" id="headerTitle"></h1>
+            <script>
+              (function () {
+                try {
+                  var sessionRaw = sessionStorage.getItem("watchlist-session-v2");
+                  var session = sessionRaw ? JSON.parse(sessionRaw) : null;
+                  if (!session?.listId) {
+                    var legacyRaw = sessionStorage.getItem("watchlist-session-v1");
+                    if (legacyRaw) {
+                      var legacy = JSON.parse(legacyRaw);
+                      session = {
+                        accountId: legacy.accountId || legacy.listId,
+                        listId: legacy.listId,
+                      };
+                    }
+                  }
+                  if (!session?.listId) return;
+                  var accountId = session.accountId || session.listId;
+                  var libraryRaw = localStorage.getItem("watchlist-library-v2-" + accountId);
+                  var library = libraryRaw ? JSON.parse(libraryRaw) : [];
+                  var entry = library.find(function (item) {
+                    return item.listId === session.listId;
+                  });
+                  var name = (entry && entry.name) || "My list";
+                  var titleEl = document.getElementById("headerTitle");
+                  if (titleEl) titleEl.textContent = name;
+                  document.title = name;
+                } catch (err) {
+                  /* ignore */
+                }
+              })();
+            </script>
             <div class="header__stats" id="stats" aria-live="polite"></div>
           </div>
           <div class="header__actions">
@@ -137,9 +169,6 @@
                     </button>
                   </div>
                 </div>
-                <button type="button" class="account-menu__item" role="menuitem" data-action="open-about">
-                  About
-                </button>
                 <hr class="account-menu__divider" />
                 <button type="button" class="account-menu__item" role="menuitem" data-action="change-code">
                   Change code
@@ -300,20 +329,6 @@
             </svg>
           </button>
         </div>
-      </div>
-
-      <div class="app-banner" id="onboardingBanner" hidden role="region" aria-labelledby="onboardingBannerTitle">
-        <div class="app-banner__body">
-          <h2 class="app-banner__title" id="onboardingBannerTitle">Quick tips</h2>
-          <ul class="app-banner__list" id="onboardingBannerList">
-            <li id="onboardingTipCode"></li>
-            <li id="onboardingTipShare"></li>
-            <li id="onboardingTipSync"></li>
-          </ul>
-        </div>
-        <button type="button" class="btn btn--ghost btn--sm app-banner__dismiss" data-action="dismiss-onboarding">
-          Got it
-        </button>
       </div>
 
       <div class="app-banner app-banner--share" id="shareArrivalBanner" hidden role="region" aria-labelledby="shareArrivalTitle">
@@ -489,6 +504,10 @@
             <button type="button" class="theme-option" data-action="set-theme" data-theme="brown">
               <span class="theme-option__preview theme-option__preview--brown" aria-hidden="true"></span>
               <span class="theme-option__title" data-theme-label="brown">Brown</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="pink">
+              <span class="theme-option__preview theme-option__preview--pink" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="pink">Pink</span>
             </button>
           </div>
           <footer class="modal__footer modal__footer--simple">

@@ -1,11 +1,10 @@
 /* Minimal service worker — offline shell for installable PWA. */
-const CACHE = "omn-shell-v4";
+const CACHE = "omn-shell-v26";
 
 const SHELL = [
   "./",
   "./index.html",
   "./gate.html",
-  "./about.html",
   "./manifest.webmanifest",
   "./assets/icons/icon.svg",
   "./assets/icons/icon-maskable.svg",
@@ -15,18 +14,17 @@ const SHELL = [
   "./css/theme-light.css",
   "./css/theme-purple.css",
   "./css/theme-brown.css",
+  "./css/theme-pink.css",
   "./css/theme-consistency.css",
   "./css/typography.css",
   "./css/reduced-motion.css",
   "./css/accessibility.css",
   "./css/rtl.css",
   "./css/mobile.css",
-  "./css/about.css",
   "./js/pwa.js",
   "./js/i18n.js",
   "./js/accessibility.js",
   "./js/themes.js",
-  "./js/about.js",
 ];
 
 self.addEventListener("install", (event) => {

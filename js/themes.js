@@ -2,9 +2,9 @@
   "use strict";
 
   const STORAGE_KEY = "watchlist-theme-v1";
-  const THEMES = ["dark", "light", "purple", "brown"];
+  const THEMES = ["dark", "light", "purple", "brown", "pink"];
   const DEFAULT_THEME = "dark";
-  const LEGACY_MAP = { fancy: "purple", midnight: "dark" };
+  const LEGACY_MAP = { fancy: "purple", midnight: "dark", instagram: "dark" };
   let listeners = [];
 
   function normalizeTheme(theme) {
