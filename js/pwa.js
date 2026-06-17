@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const ICON_NOTE_KEY = "omn-ios-icon-note-v2";
+  const ICON_NOTE_KEY = "omn-ios-icon-note-v3";
   let bannerEl = null;
 
   function isIOS() {
@@ -55,9 +55,7 @@
     }
 
     const main = document.getElementById("mainContent");
-    const gate = document.querySelector(".gate");
-    const anchor = main || gate;
-    if (!anchor?.parentElement) return;
+    if (!main?.parentElement) return;
 
     bannerEl = document.createElement("div");
     bannerEl.className = "app-banner app-banner--pwa-icon";
@@ -80,7 +78,7 @@
       }
     });
 
-    anchor.parentElement.insertBefore(bannerEl, anchor);
+    main.parentElement.insertBefore(bannerEl, main);
 
     renderIconNote();
     window.WatchlistI18n?.onChange?.(() => renderIconNote());
