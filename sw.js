@@ -1,5 +1,5 @@
 /* Minimal service worker — offline shell for installable PWA. */
-const CACHE = "omn-shell-v31";
+const CACHE = "omn-shell-v32";
 
 const SHELL = [
   "./",
@@ -8,6 +8,9 @@ const SHELL = [
   "./manifest.webmanifest",
   "./assets/icons/icon.svg",
   "./assets/icons/icon-maskable.svg",
+  "./assets/icons/apple-touch-icon.png",
+  "./assets/icons/icon-192.png",
+  "./assets/icons/icon-512.png",
   "./assets/og/og-image.svg",
   "./css/styles.css",
   "./css/theme.css",
