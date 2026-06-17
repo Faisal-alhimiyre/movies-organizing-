@@ -16,7 +16,7 @@
   --title-accent: #c4a882;
   --tab-active-fg: #fafafa;
   --search-field-bg: #262626;
-  --filter-field-bg: #121212;
+  --filter-field-bg: #1a1a1a;
   --movie: #0095f6;
   --movie-dim: rgba(0, 149, 246, 0.14);
   --tv: #a855f7;
@@ -272,45 +272,66 @@ body {
   gap: 0.55rem;
 }
 
-.search__input,
-.gate__input,
-.form-input,
-.form-textarea {
+html[data-theme="dark"] .search__input,
+html:not([data-theme]) .search__input,
+html[data-theme="dark"] .gate__input,
+html:not([data-theme]) .gate__input,
+html[data-theme="dark"] .form-input,
+html:not([data-theme]) .form-input,
+html[data-theme="dark"] .form-textarea,
+html:not([data-theme]) .form-textarea {
   background-color: var(--search-field-bg);
-  border-color: transparent;
+  border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: none;
 }
 
-.genre-filter__select,
-.select,
-.watched-filter__select,
-.rating-filter__select {
+html[data-theme="dark"] .genre-filter__select,
+html:not([data-theme]) .genre-filter__select,
+html[data-theme="dark"] .panel__filters .select,
+html:not([data-theme]) .panel__filters .select,
+html[data-theme="dark"] .watched-filter__select,
+html:not([data-theme]) .watched-filter__select,
+html[data-theme="dark"] .rating-filter__select,
+html:not([data-theme]) .rating-filter__select {
   background-color: var(--filter-field-bg);
   background-image: var(--select-chevron);
   background-repeat: no-repeat;
   background-position: right 0.65rem center;
-  border-color: transparent;
+  border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: none;
 }
 
-.search__input::placeholder,
-.gate__input::placeholder,
-.form-input::placeholder,
-.form-textarea::placeholder {
+html[data-theme="dark"] .search__input::placeholder,
+html:not([data-theme]) .search__input::placeholder,
+html[data-theme="dark"] .gate__input::placeholder,
+html:not([data-theme]) .gate__input::placeholder,
+html[data-theme="dark"] .form-input::placeholder,
+html:not([data-theme]) .form-input::placeholder,
+html[data-theme="dark"] .form-textarea::placeholder,
+html:not([data-theme]) .form-textarea::placeholder {
   color: #a8a8a8;
 }
 
-.search__input:focus,
-.filter:focus,
-.genre-filter__select:focus,
-.select:focus,
-.watched-filter__select:focus,
-.rating-filter__select:focus,
-.gate__input:focus,
-.form-input:focus,
-.form-textarea:focus {
+html[data-theme="dark"] .search__input:focus,
+html:not([data-theme]) .search__input:focus,
+html[data-theme="dark"] .filter:focus,
+html:not([data-theme]) .filter:focus,
+html[data-theme="dark"] .genre-filter__select:focus,
+html:not([data-theme]) .genre-filter__select:focus,
+html[data-theme="dark"] .panel__filters .select:focus,
+html:not([data-theme]) .panel__filters .select:focus,
+html[data-theme="dark"] .watched-filter__select:focus,
+html:not([data-theme]) .watched-filter__select:focus,
+html[data-theme="dark"] .rating-filter__select:focus,
+html:not([data-theme]) .rating-filter__select:focus,
+html[data-theme="dark"] .gate__input:focus,
+html:not([data-theme]) .gate__input:focus,
+html[data-theme="dark"] .form-input:focus,
+html:not([data-theme]) .form-input:focus,
+html[data-theme="dark"] .form-textarea:focus,
+html:not([data-theme]) .form-textarea:focus {
   border-color: #525252;
   box-shadow: none;
   outline: none;

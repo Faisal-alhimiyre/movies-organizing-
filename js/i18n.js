@@ -244,6 +244,13 @@
       "share.arrivalDismiss": "Not now",
       "share.arrivalExpired": "This share link has expired.",
       "share.arrivalInvalid": "This share link is invalid or no longer available.",
+      "pwa.iconNoteTitle": "Update your home screen icon",
+      "pwa.iconNoteLead":
+        "We added a proper app icon (the toast robot). If yours still shows a letter “O”, refresh the shortcut once:",
+      "pwa.iconNoteStep1": "Delete the old Movie Nights icon from your home screen.",
+      "pwa.iconNoteStep2": "Open the site in your browser (not from the old shortcut).",
+      "pwa.iconNoteStep3": "Add it to your home screen again — same way you did the first time.",
+      "pwa.iconNoteDismiss": "Got it",
       "share.fileMessage":
         "My watchlist backup. Open Our Movie Nights → Share → Import a list.",
       "manage.title": "Manage lists",
@@ -711,6 +718,13 @@
       "share.arrivalDismiss": "ليس الآن",
       "share.arrivalExpired": "انتهت صلاحية رابط المشاركة.",
       "share.arrivalInvalid": "رابط المشاركة غير صالح أو لم يعد متاحاً.",
+      "pwa.iconNoteTitle": "حدّث أيقونة الشاشة الرئيسية",
+      "pwa.iconNoteLead":
+        "أضفنا أيقونة التطبيق الصحيحة (روبوت التوست). إذا ما زالت تظهر حرف «O»، حدّث الاختصار مرة واحدة:",
+      "pwa.iconNoteStep1": "احذف أيقونة Movie Nights القديمة من الشاشة الرئيسية.",
+      "pwa.iconNoteStep2": "افتح الموقع من المتصفح (وليس من الاختصار القديم).",
+      "pwa.iconNoteStep3": "أضفه إلى الشاشة الرئيسية مرة أخرى — بنفس طريقة الإضافة الأولى.",
+      "pwa.iconNoteDismiss": "تم",
       "share.fileMessage":
         "نسخة احتياطية من قائمتي. افتح Our Movie Nights ← مشاركة ← استيراد قائمة.",
       "manage.title": "إدارة القوائم",

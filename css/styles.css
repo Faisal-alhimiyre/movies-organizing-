@@ -625,6 +625,17 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   border-color: rgba(96, 165, 250, 0.32);
 }
 
+.app-banner--pwa-icon {
+  background: rgba(196, 168, 130, 0.12);
+  border-color: rgba(196, 168, 130, 0.34);
+}
+
+.app-banner--pwa-icon .app-banner__list {
+  margin-top: 0.55rem;
+  padding-inline-start: 1.2rem;
+  list-style: decimal;
+}
+
 .app-banner__body {
   flex: 1 1 14rem;
   min-width: 0;
