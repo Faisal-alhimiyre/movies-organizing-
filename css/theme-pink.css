@@ -3,9 +3,9 @@
 html[data-theme="pink"] {
   color-scheme: dark;
   --bg: #9b1149;
-  --bg-elevated: rgba(200, 45, 100, 0.72);
-  --bg-card: rgba(210, 50, 105, 0.52);
-  --bg-card-hover: rgba(220, 60, 115, 0.58);
+  --bg-elevated: #8a1e47;
+  --bg-card: #7a1840;
+  --bg-card-hover: #8a224c;
   --border: rgba(255, 180, 205, 0.28);
   --border-strong: rgba(255, 200, 218, 0.4);
   --text: #ffffff;
@@ -14,8 +14,8 @@ html[data-theme="pink"] {
   --accent-dim: rgba(255, 160, 190, 0.16);
   --title-accent: #c4a882;
   --tab-active-fg: #ffffff;
-  --search-field-bg: rgba(190, 40, 95, 0.48);
-  --filter-field-bg: rgba(170, 32, 85, 0.62);
+  --search-field-bg: #9a2d58;
+  --filter-field-bg: #842147;
   --movie: #8ec8ff;
   --movie-dim: rgba(142, 200, 255, 0.14);
   --tv: #d8a8f0;
@@ -83,12 +83,7 @@ html[data-theme="pink"] .header__toolbar .account-menu__trigger:focus-visible {
 }
 
 html[data-theme="pink"] .panel {
-  background: linear-gradient(
-    165deg,
-    rgba(220, 65, 115, 0.42) 0%,
-    rgba(200, 45, 100, 0.58) 55%,
-    rgba(175, 35, 85, 0.62) 100%
-  );
+  background: linear-gradient(165deg, #a12c57 0%, #8d2249 55%, #7a1a3f 100%);
   border-color: rgba(255, 180, 205, 0.28);
   box-shadow:
     inset 0 1px 0 rgba(255, 220, 235, 0.1),
@@ -99,11 +94,7 @@ html[data-theme="pink"] .main {
   margin-top: 0.15rem;
   padding: 1.1rem 1rem 0.75rem;
   border-radius: 12px;
-  background: linear-gradient(
-    180deg,
-    rgba(72, 10, 38, 0.48) 0%,
-    rgba(58, 8, 32, 0.62) 100%
-  );
+  background: linear-gradient(180deg, #5a1232 0%, #4a0f2b 100%);
   border: 1px solid rgba(255, 130, 170, 0.16);
   box-shadow: inset 0 1px 0 rgba(255, 180, 205, 0.05);
 }
@@ -202,16 +193,30 @@ html[data-theme="pink"] .select option:checked {
 }
 
 html[data-theme="pink"] .btn--primary {
-  color: #ffffff;
-  background: linear-gradient(90deg, #d81b60 0%, #e91e63 48%, #f06292 100%);
-  border-color: rgba(255, 200, 218, 0.32);
+  color: #4a1430;
+  background: linear-gradient(90deg, #fff7fb 0%, #ffe9f3 48%, #ffd8e9 100%);
+  border-color: rgba(255, 220, 235, 0.7);
   box-shadow:
     0 1px 0 rgba(255, 230, 240, 0.16) inset,
     0 8px 22px rgba(160, 24, 72, 0.28);
 }
 
 html[data-theme="pink"] .btn--primary:hover {
-  background: linear-gradient(90deg, #e91e63 0%, #ec407a 48%, #f48fb1 100%);
+  color: #4a1430;
+  background: linear-gradient(90deg, #fff0f7 0%, #ffdce9 48%, #ffc8de 100%);
+}
+
+html[data-theme="pink"] .btn--ghost {
+  background: #6f1b3c;
+  border-color: rgba(255, 190, 215, 0.34);
+  color: #fff;
+}
+
+html[data-theme="pink"] .btn--ghost:hover,
+html[data-theme="pink"] .btn--ghost:focus-visible {
+  background: #7b2144;
+  border-color: rgba(255, 210, 228, 0.48);
+  color: #fff;
 }
 
 html[data-theme="pink"] .layout-bar {
@@ -310,12 +315,7 @@ html[data-theme="pink"] .card__watch-status--watched {
 
 html[data-theme="pink"] .modal__panel,
 html[data-theme="pink"] .app-dialog__panel {
-  background: linear-gradient(
-    180deg,
-    rgba(230, 75, 125, 0.55) 0%,
-    rgba(210, 50, 105, 0.62) 55%,
-    rgba(185, 38, 90, 0.68) 100%
-  );
+  background: linear-gradient(180deg, #972853 0%, #822046 55%, #6f1a3c 100%);
   border-color: rgba(255, 180, 205, 0.3);
   box-shadow:
     inset 0 1px 0 rgba(255, 220, 235, 0.1),
@@ -353,12 +353,7 @@ html[data-theme="pink"] .add-panel-hint {
 }
 
 html[data-theme="pink"] .gate__card {
-  background: linear-gradient(
-    180deg,
-    rgba(230, 75, 125, 0.55) 0%,
-    rgba(210, 50, 105, 0.62) 55%,
-    rgba(185, 38, 90, 0.68) 100%
-  );
+  background: linear-gradient(180deg, #972853 0%, #822046 55%, #6f1a3c 100%);
   border-color: rgba(255, 180, 205, 0.3);
   box-shadow:
     inset 0 1px 0 rgba(255, 220, 235, 0.1),
@@ -387,12 +382,17 @@ html[data-theme="pink"] .theme-option--active {
 }
 
 html[data-theme="pink"] .account-menu__panel {
-  background: linear-gradient(180deg, rgba(210, 50, 105, 0.95) 0%, rgba(185, 38, 90, 0.96) 100%);
+  background: linear-gradient(180deg, #7f2146 0%, #6a1839 100%);
   border-color: rgba(255, 180, 205, 0.28);
 }
 
 html[data-theme="pink"] .account-menu__item {
   color: #ffffff;
+}
+
+html[data-theme="pink"] .card-menu__panel {
+  background: #6a1839;
+  border-color: rgba(255, 180, 205, 0.34);
 }
 
 html[data-theme="pink"] .genre-chip--filter {
