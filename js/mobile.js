@@ -248,7 +248,12 @@
       : "";
 
     let ratingBlock = `<p class="mobile-card-focus__unwatched">${escapeHtml(t("mobile.notWatched"))}</p>`;
+    let ratingInteractive = false;
+    let ratingAriaLabel = "";
+
     if (watchEntry && hasWatchRating(watchEntry)) {
+      ratingInteractive = true;
+      ratingAriaLabel = t("mobile.editRating");
       ratingBlock = `
         <div class="mobile-card-focus__rating-top">
           <span class="mobile-card-focus__rating-label">${escapeHtml(t("card.yourRating"))}</span>
@@ -261,42 +266,60 @@
         }
       `;
     } else if (watchEntry) {
+      ratingInteractive = true;
+      ratingAriaLabel = t("mobile.rateTitle");
       ratingBlock = `<p class="mobile-card-focus__unwatched">${escapeHtml(t("mobile.watchedUnrated"))}</p>`;
     }
+
+    const ratingClass = ratingInteractive
+      ? "mobile-card-focus__rating mobile-card-focus__rating--interactive"
+      : "mobile-card-focus__rating";
+    const ratingEl = ratingInteractive
+      ? `<button
+          type="button"
+          class="${ratingClass}"
+          data-action="mobile-card-rate"
+          data-id="${escapeHtml(item.id)}"
+          aria-label="${escapeHtml(ratingAriaLabel)}"
+        >${ratingBlock}</button>`
+      : `<div class="${ratingClass}">${ratingBlock}</div>`;
 
     const externalScores = renderFocusExternalRatings(item);
 
     return `
-      ${poster}
-      <div class="mobile-card-focus__badges">
-        <div class="mobile-card-focus__badge-row">
-          <span class="badge badge--${typeBadge.className}">${escapeHtml(typeBadge.label)}</span>
+      <header class="mobile-card-focus__header">
+        <div class="mobile-card-focus__thumb">${poster}</div>
+        <div class="mobile-card-focus__header-main">
+          <h2 class="mobile-card-focus__title" id="mobileCardFocusTitle">
+            <span class="text-ltr">${escapeHtml(ltr(item.title))}</span>
+            ${altTitle}
+          </h2>
+          ${leadBlock}
+          <div class="mobile-card-focus__badges">
+            <div class="mobile-card-focus__badge-row">
+              <span class="badge badge--${typeBadge.className}">${escapeHtml(typeBadge.label)}</span>
+              ${mainGenreBadge}
+              ${secondaryBadges}
+            </div>
+          </div>
         </div>
-        <div class="mobile-card-focus__badge-row">
-          ${mainGenreBadge}
-          ${secondaryBadges}
-        </div>
-      </div>
-      <h2 class="mobile-card-focus__title" id="mobileCardFocusTitle">
-        <span class="text-ltr">${escapeHtml(ltr(item.title))}</span>
-        ${altTitle}
-      </h2>
-      ${leadBlock}
+      </header>
       <p class="mobile-card-focus__summary">${escapeHtml(item.summary || "")}</p>
       ${externalScores ? `<div class="mobile-card-focus__scores">${externalScores}</div>` : ""}
-      <div class="mobile-card-focus__rating">${ratingBlock}</div>
+      ${ratingEl}
     `;
   }
 
   function buildFocusActions(item, watchEntry) {
-    const parts = [];
     const watched = Boolean(watchEntry);
 
+    const buttons = [];
+
     if (item.link) {
-      parts.push(`
+      buttons.push(`
         <button
           type="button"
-          class="btn btn--primary btn--sm mobile-card-focus__btn"
+          class="btn btn--primary btn--sm mobile-card-focus__btn mobile-card-focus__btn--primary"
           data-action="open-mobile-card-link"
           data-link="${escapeHtml(item.link)}"
         >
@@ -305,7 +328,7 @@
       `);
     }
 
-    parts.push(`
+    buttons.push(`
       <button
         type="button"
         class="btn btn--ghost btn--sm mobile-card-focus__btn"
@@ -316,7 +339,7 @@
       </button>
     `);
 
-    parts.push(`
+    buttons.push(`
       <button
         type="button"
         class="btn btn--ghost btn--sm mobile-card-focus__btn"
@@ -327,34 +350,10 @@
       </button>
     `);
 
-    if (watchEntry && !hasWatchRating(watchEntry)) {
-      parts.push(`
-        <button
-          type="button"
-          class="btn btn--ghost btn--sm mobile-card-focus__btn"
-          data-action="mobile-card-rate"
-          data-id="${escapeHtml(item.id)}"
-        >
-          ${escapeHtml(t("mobile.rateTitle"))}
-        </button>
-      `);
-    } else if (watchEntry && hasWatchRating(watchEntry)) {
-      parts.push(`
-        <button
-          type="button"
-          class="btn btn--ghost btn--sm mobile-card-focus__btn"
-          data-action="mobile-card-rate"
-          data-id="${escapeHtml(item.id)}"
-        >
-          ${escapeHtml(t("mobile.editRating"))}
-        </button>
-      `);
-    }
-
-    parts.push(`
+    buttons.push(`
       <button
         type="button"
-        class="btn btn--ghost btn--sm btn--danger mobile-card-focus__btn"
+        class="btn btn--sm btn--danger mobile-card-focus__btn"
         data-action="mobile-card-delete"
         data-id="${escapeHtml(item.id)}"
       >
@@ -362,7 +361,7 @@
       </button>
     `);
 
-    return parts.join("");
+    return `<div class="mobile-card-focus__actions-list">${buttons.join("")}</div>`;
   }
 
   function extractItemFromCard(card, itemId) {
@@ -427,7 +426,8 @@
     const watchEntry = getWatchEntry(itemId);
     activeCardId = itemId;
 
-    focusContent.innerHTML = buildFocusMarkup(item, watchEntry);
+    const markup = buildFocusMarkup(item, watchEntry);
+    focusContent.innerHTML = markup;
     focusActions.innerHTML = buildFocusActions(item, watchEntry);
     focusOverlay.hidden = false;
     document.body.style.overflow = "hidden";

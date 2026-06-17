@@ -177,7 +177,12 @@
     importShareModalText: document.getElementById("importShareModalText"),
     importShareModalHint: document.getElementById("importShareModalHint"),
     importMergeBtn: document.getElementById("importMergeBtn"),
-    importReplaceBtn: document.getElementById("importReplaceBtn"),
+    importMergeWatchedBtn: document.getElementById("importMergeWatchedBtn"),
+    importNewListModal: document.getElementById("importNewListModal"),
+    importNewListForm: document.getElementById("importNewListForm"),
+    importNewListName: document.getElementById("importNewListName"),
+    importNewListDescription: document.getElementById("importNewListDescription"),
+    importNewListError: document.getElementById("importNewListError"),
     layoutToggles: document.getElementById("layoutToggles"),
     linkPreviewPopover: document.getElementById("linkPreviewPopover"),
     linkPreviewPopoverInner: document.getElementById("linkPreviewPopoverInner"),
@@ -271,6 +276,7 @@
       { el: els.manageListsModal, panel: els.manageListsModal?.querySelector(".modal__panel") },
       { el: els.moveListModal, panel: els.moveListModal?.querySelector(".modal__panel") },
       { el: els.importShareModal, panel: els.importShareModal?.querySelector(".modal__panel") },
+      { el: els.importNewListModal, panel: els.importNewListModal?.querySelector(".modal__panel") },
       { el: els.changeCodeModal, panel: els.changeCodeModal?.querySelector(".modal__panel") },
       { el: els.shareModal, panel: els.shareModal?.querySelector(".modal__panel") },
       { el: els.themeModal, panel: els.themeModal?.querySelector(".modal__panel") },
@@ -1127,6 +1133,44 @@
     els.ratingError.classList.toggle("backup-modal__hint--error", Boolean(message));
   }
 
+  function updateRatingModalActions() {
+    const laterBtn = els.ratingForm?.querySelector('[data-action="rate-later"]');
+    const submitBtn = els.ratingForm?.querySelector('button[type="submit"]');
+    if (!laterBtn || !submitBtn) return;
+
+    if (state.ratingHadScore) {
+      laterBtn.textContent = t("btn.cancel");
+      submitBtn.textContent = t("btn.save");
+    } else {
+      laterBtn.textContent = t("btn.rateLater");
+      submitBtn.textContent = t("btn.saveRating");
+    }
+  }
+
+  function watchEntryHasUserData(entry) {
+    if (!entry) return false;
+    return hasWatchRating(entry) || Boolean(String(entry.note || "").trim());
+  }
+
+  async function markItemUnwatched(itemId) {
+    const entry = state.watched[itemId];
+    if (!entry) return;
+
+    if (watchEntryHasUserData(entry)) {
+      const confirmed = await window.WatchlistDialog.confirm(t("alert.markUnwatchedConfirm"), {
+        title: t("alert.markUnwatchedTitle"),
+        confirmLabel: t("card.markUnwatched"),
+        cancelLabel: t("btn.cancel"),
+        danger: true,
+      });
+      if (!confirmed) return;
+    }
+
+    delete state.watched[itemId];
+    saveWatched();
+    render();
+  }
+
   function openRatingModal(itemId) {
     const item = state.items.find((entry) => entry.id === itemId);
     if (!item || !els.ratingModal) return;
@@ -1145,6 +1189,7 @@
     }
     els.ratingNote.value = existing?.note || "";
 
+    updateRatingModalActions();
     els.ratingModal.hidden = false;
     updateBodyScrollLock();
     closeAllCardMenus();
@@ -3652,6 +3697,7 @@
       !els.themeModal?.hidden ||
       !els.changeCodeModal?.hidden ||
       !els.importShareModal?.hidden ||
+      !els.importNewListModal?.hidden ||
       !els.manageListsModal?.hidden ||
       !els.createListModal?.hidden ||
       !els.moveListModal?.hidden;
@@ -4689,6 +4735,47 @@
     return `${trimmed.slice(0, 40)} ${Date.now()}`;
   }
 
+  function importedListDescription(payload) {
+    const raw = String(payload.listDescription ?? payload.listSummary ?? "").trim();
+    if (raw) return raw.slice(0, 120);
+    const titleCount = countTitles(payload.watchlist);
+    return t("import.listDescription", { count: titleCount });
+  }
+
+  function shareLinkText(payload) {
+    const summary = String(payload.listDescription || "").trim();
+    const summaryPart = summary ? t("share.linkSummaryPart", { summary }) : "";
+    return t("share.linkMessage", { name: payload.listName, summary: summaryPart });
+  }
+
+  function setImportNewListError(message) {
+    if (!els.importNewListError) return;
+    els.importNewListError.hidden = !message;
+    els.importNewListError.textContent = localizeMessage(message);
+    els.importNewListError.classList.toggle("backup-modal__hint--error", Boolean(message));
+  }
+
+  function openImportNewListModal() {
+    if (!els.importNewListModal || !pendingImportPayload) return;
+
+    const payload = pendingImportPayload;
+    els.importNewListName.value = payload.listName || t("list.sharedList");
+    els.importNewListDescription.value = importedListDescription(payload);
+    setImportNewListError("");
+    els.importNewListModal.hidden = false;
+    updateBodyScrollLock();
+    els.importNewListName?.focus();
+    els.importNewListName?.select();
+  }
+
+  function closeImportNewListModal() {
+    if (!els.importNewListModal) return;
+    els.importNewListModal.hidden = true;
+    setImportNewListError("");
+    els.importNewListForm?.reset();
+    updateBodyScrollLock();
+  }
+
   function openImportShareModal(payload) {
     if (!els.importShareModal) return;
     if (!isImportPayloadValid(payload)) {
@@ -4698,41 +4785,42 @@
 
     pendingImportPayload = payload;
     const listName = payload.listName || "Shared list";
+    const listDescription = String(payload.listDescription || "").trim();
     const titleCount = countTitles(payload.watchlist);
     const currentCount = state.items.length;
     const currentListName = window.WatchlistAuth?.getListLabel() || "My list";
 
+    const summaryLine = listDescription
+      ? t("import.summaryWithDescription", { description: listDescription })
+      : "";
+
     if (currentCount > 0) {
-      els.importShareModalText.textContent = t("import.summaryWithCurrent", {
-        listName,
-        count: titleCount,
-        currentName: currentListName,
-        currentCount,
-      });
+      els.importShareModalText.textContent = [
+        t("import.summaryWithCurrent", {
+          listName,
+          count: titleCount,
+          currentName: currentListName,
+          currentCount,
+        }),
+        summaryLine,
+      ]
+        .filter(Boolean)
+        .join(" ");
       if (els.importShareModalHint) {
         els.importShareModalHint.textContent = t("import.hint");
       }
-      if (els.importMergeBtn) els.importMergeBtn.hidden = false;
-      if (els.importReplaceBtn) {
-        els.importReplaceBtn.hidden = false;
-        els.importReplaceBtn.textContent = t("import.replace");
-        els.importReplaceBtn.classList.remove("btn--ghost");
-        els.importReplaceBtn.classList.add("btn--danger");
-      }
     } else {
-      els.importShareModalText.textContent = t("import.summaryEmpty", {
-        listName,
-        count: titleCount,
-      });
+      els.importShareModalText.textContent = [
+        t("import.summaryEmpty", {
+          listName,
+          count: titleCount,
+        }),
+        summaryLine,
+      ]
+        .filter(Boolean)
+        .join(" ");
       if (els.importShareModalHint) {
         els.importShareModalHint.textContent = t("import.hintEmpty");
-      }
-      if (els.importMergeBtn) els.importMergeBtn.hidden = true;
-      if (els.importReplaceBtn) {
-        els.importReplaceBtn.hidden = false;
-        els.importReplaceBtn.textContent = t("import.addToList");
-        els.importReplaceBtn.classList.remove("btn--danger");
-        els.importReplaceBtn.classList.add("btn--ghost");
       }
     }
 
@@ -4742,10 +4830,13 @@
     els.importShareModal.querySelector("[data-action='import-new-list']")?.focus();
   }
 
-  async function importAsNewList(payload) {
+  async function importAsNewList(payload, options = {}) {
     const titleCount = countTitles(payload.watchlist);
-    const name = uniqueImportedListName(payload.listName);
-    const description = t("import.listDescription", { count: titleCount });
+    const name = uniqueImportedListName(options.name || payload.listName);
+    const description = String(options.description ?? importedListDescription(payload)).trim().slice(
+      0,
+      120
+    );
 
     const result = window.WatchlistAuth.createList(name, description);
     if (!result.ok) {
@@ -4823,6 +4914,7 @@
       app: "Our Movie Nights",
       exportedAt: new Date().toISOString(),
       listName: window.WatchlistAuth?.getListLabel() || "My list",
+      listDescription: window.WatchlistAuth?.getListDescription?.() || "",
       watchlist: state.data,
       watched,
       stats: {
@@ -4912,7 +5004,7 @@
       try {
         const shareData = {
           title: `${payload.listName} — Our Movie Nights`,
-          text: t("share.linkMessage", { name: payload.listName }),
+          text: shareLinkText(payload),
           url: shareUrl,
         };
         if (!navigator.canShare || navigator.canShare(shareData)) {
@@ -5013,20 +5105,22 @@
     saveWatched();
   }
 
-  async function finishImport(payload, mode) {
+  async function finishImport(payload, mode, newListOptions = null) {
     let cloud = { ok: true };
     let importedListName = "";
 
     if (mode === "new-list") {
-      const result = await importAsNewList(payload);
+      const result = await importAsNewList(payload, newListOptions || {});
       if (!result) return;
       cloud = result;
       importedListName = result.listName;
-    } else if (mode === "merge") {
-      const mergeResult = mergeImportIntoCurrentList(payload);
+    } else if (mode === "merge" || mode === "merge-watched") {
+      const includeWatched = mode === "merge-watched";
+      const mergeResult = mergeImportIntoCurrentList(payload, { includeWatched });
       cloud = await syncCurrentListToCloud();
       pendingImportPayload = null;
       closeImportShareModal();
+      closeImportNewListModal();
       updateGenreOptions();
       renderListSwitcher();
       updateHeaderTitle();
@@ -5037,25 +5131,35 @@
         await notifyCloudSyncFailed();
       }
 
-      const message =
-        mergeResult.skipped > 0
-          ? t("alert.importMergedSkips", {
-              added: mergeResult.added,
-              skipped: mergeResult.skipped,
-            })
-          : t("alert.importMerged");
+      let message;
+      if (includeWatched) {
+        message =
+          mergeResult.skipped > 0
+            ? t("alert.importMergedWithWatchSkips", {
+                added: mergeResult.added,
+                skipped: mergeResult.skipped,
+              })
+            : t("alert.importMergedWithWatch");
+      } else {
+        message =
+          mergeResult.skipped > 0
+            ? t("alert.importMergedSkips", {
+                added: mergeResult.added,
+                skipped: mergeResult.skipped,
+              })
+            : t("alert.importMerged");
+      }
+
       await window.WatchlistDialog.alert(message, {
         title: t("alert.listUpdatedTitle"),
       });
       dismissShareArrival();
       return;
-    } else {
-      applyImportToCurrentList(payload);
-      cloud = await syncCurrentListToCloud();
     }
 
     pendingImportPayload = null;
     closeImportShareModal();
+    closeImportNewListModal();
     updateGenreOptions();
     renderListSwitcher();
     updateHeaderTitle();
@@ -5067,15 +5171,9 @@
       return;
     }
 
-    const message =
-      mode === "new-list"
-        ? t("alert.importOpenedNewList", { name: ltr(importedListName) })
-        : mode === "merge"
-          ? t("alert.importMerged")
-          : t("alert.importReplaced");
+    const message = t("alert.importOpenedNewList", { name: ltr(importedListName) });
     await window.WatchlistDialog.alert(message, {
-      title:
-        mode === "new-list" ? t("alert.newListCreatedTitle") : t("alert.listUpdatedTitle"),
+      title: t("alert.newListCreatedTitle"),
     });
     dismissShareArrival();
   }
@@ -5102,7 +5200,7 @@
     reader.readAsText(file);
   }
 
-  function mergeImportIntoCurrentList(payload) {
+  function mergeImportIntoCurrentList(payload, { includeWatched = false } = {}) {
     const beforeKeys = new Set(
       flattenWatchlist(state.data).map((item) => itemKey(item.contentType, item.title))
     );
@@ -5119,11 +5217,13 @@
     state.items = flattenWatchlist(state.data);
     state.data = itemsToNested(state.items);
 
-    for (const item of importItems) {
-      const watchEntry = findImportedWatchEntry(item, payload.watched);
-      if (!watchEntry) continue;
+    if (includeWatched) {
+      for (const item of importItems) {
+        const watchEntry = findImportedWatchEntry(item, payload.watched);
+        if (!watchEntry) continue;
 
-      state.watched[makeId(item.contentType, item.genre, item.title)] = watchEntry;
+        state.watched[makeId(item.contentType, item.genre, item.title)] = watchEntry;
+      }
     }
 
     window.WatchlistAuth?.clearEmptyListFlag();
@@ -5376,7 +5476,7 @@
       }
 
       if (action === "import-new-list" && pendingImportPayload) {
-        await finishImport(pendingImportPayload, "new-list");
+        openImportNewListModal();
         return;
       }
 
@@ -5401,32 +5501,55 @@
         return;
       }
 
-      if (action === "import-replace" && pendingImportPayload) {
+      if (action === "import-merge-watched" && pendingImportPayload) {
         const listName = pendingImportPayload.listName || t("list.sharedList");
         const titleCount = countTitles(pendingImportPayload.watchlist);
         const currentName = window.WatchlistAuth?.getListLabel() || t("list.myList");
-        const replacing = state.items.length > 0;
         const confirmed = await window.WatchlistDialog.confirm(
-          replacing
-            ? t("alert.importReplaceConfirm", {
-                currentName: ltr(currentName),
-                listName: ltr(listName),
-                count: titleCount,
-              })
-            : t("alert.importAddConfirm", {
-                count: titleCount,
-                listName: ltr(listName),
-              }),
+          t("alert.importMergeWithWatchConfirm", {
+            count: titleCount,
+            listName: ltr(listName),
+            currentName: ltr(currentName),
+          }),
           {
-            title: replacing ? t("alert.importReplaceTitle") : t("alert.importAddTitle"),
-            confirmLabel: replacing ? t("btn.replaceList") : t("btn.addTitles"),
+            title: t("alert.importMergeWithWatchTitle"),
+            confirmLabel: t("btn.addTitles"),
             cancelLabel: t("btn.cancel"),
-            danger: replacing,
           }
         );
         if (!confirmed) return;
-        await finishImport(pendingImportPayload, "replace");
+        await finishImport(pendingImportPayload, "merge-watched");
       }
+    });
+
+    els.importNewListModal?.addEventListener("click", (event) => {
+      if (event.target.closest("[data-action='close-import-new-list-modal']")) {
+        closeImportNewListModal();
+      }
+    });
+
+    els.importNewListForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!pendingImportPayload) return;
+
+      const name = els.importNewListName?.value?.trim() || "";
+      const description = els.importNewListDescription?.value?.trim() || "";
+
+      if (!name) {
+        setImportNewListError(t("auth.listNameRequired"));
+        els.importNewListName?.focus();
+        return;
+      }
+
+      if (name.length > 48) {
+        setImportNewListError(t("auth.listNameLong"));
+        els.importNewListName?.focus();
+        return;
+      }
+
+      setImportNewListError("");
+      closeImportNewListModal();
+      await finishImport(pendingImportPayload, "new-list", { name, description });
     });
 
     els.listSwitcher?.addEventListener("change", () => {
@@ -5656,6 +5779,10 @@
         closeMoveListModal();
         return;
       }
+      if (!els.importNewListModal?.hidden) {
+        closeImportNewListModal();
+        return;
+      }
       if (!els.importShareModal?.hidden) {
         closeImportShareModal();
         return;
@@ -5766,9 +5893,7 @@
 
       if (action === "toggle-watched") {
         if (isItemWatched(id)) {
-          delete state.watched[id];
-          saveWatched();
-          render();
+          await markItemUnwatched(id);
         } else {
           state.watched[id] = {};
           saveWatched();
@@ -5985,7 +6110,7 @@
     });
   }
 
-  window.WatchlistApp = { init, renderExternalRatings };
+  window.WatchlistApp = { init, renderExternalRatings, updateRatingModalActions };
 
   if (document.getElementById("mainContent")) {
     init();

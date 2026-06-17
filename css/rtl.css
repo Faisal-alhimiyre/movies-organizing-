@@ -121,7 +121,8 @@ html[dir="rtl"] .modal__footer-right {
 
 html[dir="rtl"] .mobile-card-focus__close {
   right: auto;
-  left: 0.45rem;
+  left: auto;
+  inset-inline-end: 0.45rem;
 }
 
 html[dir="rtl"] .gate__toolbar {

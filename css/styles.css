@@ -1857,6 +1857,14 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   min-width: 5.5rem;
 }
 
+.app-dialog--alert .app-dialog__actions {
+  justify-content: stretch;
+}
+
+.app-dialog--alert .app-dialog__actions .btn {
+  width: 100%;
+}
+
 .gate__input--invalid {
   border-color: rgba(248, 113, 113, 0.55);
   box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.1);

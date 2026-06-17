@@ -56,8 +56,9 @@
 
       if (action === "cancel") {
         const resolve = settle.resolve;
+        const accepted = settle.mode === "alert";
         close();
-        resolve(false);
+        resolve(accepted);
       }
     });
 
@@ -113,6 +114,7 @@
 
     const isAlert = mode === "alert";
     cancelBtn.hidden = isAlert;
+    root.classList.toggle("app-dialog--alert", isAlert);
     confirmBtn.className = danger
       ? "btn btn--danger"
       : "btn btn--primary";

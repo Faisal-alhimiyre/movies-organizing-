@@ -236,7 +236,9 @@
       "share.sendDesc": "Create a share link for this list",
       "share.importTitle": "Import a list",
       "share.importDesc": "Open a link someone sent you, or pick a .json backup file",
-      "share.linkMessage": "My movie list “{name}” — open this link to import it into Our Movie Nights.",
+      "share.linkMessage":
+        "My movie list “{name}”{summary} — open this link to import it into Our Movie Nights.",
+      "share.linkSummaryPart": " — {summary}",
       "share.arrivalTitle": "Shared list ready to import",
       "share.arrivalLoading": "Loading shared list…",
       "share.arrivalText": "“{name}” has {count} titles. Choose how to import it into your account.",
@@ -275,13 +277,18 @@
       "import.hint":
         "Choose how to import. Opening as a new list keeps your current list unchanged.",
       "import.hintEmpty":
-        "Open as a new list (recommended), or add these titles to your current list.",
+        "Choose how to import these titles into your account.",
       "import.summaryWithCurrent":
         '"{listName}" has {count} titles. You\'re on "{currentName}" with {currentCount}.',
       "import.summaryEmpty": '"{listName}" has {count} titles. Your current list is empty.',
+      "import.summaryWithDescription": "About: {description}",
       "import.newList": "Open as new list",
       "import.merge": "Add to my current list",
-      "import.replace": "Replace my current list",
+      "import.mergeWithWatch": "Add to current list with ratings and notes",
+      "import.newListFormTitle": "Name your new list",
+      "import.newListFormHint":
+        "Keep the shared name and summary or change them before creating the list.",
+      "import.newListSubmit": "Create list",
       "import.addToList": "Add to this list",
       "rating.title": "Rate title",
       "rating.rateItem": 'Rate "{title}"',
@@ -446,23 +453,24 @@
         "Opened “{name}” as a new list. Your previous list is unchanged.",
       "alert.importMerged": "New titles were added to your current list.",
       "alert.importMergedSkips": "{added} added. {skipped} duplicate titles were already on your list.",
-      "alert.importReplaced": "Your current list was updated with the imported file.",
+      "alert.importMergedWithWatch": "Titles were added with ratings and notes where available.",
+      "alert.importMergedWithWatchSkips":
+        "{added} added with ratings and notes. {skipped} duplicate titles were skipped.",
       "alert.newListCreatedTitle": "New list created",
       "alert.listUpdatedTitle": "List updated",
       "alert.couldNotOpenFile":
         "Could not read that file. Ask your friend to send one downloaded from this app.",
       "alert.couldNotOpenFileTitle": "Could not open file",
       "alert.importMergeConfirm":
-        "Add {count} titles from “{listName}” to “{currentName}”? Duplicates will be skipped.",
+        "Add {count} titles from “{listName}” to “{currentName}”? Duplicates will be skipped. Ratings and notes will not be copied.",
+      "alert.importMergeWithWatchConfirm":
+        "Add {count} titles from “{listName}” to “{currentName}”? Duplicates will be skipped. Matching ratings and notes will be copied too.",
       "alert.importMergeTitle": "Add to current list?",
-      "alert.importReplaceConfirm":
-        "Replace “{currentName}” with “{listName}” ({count} titles)? Your current list will be lost.",
-      "alert.importAddConfirm":
-        "Add {count} titles from “{listName}” to your list?",
-      "alert.importReplaceTitle": "Replace current list?",
-      "alert.importAddTitle": "Add to this list?",
+      "alert.importMergeWithWatchTitle": "Add with ratings and notes?",
+      "alert.markUnwatchedConfirm":
+        "Mark as unwatched? Your rating and note for this title will be removed.",
+      "alert.markUnwatchedTitle": "Remove watch data?",
       "btn.addTitles": "Add titles",
-      "btn.replaceList": "Replace list",
       "alert.codeUpgrade":
         "Your old code (like 1234) no longer fits the new rules. Pick a new personal code with letters and numbers — at least 6 characters.",
       "alert.codeUpgradeTitle": "Update your sign-in code",
@@ -710,7 +718,9 @@
       "share.sendDesc": "إنشاء رابط مشاركة لهذه القائمة",
       "share.importTitle": "استيراد قائمة",
       "share.importDesc": "افتح رابطاً أرسله لك أحدهم، أو اختر ملف نسخ احتياطي .json",
-      "share.linkMessage": "قائمتي «{name}» — افتح هذا الرابط لاستيرادها في Our Movie Nights.",
+      "share.linkMessage":
+        "قائمتي «{name}»{summary} — افتح هذا الرابط لاستيرادها في Our Movie Nights.",
+      "share.linkSummaryPart": " — {summary}",
       "share.arrivalTitle": "قائمة مشتركة جاهزة للاستيراد",
       "share.arrivalLoading": "جاري تحميل القائمة المشتركة…",
       "share.arrivalText": "«{name}» تحتوي على {count} عنواناً. اختر كيف تستوردها إلى حسابك.",
@@ -748,13 +758,18 @@
       "import.hint":
         "اختر طريقة الاستيراد. الفتح كقائمة جديدة يبقي قائمتك الحالية دون تغيير.",
       "import.hintEmpty":
-        "افتح كقائمة جديدة (موصى به)، أو أضف هذه العناوين لقائمتك الحالية.",
+        "اختر طريقة استيراد هذه العناوين إلى حسابك.",
       "import.summaryWithCurrent":
         '«{listName}» فيها {count} عنواناً. أنت على «{currentName}» بـ {currentCount}.',
       "import.summaryEmpty": '«{listName}» فيها {count} عنواناً. قائمتك الحالية فارغة.',
+      "import.summaryWithDescription": "الوصف: {description}",
       "import.newList": "فتح كقائمة جديدة",
       "import.merge": "إضافة لقائمتي الحالية",
-      "import.replace": "استبدال قائمتي الحالية",
+      "import.mergeWithWatch": "إضافة للقائمة الحالية مع التقييمات والملاحظات",
+      "import.newListFormTitle": "سمّ قائمتك الجديدة",
+      "import.newListFormHint":
+        "احتفظ بالاسم والوصف المشترَكين أو غيّرهما قبل إنشاء القائمة.",
+      "import.newListSubmit": "إنشاء القائمة",
       "import.addToList": "إضافة لهذه القائمة",
       "rating.title": "تقييم العنوان",
       "rating.rateItem": 'تقييم "{title}"',
@@ -914,7 +929,9 @@
         "تم فتح «{name}» كقائمة جديدة. قائمتك السابقة لم تتغير.",
       "alert.importMerged": "تمت إضافة عناوين جديدة لقائمتك الحالية.",
       "alert.importMergedSkips": "تمت إضافة {added}. {skipped} عنواناً مكرراً كان موجوداً مسبقاً.",
-      "alert.importReplaced": "تم تحديث قائمتك الحالية بالملف المستورد.",
+      "alert.importMergedWithWatch": "تمت إضافة العناوين مع التقييمات والملاحظات حيث توفرت.",
+      "alert.importMergedWithWatchSkips":
+        "تمت إضافة {added} مع التقييمات والملاحظات. تم تخطي {skipped} عنواناً مكرراً.",
       "alert.newListCreatedTitle": "قائمة جديدة",
       "alert.listUpdatedTitle": "تم تحديث القائمة",
       "alert.couldNotOpenFile":
@@ -923,16 +940,16 @@
       "alert.importEmptyList": "لا توجد عناوين في هذا الملف أو الرابط للاستيراد.",
       "alert.importEmptyListTitle": "لا شيء للاستيراد",
       "alert.importMergeConfirm":
-        "إضافة {count} عنواناً من «{listName}» إلى «{currentName}»؟ سيتم تخطي المكررات.",
+        "إضافة {count} عنواناً من «{listName}» إلى «{currentName}»؟ سيتم تخطي المكررات. لن تُنسخ التقييمات والملاحظات.",
+      "alert.importMergeWithWatchConfirm":
+        "إضافة {count} عنواناً من «{listName}» إلى «{currentName}»؟ سيتم تخطي المكررات. ستُنسخ التقييمات والملاحظات المطابقة أيضاً.",
       "alert.importMergeTitle": "إضافة للقائمة الحالية؟",
-      "alert.importReplaceConfirm":
-        "استبدال «{currentName}» بـ «{listName}» ({count} عنواناً)؟ ستفقد قائمتك الحالية.",
-      "alert.importAddConfirm":
-        "إضافة {count} عنواناً من «{listName}» لقائمتك؟",
-      "alert.importReplaceTitle": "استبدال القائمة الحالية؟",
-      "alert.importAddTitle": "إضافة لهذه القائمة؟",
+      "alert.importMergeWithWatchTitle": "إضافة مع التقييمات والملاحظات؟",
+      "alert.markUnwatchedConfirm":
+        "تعيين كغير مشاهد؟ سيُحذف تقييمك وملاحظتك لهذا العنوان.",
+      "alert.markUnwatchedTitle": "إزالة بيانات المشاهدة؟",
       "btn.addTitles": "إضافة العناوين",
-      "btn.replaceList": "استبدال القائمة",
+      "btn.addTitles": "إضافة العناوين",
       "alert.codeUpgrade":
         "رمزك القديم (مثل 1234) لم يعد يلائم القواعد الجديدة. اختر رمزاً شخصياً جديداً بحروف وأرقام — 6 أحرف على الأقل.",
       "alert.codeUpgradeTitle": "حدّث رمز الدخول",
@@ -1244,8 +1261,14 @@
     setText("#importShareModalHint", "import.hint");
     setText("[data-action='import-new-list']", "import.newList");
     setText("#importMergeBtn", "import.merge");
-    setText("#importReplaceBtn", "import.replace");
+    setText("#importMergeWatchedBtn", "import.mergeWithWatch");
     setText("#importShareModal .btn--text", "btn.cancel");
+    setText("#importNewListModalTitle", "import.newListFormTitle");
+    setText("#importNewListModalHint", "import.newListFormHint");
+    setText("label:has(#importNewListName) .form-field__label", "create.name");
+    setText("label:has(#importNewListDescription) .form-field__label", "create.about");
+    setText("#importNewListForm .btn--ghost", "btn.cancel");
+    setText("#importNewListSubmit", "import.newListSubmit");
 
     setText("#searchAddPanel .modal__footer .btn--ghost", "btn.cancel");
     setText("#bulkAddPanel .modal__footer .btn--ghost", "btn.cancel");
@@ -1268,7 +1291,11 @@
     setText("label:has(#ratingNote) .form-field__label", "rating.note");
     setPlaceholder("#ratingNote", "rating.notePlaceholder");
     setText("[data-action='rate-later']", "btn.rateLater");
-    setText("#ratingForm .btn--primary", "btn.saveRating");
+    if (window.WatchlistApp?.updateRatingModalActions) {
+      window.WatchlistApp.updateRatingModalActions();
+    } else {
+      setText("#ratingForm .btn--primary", "btn.saveRating");
+    }
 
     document.querySelectorAll("[data-rating-star]").forEach((btn) => {
       const n = btn.dataset.ratingStar;

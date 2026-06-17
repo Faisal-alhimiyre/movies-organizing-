@@ -667,14 +667,65 @@
             <button type="button" class="btn btn--ghost" data-action="import-merge" id="importMergeBtn">
               Add to my current list
             </button>
-            <button type="button" class="btn btn--danger" data-action="import-replace" id="importReplaceBtn">
-              Replace my current list
+            <button type="button" class="btn btn--ghost" data-action="import-merge-watched" id="importMergeWatchedBtn">
+              Add to current list with ratings and notes
             </button>
             <button type="button" class="btn btn--text" data-action="close-import-share-modal">
               Cancel
             </button>
           </footer>
         </div>
+      </div>
+    </div>
+
+    <div class="modal" id="importNewListModal" hidden>
+      <div class="modal__backdrop" data-action="close-import-new-list-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="importNewListModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="importNewListModalTitle">Name your new list</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-import-new-list-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        <form class="modal__form" id="importNewListForm" novalidate>
+          <p class="backup-modal__text" id="importNewListModalHint"></p>
+          <label class="form-field form-field--full">
+            <span class="form-field__label">Name</span>
+            <input
+              type="text"
+              id="importNewListName"
+              class="form-input"
+              maxlength="48"
+              required
+            />
+          </label>
+          <label class="form-field form-field--full">
+            <span class="form-field__label">About this list</span>
+            <input
+              type="text"
+              id="importNewListDescription"
+              class="form-input"
+              maxlength="120"
+            />
+          </label>
+          <p class="backup-modal__hint" id="importNewListError" hidden></p>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-import-new-list-modal">
+              Cancel
+            </button>
+            <button type="submit" class="btn btn--primary" id="importNewListSubmit">Create list</button>
+          </footer>
+        </form>
       </div>
     </div>
 
