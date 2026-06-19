@@ -936,9 +936,31 @@ html:not([data-theme]) .gate__lang-btn--active {
 
 /* — Chips & misc — */
 .genre-chip--filter {
-  background: #262626;
-  border-color: var(--border-strong);
   border-radius: 999px;
+}
+
+html[data-theme="dark"] .genre-chip--filter,
+html:not([data-theme]) .genre-chip--filter {
+  color: #0c0c0d;
+  background: linear-gradient(180deg, #d4b896 0%, #c4a882 100%);
+  border-color: rgba(212, 184, 150, 0.45);
+}
+
+html[data-theme="dark"] .genre-chip--filter .genre-chip__remove:hover,
+html:not([data-theme]) .genre-chip--filter .genre-chip__remove:hover {
+  background: rgba(12, 12, 13, 0.1);
+}
+
+html[data-theme="dark"] .genre-chip--secondary,
+html:not([data-theme]) .genre-chip--secondary {
+  color: #0c0c0d;
+  background: linear-gradient(180deg, #d4b896 0%, #c4a882 100%);
+  border-color: rgba(212, 184, 150, 0.45);
+}
+
+html[data-theme="dark"] .genre-chip--secondary .genre-chip__remove:hover,
+html:not([data-theme]) .genre-chip--secondary .genre-chip__remove:hover {
+  background: rgba(12, 12, 13, 0.1);
 }
 
 .genre-section__match {

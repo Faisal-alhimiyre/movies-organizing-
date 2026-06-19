@@ -201,7 +201,7 @@
       "search.foundMany": "{count} matches found.",
       "search.loadingDetails": "Loading details…",
       "search.loadFailed": "Could not load that title. Try again.",
-      "search.back": "Back to results",
+      "search.back": "Back to search",
       "search.chooseGenre": "Choose genre",
       "search.mainGenre": "Main genre",
       "search.noSummary": "No summary available.",
@@ -245,14 +245,11 @@
       "changeCode.cloudFailed": "Could not update cloud account. Try again.",
       "share.title": "Share a list",
       "share.tagline": "Send a link — not your account code",
-      "share.intro":
-        "Sharing creates a link anyone can open. They log in with their own account and choose how to import your titles, ratings, and notes.",
+      "share.step1": "Creates a link anyone can open.",
+      "share.step2": "They sign in with their own account to import your titles.",
       "share.note":
         "Your private login code is never included in a share link.",
       "share.sendTitle": "Send my list",
-      "share.sendDesc": "Create a share link for this list",
-      "share.importTitle": "Import a list",
-      "share.importDesc": "Open a link someone sent you, or pick a .json backup file",
       "share.linkMessage":
         "My movie list “{name}”{summary} — open this link to import it into Our Movie Nights.",
       "share.linkSummaryPart": " — {summary}",
@@ -701,7 +698,7 @@
       "search.foundMany": "{count} نتائج.",
       "search.loadingDetails": "جاري تحميل التفاصيل…",
       "search.loadFailed": "تعذر تحميل هذا العنوان. حاول مرة أخرى.",
-      "search.back": "العودة للنتائج",
+      "search.back": "العودة للبحث",
       "search.chooseGenre": "اختر التصنيف",
       "search.mainGenre": "التصنيف الرئيسي",
       "search.noSummary": "لا يوجد ملخص.",
@@ -745,13 +742,10 @@
       "changeCode.cloudFailed": "تعذر تحديث الحساب في السحابة. حاول مرة أخرى.",
       "share.title": "مشاركة قائمة",
       "share.tagline": "أرسل رابطاً — وليس رمز حسابك",
-      "share.intro":
-        "المشاركة تنشئ رابطاً يمكن لأي شخص فتحه. يسجل الدخول بحسابه ويختار كيفية استيراد العناوين والتقييمات والملاحظات.",
+      "share.step1": "ينشئ رابطاً يمكن لأي شخص فتحه.",
+      "share.step2": "يسجّلون الدخول بحسابهم لاستيراد عناوينك.",
       "share.note": "رمز الدخول الخاص بك لا يُرسل أبداً في رابط المشاركة.",
       "share.sendTitle": "إرسال قائمتي",
-      "share.sendDesc": "إنشاء رابط مشاركة لهذه القائمة",
-      "share.importTitle": "استيراد قائمة",
-      "share.importDesc": "افتح رابطاً أرسله لك أحدهم، أو اختر ملف نسخ احتياطي .json",
       "share.linkMessage":
         "قائمتي «{name}»{summary} — افتح هذا الرابط لاستيرادها في Our Movie Nights.",
       "share.linkSummaryPart": " — {summary}",
@@ -1232,7 +1226,7 @@
       "#searchConfirmStep .form-field:has(#searchConfirmSecondaryAdd) .form-field__label",
       "form.secondaryGenres"
     );
-    setText("#searchConfirmAdd", "btn.addToList");
+    setText("#searchConfirmAdd", "btn.addTitle");
 
     setHtml(".add-panel-hint--manual", "manual.hint");
     setText("#itemForm .form-field:nth-child(1) .form-field__label", "manual.link");
@@ -1270,13 +1264,10 @@
 
     setText("#shareModalTitle", "share.title");
     setText(".share-modal__tagline", "share.tagline");
-    setText(".share-modal__intro", "share.intro");
+    setText(".share-modal__list li:nth-child(1)", "share.step1");
+    setText(".share-modal__list li:nth-child(2)", "share.step2");
     setText(".share-modal__note", "share.note");
-    setText("[data-action='share-send'] .share-option__title", "share.sendTitle");
-    setText("[data-action='share-send'] .share-option__desc", "share.sendDesc");
-    setText("[data-action='share-receive'] .share-option__title", "share.importTitle");
-    setText("[data-action='share-receive'] .share-option__desc", "share.importDesc");
-    setText("#shareModal .btn--ghost", "btn.cancel");
+    setText("[data-action='share-send']", "share.sendTitle");
 
     setText("#manageListsModalTitle", "manage.title");
     setText("[data-action='create-new-list']", "manage.create");
@@ -1304,7 +1295,6 @@
     setText("#importNewListForm .btn--ghost", "btn.cancel");
     setText("#importNewListSubmit", "import.newListSubmit");
 
-    setText("#searchAddPanel .modal__footer .btn--ghost", "btn.cancel");
     setText("#bulkAddPanel .modal__footer .btn--ghost", "btn.cancel");
     setText("#bulkAddConfirm", "btn.addAllTitles");
     setText(".bulk-add__headline", "bulk.headline");

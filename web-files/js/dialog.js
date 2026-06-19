@@ -102,6 +102,7 @@
     } = options;
 
     const panel = root.querySelector(".app-dialog__panel");
+    const backdrop = root.querySelector(".app-dialog__backdrop");
     const rtl = window.WatchlistI18n?.isRtl?.();
     if (panel) {
       panel.dir = rtl ? "rtl" : "ltr";
@@ -114,6 +115,13 @@
 
     const isAlert = mode === "alert";
     cancelBtn.hidden = isAlert;
+    if (backdrop) {
+      if (isAlert) {
+        backdrop.removeAttribute("data-action");
+      } else {
+        backdrop.setAttribute("data-action", "cancel");
+      }
+    }
     root.classList.toggle("app-dialog--alert", isAlert);
     confirmBtn.className = danger
       ? "btn btn--danger"

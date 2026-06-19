@@ -396,8 +396,30 @@ html[data-theme="pink"] .card-menu__panel {
 }
 
 html[data-theme="pink"] .genre-chip--filter {
-  border-color: rgba(255, 200, 218, 0.34);
-  color: #ffffff;
+  color: #4a1430;
+  background: linear-gradient(90deg, #fff7fb 0%, #ffe9f3 48%, #ffd8e9 100%);
+  border-color: rgba(255, 220, 235, 0.7);
+  box-shadow: 0 1px 0 rgba(255, 230, 240, 0.16) inset;
+}
+
+html[data-theme="pink"] .genre-chip--filter .genre-chip__remove:hover {
+  background: rgba(74, 20, 48, 0.08);
+}
+
+html[data-theme="pink"] .genre-chip--secondary {
+  color: #4a1430;
+  background: linear-gradient(90deg, #fff7fb 0%, #ffe9f3 48%, #ffd8e9 100%);
+  border-color: rgba(255, 220, 235, 0.7);
+  box-shadow: 0 1px 0 rgba(255, 230, 240, 0.16) inset;
+}
+
+html[data-theme="pink"] .genre-chip--secondary .genre-chip__remove:hover {
+  background: rgba(74, 20, 48, 0.08);
+}
+
+html[data-theme="pink"] #searchConfirmSecondaryChips:not(:empty) {
+  border-color: rgba(255, 200, 218, 0.55);
+  background: rgba(255, 240, 247, 0.12);
 }
 
 html[data-theme="pink"] .rating-picker__star--filled .rating-picker__star-icon {

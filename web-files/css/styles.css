@@ -491,9 +491,19 @@ body {
 }
 
 .genre-chip--filter {
+  font-weight: 500;
   color: var(--text);
-  background: rgba(232, 184, 74, 0.1);
-  border-color: rgba(232, 184, 74, 0.25);
+  background: var(--bg-card);
+  border-color: var(--border);
+}
+
+.genre-chip--filter .genre-chip__remove {
+  color: inherit;
+}
+
+.genre-chip--filter .genre-chip__remove:hover {
+  color: inherit;
+  background: rgba(0, 0, 0, 0.08);
 }
 
 .select {
@@ -1917,6 +1927,10 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   min-width: 5.5rem;
 }
 
+.app-dialog--alert .app-dialog__actions [data-action="cancel"] {
+  display: none !important;
+}
+
 .app-dialog--alert .app-dialog__actions {
   justify-content: stretch;
 }
@@ -2172,12 +2186,50 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   display: none;
 }
 
+.share-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
 .share-modal__tagline {
   margin: 0;
   font-size: 0.95rem;
   font-weight: 500;
   color: var(--accent);
   text-align: center;
+}
+
+.share-modal__copy {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.share-modal__list {
+  margin: 0;
+  padding-inline-start: 1.15rem;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.share-modal__list li + li {
+  margin-top: 0.35rem;
+}
+
+.share-modal__note {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.share-modal__footer {
+  margin-top: 0.35rem;
+}
+
+.share-modal__footer .btn {
+  width: 100%;
 }
 
 .share-options {
@@ -2210,6 +2262,8 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   margin-top: 0.35rem;
   text-align: center;
 }
+
+/* legacy share option cards — kept for reference; share modal uses primary button */
 
 .share-option:hover,
 .share-option:focus-visible {
@@ -2579,10 +2633,50 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   margin-top: 0.65rem;
 }
 
-.title-search-confirm .modal__footer {
+.title-search-confirm .modal__footer,
+.title-search-confirm__footer {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.65rem;
   margin-top: 1.25rem;
   padding-top: 1rem;
   border-top: 1px solid var(--border);
+}
+
+.title-search-confirm__footer .btn {
+  width: auto;
+  flex: 0 1 auto;
+  min-height: 2.5rem;
+}
+
+.title-search-confirm__add {
+  margin-inline-start: auto;
+}
+
+#searchConfirmSecondaryChips:not(:empty) {
+  margin-top: 0.55rem;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid rgba(232, 184, 74, 0.35);
+  border-radius: var(--radius-sm);
+  background: rgba(232, 184, 74, 0.08);
+}
+
+.genre-chip--secondary {
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg-card);
+  border-color: var(--border);
+}
+
+.genre-chip--secondary .genre-chip__remove {
+  color: inherit;
+}
+
+.genre-chip--secondary .genre-chip__remove:hover {
+  color: inherit;
+  background: rgba(0, 0, 0, 0.08);
 }
 
 .title-search-confirm__back {
@@ -3869,13 +3963,14 @@ html[data-theme] .header__toolbar .btn--primary:hover {
     width: auto;
   }
 
-  .title-search-confirm .modal__footer {
-    flex-direction: column;
-    align-items: stretch;
+  .title-search-confirm__footer {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
   }
 
-  .title-search-confirm .modal__footer .btn {
-    width: 100%;
+  .title-search-confirm__footer .btn {
+    width: auto;
     min-height: 2.1rem;
   }
 

@@ -459,27 +459,20 @@
             ×
           </button>
         </header>
-        <div class="modal__body">
+        <div class="modal__body share-modal__body">
           <p class="share-modal__tagline">Send a link — not your account code</p>
-          <p class="backup-modal__text share-modal__intro">
-            Sharing creates a link anyone can open. They log in with their own account and choose how to import your titles, ratings, and notes.
-          </p>
-          <p class="backup-modal__text share-modal__note">
-            Your private login code is never included in a share link.
-          </p>
-          <div class="share-options">
-            <button type="button" class="share-option" data-action="share-send">
-              <span class="share-option__title">Send my list</span>
-              <span class="share-option__desc">Create a share link for this list</span>
-            </button>
-            <button type="button" class="share-option" data-action="share-receive">
-              <span class="share-option__title">Import a list</span>
-              <span class="share-option__desc">Open a link someone sent you, or pick a .json backup file</span>
-            </button>
+          <div class="share-modal__copy">
+            <ul class="share-modal__list">
+              <li>Creates a link anyone can open.</li>
+              <li>They sign in with their own account to import your titles.</li>
+            </ul>
+            <p class="share-modal__note">
+              Your private login code is never included in a share link.
+            </p>
           </div>
-          <footer class="modal__footer modal__footer--simple">
-            <button type="button" class="btn btn--ghost" data-action="close-share-modal">
-              Cancel
+          <footer class="modal__footer modal__footer--simple share-modal__footer">
+            <button type="button" class="btn btn--primary" data-action="share-send">
+              Send my list
             </button>
           </footer>
         </div>
@@ -871,12 +864,12 @@
                 <div class="genre-chips" id="searchConfirmSecondaryChips"></div>
               </div>
             </div>
-            <footer class="modal__footer">
+            <footer class="modal__footer title-search-confirm__footer">
               <button type="button" class="btn btn--ghost btn--back title-search-confirm__back" id="searchConfirmBack">
-                Back to results
+                Back to search
               </button>
-              <button type="button" class="btn btn--primary" id="searchConfirmAdd">
-                Add to list
+              <button type="button" class="btn btn--primary title-search-confirm__add" id="searchConfirmAdd">
+                Add title
               </button>
             </footer>
           </div>

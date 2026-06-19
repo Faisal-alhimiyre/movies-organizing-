@@ -287,7 +287,23 @@ html[data-theme="light"] .theme-option:focus-visible {
 }
 
 html[data-theme="light"] .genre-chip--filter {
-  border-color: rgba(138, 109, 66, 0.25);
+  color: #ffffff;
+  background: linear-gradient(180deg, #9a7b4f 0%, #7d6238 100%);
+  border-color: rgba(125, 98, 56, 0.55);
+}
+
+html[data-theme="light"] .genre-chip--filter .genre-chip__remove:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+html[data-theme="light"] .genre-chip--secondary {
+  color: #ffffff;
+  background: linear-gradient(180deg, #9a7b4f 0%, #7d6238 100%);
+  border-color: rgba(125, 98, 56, 0.55);
+}
+
+html[data-theme="light"] .genre-chip--secondary .genre-chip__remove:hover {
+  background: rgba(255, 255, 255, 0.14);
 }
 
 html[data-theme="light"] .gate__toggle-password:hover,

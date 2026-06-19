@@ -163,6 +163,13 @@
         return;
       }
 
+      if (action.dataset.action === "mobile-card-move-list") {
+        const itemId = action.dataset.id;
+        closeCardFocus();
+        triggerCardAction(itemId, "move-to-list");
+        return;
+      }
+
       if (action.dataset.action === "mobile-card-delete") {
         const itemId = action.dataset.id;
         closeCardFocus();
@@ -312,7 +319,8 @@
 
   function buildFocusActions(item, watchEntry) {
     const watched = Boolean(watchEntry);
-
+    const listIds = window.WatchlistAuth?.discoverListIds?.() || [];
+    const canMoveToList = listIds.length > 1;
     const buttons = [];
 
     if (item.link) {
@@ -332,10 +340,10 @@
       <button
         type="button"
         class="btn btn--ghost btn--sm mobile-card-focus__btn"
-        data-action="mobile-card-edit"
+        data-action="mobile-card-toggle-watched"
         data-id="${escapeHtml(item.id)}"
       >
-        ${escapeHtml(t("card.edit"))}
+        ${escapeHtml(watched ? t("card.markUnwatched") : t("card.markWatched"))}
       </button>
     `);
 
@@ -343,12 +351,25 @@
       <button
         type="button"
         class="btn btn--ghost btn--sm mobile-card-focus__btn"
-        data-action="mobile-card-toggle-watched"
+        data-action="mobile-card-edit"
         data-id="${escapeHtml(item.id)}"
       >
-        ${escapeHtml(watched ? t("card.markUnwatched") : t("card.markWatched"))}
+        ${escapeHtml(t("card.edit"))}
       </button>
     `);
+
+    if (canMoveToList) {
+      buttons.push(`
+        <button
+          type="button"
+          class="btn btn--ghost btn--sm mobile-card-focus__btn"
+          data-action="mobile-card-move-list"
+          data-id="${escapeHtml(item.id)}"
+        >
+          ${escapeHtml(t("card.moveToList"))}
+        </button>
+      `);
+    }
 
     buttons.push(`
       <button

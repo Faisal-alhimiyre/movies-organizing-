@@ -245,7 +245,13 @@ html[data-theme="purple"] .account-menu__panel {
 }
 
 html[data-theme="purple"] .genre-chip--filter {
-  border-color: rgba(232, 192, 120, 0.28);
+  color: #1a0f2e;
+  background: linear-gradient(180deg, #e8d4a8 0%, #d4bc88 100%);
+  border-color: rgba(232, 192, 120, 0.45);
+}
+
+html[data-theme="purple"] .genre-chip--filter .genre-chip__remove:hover {
+  background: rgba(26, 15, 46, 0.1);
 }
 
 html[data-theme="purple"] .rating-picker__star--filled .rating-picker__star-icon {

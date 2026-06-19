@@ -791,16 +791,27 @@
     font-size: 0.8rem;
   }
 
-  .modal__footer--stacked .btn,
-  .title-search-confirm .modal__footer .btn {
+  .modal__footer--stacked .btn {
     width: 100%;
     flex: 1 1 100%;
     justify-content: center;
   }
 
-  .title-search-confirm .modal__footer {
-    flex-direction: column;
-    align-items: stretch;
+  .title-search-confirm__footer {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .title-search-confirm__footer .btn {
+    width: auto;
+    flex: 0 1 auto;
+    min-height: 2.35rem;
+    justify-content: center;
+  }
+
+  .title-search-confirm__add {
+    margin-inline-start: auto;
   }
 
   .add-mode-tabs {
@@ -942,7 +953,7 @@
     font-size: 0.95rem;
   }
 
-  .title-search-confirm .modal__footer .btn {
+  .title-search-confirm__footer .btn {
     min-height: 2.35rem;
   }
 
@@ -988,15 +999,16 @@
     overflow: hidden;
   }
 
-  .title-search-confirm .modal__footer {
-    flex-direction: column;
-    align-items: stretch;
+  .title-search-confirm__footer {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
     gap: 0.4rem;
     margin-top: 0.65rem;
   }
 
-  .title-search-confirm .modal__footer .btn {
-    width: 100%;
+  .title-search-confirm__footer .btn {
+    width: auto;
     justify-content: center;
   }
 }

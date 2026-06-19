@@ -3074,6 +3074,19 @@
         </button>`
       : "";
 
+    const openLinkItem = item.link
+      ? `<button
+          type="button"
+          class="card-menu__item"
+          role="menuitem"
+          data-action="open-card-link"
+          data-link="${escapeHtml(item.link)}"
+          data-id="${escapeHtml(item.id)}"
+        >
+          ${escapeHtml(t("card.openLink"))}
+        </button>`
+      : "";
+
     const watchedLabel = isWatched ? t("card.markUnwatched") : t("card.markWatched");
 
     return `
@@ -3111,6 +3124,7 @@
               </svg>
             </button>
             <div class="card-menu__panel" hidden role="menu">
+              ${openLinkItem}
               <button
                 type="button"
                 class="card-menu__item"
@@ -3277,7 +3291,7 @@
     els.searchConfirmSecondaryChips.innerHTML = state.searchConfirmSecondary
       .map(
         (genre) => `
-        <span class="genre-chip">
+        <span class="genre-chip genre-chip--secondary">
           ${escapeHtml(genreLabel(genre))}
           <button
             type="button"
@@ -5691,12 +5705,6 @@
 
       if (action === "share-send") {
         await exportBackup();
-        return;
-      }
-
-      if (action === "share-receive") {
-        closeShareModal();
-        els.importInput?.click();
       }
     });
 
@@ -6199,6 +6207,13 @@
       if (action === "toggle-card-menu") {
         event.stopPropagation();
         toggleCardMenu(id);
+        return;
+      }
+
+      if (action === "open-card-link") {
+        closeAllCardMenus();
+        const url = target.dataset.link;
+        if (url) window.open(url, "_blank", "noopener,noreferrer");
         return;
       }
 
