@@ -49,8 +49,43 @@ class WatchlistFilterNotifier extends Notifier<WatchlistFilterState> {
     state = state.copyWith(watchedFilter: filter);
   }
 
-  void setRatingFilter(String value) {
-    state = state.copyWith(ratingFilterValue: value);
+  void setSortSource(String source) {
+    if (source == 'all') {
+      state = state.copyWith(sortSource: 'all', sortDirection: 'newest');
+      return;
+    }
+
+    var direction = state.sortDirection;
+    final prev = state.sortSource;
+
+    if (isDateSortSource(prev) &&
+        isDateSortSource(source) &&
+        source != prev) {
+      direction = state.sortDirection == 'oldest' ? 'oldest' : 'newest';
+    } else if (isRatingSortSource(prev) &&
+        isRatingSortSource(source) &&
+        source != prev) {
+      direction = state.sortDirection == 'worst' ? 'worst' : 'best';
+    } else if (source != prev) {
+      direction = isDateSortSource(source) ? 'newest' : 'best';
+    }
+
+    state = state.copyWith(sortSource: source, sortDirection: direction);
+  }
+
+  void toggleSortDirection() {
+    if (state.sortSource == 'all') return;
+    if (isDateSortSource(state.sortSource)) {
+      state = state.copyWith(
+        sortDirection: state.sortDirection == 'newest' ? 'oldest' : 'newest',
+      );
+      return;
+    }
+    if (isRatingSortSource(state.sortSource)) {
+      state = state.copyWith(
+        sortDirection: state.sortDirection == 'best' ? 'worst' : 'best',
+      );
+    }
   }
 
   void clearAll() => state = const WatchlistFilterState();

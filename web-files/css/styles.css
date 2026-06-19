@@ -210,6 +210,18 @@ body {
   padding: 0.65rem;
 }
 
+.panel__clear-filters {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8125rem;
+  min-height: 2.25rem;
+}
+
+.panel__clear-filters[hidden] {
+  display: none !important;
+}
+
 .ratings-backfill-banner {
   flex: 1 1 100%;
   margin: 0;

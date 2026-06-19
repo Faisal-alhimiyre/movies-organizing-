@@ -125,6 +125,34 @@ class L10n {
   String get filterWatched => _ar ? 'مشاهَد' : 'Watched';
   String get filterUnwatched => _ar ? 'غير مشاهَد' : 'Not watched';
   String get filterSortBy => _ar ? 'ترتيب حسب' : 'Sort by';
+  String get filterSortDirection => _ar ? 'اتجاه الترتيب' : 'Sort direction';
+  String get sortNewestFirst => _ar ? 'الأحدث أولاً' : 'Newest first';
+  String get sortOldestFirst => _ar ? 'الأقدم أولاً' : 'Oldest first';
+  String get sortHighestFirst => _ar ? 'الأعلى أولاً' : 'Highest first';
+  String get sortLowestFirst => _ar ? 'الأدنى أولاً' : 'Lowest first';
+  String get cardReleaseYear => _ar ? 'سنة الإصدار' : 'Release year';
+
+  String sortDirectionLabel(String sortSource, String sortDirection) {
+    if (sortSource == 'added' || sortSource == 'release') {
+      return sortDirection == 'oldest' ? sortOldestFirst : sortNewestFirst;
+    }
+    if (sortSource == 'imdb' ||
+        sortSource == 'anilist' ||
+        sortSource == 'personal') {
+      return sortDirection == 'worst' ? sortLowestFirst : sortHighestFirst;
+    }
+    return filterSortDirection;
+  }
+
+  String sortFilterLabel(String value) => switch (value) {
+        'all' => _ar ? 'الترتيب الافتراضي' : 'Default order',
+        'added' => _ar ? 'أُضيف مؤخراً' : 'Recently added',
+        'release' => _ar ? 'تاريخ الإصدار' : 'Release date',
+        'imdb' => _ar ? 'تقييمات IMDb' : 'IMDb ratings',
+        'anilist' => _ar ? 'تقييم AniList' : 'AniList rating',
+        'personal' => _ar ? 'تقييماتي' : 'My ratings',
+        _ => value,
+      };
   String get filterByGenre => _ar
       ? 'تصفية حسب التصنيف (أساسي أو ثانوي)'
       : 'Filter by genre (primary or secondary)';

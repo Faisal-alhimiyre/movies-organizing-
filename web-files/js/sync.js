@@ -74,8 +74,26 @@
     };
   }
 
-  function watchlistToRows(listId, watchlist, watched) {
+  function parseAddedAtMs(value) {
+    if (value == null || value === "") return null;
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    const ms = Date.parse(String(value));
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  function resolveAddedAtIso(entry, itemId, existingAddedAt = new Map()) {
+    const localMs = parseAddedAtMs(entry.addedAt);
+    if (localMs != null) return new Date(localMs).toISOString();
+
+    const remoteMs = parseAddedAtMs(existingAddedAt.get(itemId));
+    if (remoteMs != null) return new Date(remoteMs).toISOString();
+
+    return new Date().toISOString();
+  }
+
+  function watchlistToRows(listId, watchlist, watched, existingAddedAt = new Map()) {
     const rows = [];
+    const now = new Date().toISOString();
 
     for (const [contentType, genres] of Object.entries(watchlist || {})) {
       if (!genres || typeof genres !== "object") continue;
@@ -109,13 +127,28 @@
             watched: watchMeta.watched,
             watch_rating: watchMeta.rating,
             watch_note: watchMeta.note,
-            updated_at: new Date().toISOString(),
+            added_at: resolveAddedAtIso(entry, itemId, existingAddedAt),
+            updated_at: now,
           });
         }
       }
     }
 
     return rows;
+  }
+
+  async function fetchExistingAddedAtMap(sb, listId) {
+    const { data, error } = await sb
+      .from(ITEMS_TABLE)
+      .select("item_id, added_at")
+      .eq("list_id", listId);
+
+    if (error) {
+      console.warn("[sync] added_at fetch failed:", error.message);
+      return new Map();
+    }
+
+    return new Map((data || []).map((row) => [row.item_id, row.added_at]));
   }
 
   function rowsToWatchlist(rows) {
@@ -147,6 +180,8 @@
       if (row.imdb_rating) entry.imdbRating = row.imdb_rating;
       if (row.anilist_rating) entry.anilistRating = row.anilist_rating;
       if (row.year) entry.year = row.year;
+      const addedMs = parseAddedAtMs(row.added_at);
+      if (addedMs != null) entry.addedAt = addedMs;
 
       watchlist[contentType][genre].push(entry);
 
@@ -293,7 +328,8 @@
     syncing = true;
     dispatchStatus("saving");
 
-    const rows = watchlistToRows(listId, watchlist, watched);
+    const existingAddedAt = await fetchExistingAddedAtMap(sb, listId);
+    const rows = watchlistToRows(listId, watchlist, watched, existingAddedAt);
     const now = new Date().toISOString();
 
     const { error: accountError } = await sb.from(ACCOUNTS_TABLE).upsert(

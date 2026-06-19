@@ -86,20 +86,41 @@ class _WatchlistFilterBarState extends ConsumerState<WatchlistFilterBar> {
           onSelectionChanged: (value) => notifier.setWatchedFilter(value.first),
         ),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          value: filters.ratingFilterValue,
-          decoration: InputDecoration(labelText: l10n.filterSortBy),
-          items: ratingFilterOptions
-              .map(
-                (value) => DropdownMenuItem(
-                  value: value,
-                  child: Text(l10n.ratingFilterLabel(value)),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: filters.sortSource,
+                decoration: InputDecoration(labelText: l10n.filterSortBy),
+                items: sortFilterOptions
+                    .map(
+                      (value) => DropdownMenuItem(
+                        value: value,
+                        child: Text(l10n.sortFilterLabel(value)),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) notifier.setSortSource(value);
+                },
+              ),
+            ),
+            if (isToggleSortActive(filters)) ...[
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: l10n.sortDirectionLabel(
+                  filters.sortSource,
+                  filters.sortDirection,
                 ),
-              )
-              .toList(),
-          onChanged: (value) {
-            if (value != null) notifier.setRatingFilter(value);
-          },
+                onPressed: notifier.toggleSortDirection,
+                icon: Transform.rotate(
+                  angle: isSortDescendingPreferred(filters) ? 0 : 3.14159,
+                  child: const Icon(Icons.arrow_upward),
+                ),
+              ),
+            ],
+          ],
         ),
         if (availableGenres.isNotEmpty) ...[
           const SizedBox(height: 12),

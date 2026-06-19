@@ -69,7 +69,7 @@ List<WatchlistItem> flattenWatchlist(WatchlistData data) {
             imdbRating: map['imdbRating']?.toString(),
             anilistRating: map['anilistRating']?.toString(),
             year: _parseYear(map['year']),
-            addedAt: _parseYear(map['addedAt']),
+            addedAt: _parseAddedAtMs(map['addedAt']),
             secondaryGenres: _parseSecondaryGenres(genre, map['secondaryGenres']),
           ),
         );
@@ -101,6 +101,18 @@ int? _parseYear(dynamic raw) {
   if (raw is int) return raw;
   if (raw is num) return raw.toInt();
   return int.tryParse(raw?.toString() ?? '');
+}
+
+int? _parseAddedAtMs(dynamic raw) {
+  if (raw == null) return null;
+  if (raw is int) return raw;
+  if (raw is num && raw.isFinite) return raw.round();
+  final text = raw.toString().trim();
+  if (text.isEmpty) return null;
+  final asInt = int.tryParse(text);
+  if (asInt != null && asInt > 10000) return asInt;
+  final parsed = DateTime.tryParse(text);
+  return parsed?.millisecondsSinceEpoch;
 }
 
 List<String> _parseSecondaryGenres(String primary, dynamic raw) {

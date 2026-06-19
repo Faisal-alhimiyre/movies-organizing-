@@ -166,7 +166,25 @@ class SupabaseSyncRepository {
     if (client == null || listId.isEmpty || accountId.isEmpty) return false;
 
     try {
-      final rows = watchlistToRows(listId, watchlist, watched);
+      final existingAddedAt = <String, dynamic>{};
+      final existingRows = await client
+          .from(itemsTable)
+          .select('item_id, added_at')
+          .eq('list_id', listId);
+      for (final row in existingRows as List) {
+        final map = Map<String, dynamic>.from(row as Map);
+        final itemId = map['item_id']?.toString() ?? '';
+        if (itemId.isNotEmpty) {
+          existingAddedAt[itemId] = map['added_at'];
+        }
+      }
+
+      final rows = watchlistToRows(
+        listId,
+        watchlist,
+        watched,
+        existingAddedAt: existingAddedAt,
+      );
       final now = DateTime.now().toUtc().toIso8601String();
 
       await client.from(accountsTable).upsert(

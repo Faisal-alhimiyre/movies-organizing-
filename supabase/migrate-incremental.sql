@@ -55,5 +55,18 @@ create policy "list_snapshots_insert"
 alter table public.watchlist_items
   drop column if exists alt_title;
 
--- Note: "addedAt" for recently-added sort lives in the JSON watchlist payload
--- (local + share snapshots), not as a separate DB column.
+-- 5) When each title was added (for "Recently added" sort; survives cloud sync)
+alter table public.watchlist_items
+  add column if not exists added_at timestamptz;
+
+update public.watchlist_items
+set added_at = updated_at
+where added_at is null;
+
+alter table public.watchlist_items
+  alter column added_at set default now();
+
+alter table public.watchlist_items
+  alter column added_at set not null;
+
+-- Note: local JSON may also store addedAt (ms). Sync reads/writes added_at here.

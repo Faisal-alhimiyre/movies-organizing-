@@ -23,6 +23,7 @@ class TitleCard extends StatelessWidget {
     final theme = Theme.of(context);
     final isWatched = watched != null;
     final personalRating = watched?.rating;
+    final yearLabel = _formatReleaseYear(item.year);
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -33,7 +34,39 @@ class TitleCard extends StatelessWidget {
           children: [
             AspectRatio(
               aspectRatio: 2 / 3,
-              child: _Poster(poster: item.poster, title: item.title),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _Poster(poster: item.poster, title: item.title),
+                  if (yearLabel != null)
+                    Positioned(
+                      left: 8,
+                      bottom: 8,
+                      child: Tooltip(
+                        message: l10n.cardReleaseYear,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.72),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            child: Text(
+                              yearLabel,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
             Expanded(
               child: Padding(
@@ -95,6 +128,11 @@ class TitleCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String? _formatReleaseYear(int? year) {
+  if (year == null) return null;
+  return year.toString();
 }
 
 class _Poster extends StatelessWidget {

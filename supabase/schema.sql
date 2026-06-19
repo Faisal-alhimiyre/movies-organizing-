@@ -58,6 +58,7 @@ create table if not exists public.watchlist_items (
   watched boolean not null default false,
   watch_rating numeric,          -- user's score 0-10 when watched (null = not rated yet)
   watch_note text not null default '',  -- private comment when watched
+  added_at timestamptz not null default now(),  -- when the title was added to the list
   updated_at timestamptz not null default now(),
   primary key (list_id, item_id)
 );
@@ -141,8 +142,8 @@ create policy "list_snapshots_insert"
 -- Upgrading an older project? Run once:
 --   supabase/migrate-incremental.sql
 --
--- "addedAt" (recently-added sort) is stored inside each title in the JSON
--- watchlist payload, not as a watchlist_items column.
+-- added_at on watchlist_items is the source of truth for "Recently added" sort
+-- (synced to local addedAt in the app). updated_at is last metadata save only.
 
 -- Wipe all cloud data (run ONLY after migrate-to-accounts.sql or full schema.sql):
 -- delete from public.watchlist_items;

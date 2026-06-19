@@ -8,31 +8,37 @@ class WatchlistFilterState {
     this.search = '',
     this.selectedGenres = const [],
     this.watchedFilter = WatchedFilter.all,
-    this.ratingFilterValue = 'all',
+    this.sortSource = 'all',
+    this.sortDirection = 'newest',
   });
 
   final String search;
   final List<String> selectedGenres;
   final WatchedFilter watchedFilter;
-  final String ratingFilterValue;
+  /// Sort mode: all, added, release, imdb, anilist, personal
+  final String sortSource;
+  /// newest/oldest for date sorts; best/worst for rating sorts
+  final String sortDirection;
 
   bool get hasActiveFilters =>
       search.trim().isNotEmpty ||
       selectedGenres.isNotEmpty ||
       watchedFilter != WatchedFilter.all ||
-      ratingFilterValue != 'all';
+      sortSource != 'all';
 
   WatchlistFilterState copyWith({
     String? search,
     List<String>? selectedGenres,
     WatchedFilter? watchedFilter,
-    String? ratingFilterValue,
+    String? sortSource,
+    String? sortDirection,
   }) {
     return WatchlistFilterState(
       search: search ?? this.search,
       selectedGenres: selectedGenres ?? this.selectedGenres,
       watchedFilter: watchedFilter ?? this.watchedFilter,
-      ratingFilterValue: ratingFilterValue ?? this.ratingFilterValue,
+      sortSource: sortSource ?? this.sortSource,
+      sortDirection: sortDirection ?? this.sortDirection,
     );
   }
 }
@@ -44,25 +50,48 @@ class RatingFilterParts {
   final String sort;
 }
 
-RatingFilterParts parseRatingFilter(String value) {
-  if (value.isEmpty || value == 'all') {
+RatingFilterParts ratingFilterPartsFromState(WatchlistFilterState filters) {
+  if (filters.sortSource == 'all') {
     return const RatingFilterParts(source: 'all', sort: 'default');
   }
-  if (value == 'added-newest') {
-    return const RatingFilterParts(source: 'added', sort: 'newest');
-  }
-  if (value == 'added-oldest') {
-    return const RatingFilterParts(source: 'added', sort: 'oldest');
-  }
+  return RatingFilterParts(
+    source: filters.sortSource,
+    sort: filters.sortDirection,
+  );
+}
 
-  final parts = value.split('-');
-  if (parts.length < 2) {
-    return const RatingFilterParts(source: 'all', sort: 'default');
-  }
+bool isDateSortSource(String source) =>
+    source == 'added' || source == 'release';
 
-  final source = parts[0];
-  final sort = parts[1] == 'worst' ? 'worst' : 'best';
-  return RatingFilterParts(source: source, sort: sort);
+bool isRatingSortSource(String source) =>
+    source == 'imdb' || source == 'anilist' || source == 'personal';
+
+bool isToggleSortActive(WatchlistFilterState filters) =>
+    filters.sortSource != 'all';
+
+bool isReleaseSortActive(WatchlistFilterState filters) =>
+    filters.sortSource == 'release';
+
+bool isSortDescendingPreferred(WatchlistFilterState filters) {
+  if (isDateSortSource(filters.sortSource)) {
+    return filters.sortDirection != 'oldest';
+  }
+  if (isRatingSortSource(filters.sortSource)) {
+    return filters.sortDirection != 'worst';
+  }
+  return true;
+}
+
+int? parseReleaseYear(dynamic value) {
+  if (value == null) return null;
+  final raw = value.toString().trim();
+  if (raw.isEmpty || RegExp(r'^n/a$', caseSensitive: false).hasMatch(raw)) {
+    return null;
+  }
+  final match = RegExp(r'\b(18[89]\d|19\d{2}|20\d{2})\b').firstMatch(raw);
+  if (match == null) return null;
+  final year = int.tryParse(match.group(1)!);
+  return year;
 }
 
 bool matchesSearch(WatchlistItem item, String query) {
@@ -159,7 +188,11 @@ bool itemMatchesRatingFilter(
   RatingFilterParts rating,
   Map<String, WatchEntry> watched,
 ) {
-  if (rating.source == 'all' || rating.source == 'added') return true;
+  if (rating.source == 'all' ||
+      rating.source == 'added' ||
+      rating.source == 'release') {
+    return true;
+  }
   return ratingSortScore(item, rating.source, watched) != null;
 }
 
@@ -169,7 +202,7 @@ List<WatchlistItem> filterWatchlistItems({
   required WatchlistTypeFilter typeFilter,
   required WatchlistFilterState filters,
 }) {
-  final rating = parseRatingFilter(filters.ratingFilterValue);
+  final rating = ratingFilterPartsFromState(filters);
   final typeKey = typeFilter.contentTypeKey;
 
   return items.where((item) {
@@ -185,16 +218,16 @@ List<WatchlistItem> filterWatchlistItems({
 }
 
 bool isRatingSortActive(RatingFilterParts rating) {
-  return rating.source != 'all' &&
-      rating.source != 'added' &&
-      rating.sort != 'default';
+  return isRatingSortSource(rating.source);
 }
 
 bool isAddedSortActive(RatingFilterParts rating) => rating.source == 'added';
 
+bool isReleaseSortActiveParts(RatingFilterParts rating) =>
+    rating.source == 'release';
+
 bool isFlatSortActive(RatingFilterParts rating, List<String> selectedGenres) {
-  return (isRatingSortActive(rating) || isAddedSortActive(rating)) &&
-      selectedGenres.isEmpty;
+  return rating.source != 'all' && selectedGenres.isEmpty;
 }
 
 List<WatchlistItem> sortItemsInGroup(
@@ -207,7 +240,27 @@ List<WatchlistItem> sortItemsInGroup(
     final sorted = [...items]..sort((a, b) {
         final aTime = a.addedAt ?? 0;
         final bTime = b.addedAt ?? 0;
-        if (aTime != bTime) return newest ? bTime.compareTo(aTime) : aTime.compareTo(bTime);
+        if (aTime != bTime) {
+          return newest ? bTime.compareTo(aTime) : aTime.compareTo(bTime);
+        }
+        return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+      });
+    return sorted;
+  }
+
+  if (isReleaseSortActiveParts(rating)) {
+    final newest = rating.sort != 'oldest';
+    final sorted = [...items]..sort((a, b) {
+        final aYear = parseReleaseYear(a.year);
+        final bYear = parseReleaseYear(b.year);
+        if (aYear == null && bYear == null) {
+          return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+        }
+        if (aYear == null) return 1;
+        if (bYear == null) return -1;
+        if (aYear != bYear) {
+          return newest ? bYear.compareTo(aYear) : aYear.compareTo(bYear);
+        }
         return a.title.toLowerCase().compareTo(b.title.toLowerCase());
       });
     return sorted;
@@ -236,7 +289,8 @@ List<WatchlistItem> sortItemsInGroup(
       final bW = watched.containsKey(b.id);
       if (aW != bW) return aW ? 1 : -1;
 
-      final typeDiff = typeOrder.indexOf(a.contentType) - typeOrder.indexOf(b.contentType);
+      final typeDiff =
+          typeOrder.indexOf(a.contentType) - typeOrder.indexOf(b.contentType);
       if (typeDiff != 0) return typeDiff;
 
       return a.title.toLowerCase().compareTo(b.title.toLowerCase());
@@ -257,7 +311,7 @@ List<GenreGroup> buildFilteredGroups({
     filters: filters,
   );
 
-  final rating = parseRatingFilter(filters.ratingFilterValue);
+  final rating = ratingFilterPartsFromState(filters);
   final mergeByGenreOnly = typeFilter == WatchlistTypeFilter.all;
   final selectedGenres = filters.selectedGenres;
 
@@ -370,14 +424,11 @@ List<String> availableGenresFromItems(List<WatchlistItem> items) {
   return [...ordered, ...extras];
 }
 
-const ratingFilterOptions = [
+const sortFilterOptions = [
   'all',
-  'added-newest',
-  'added-oldest',
-  'imdb-best',
-  'imdb-worst',
-  'anilist-best',
-  'anilist-worst',
-  'personal-best',
-  'personal-worst',
+  'added',
+  'release',
+  'imdb',
+  'anilist',
+  'personal',
 ];

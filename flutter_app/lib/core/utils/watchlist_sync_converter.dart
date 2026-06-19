@@ -11,6 +11,38 @@ class WatchlistConvertResult {
   final Map<String, dynamic> watched;
 }
 
+int? parseAddedAtMs(dynamic value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  if (value is num && value.isFinite) return value.round();
+  final raw = value.toString().trim();
+  if (raw.isEmpty) return null;
+  final asInt = int.tryParse(raw);
+  if (asInt != null) return asInt;
+  final parsed = DateTime.tryParse(raw);
+  return parsed?.millisecondsSinceEpoch;
+}
+
+String resolveAddedAtIso(
+  Map<String, dynamic> entry,
+  String itemId,
+  Map<String, dynamic> existingAddedAt,
+) {
+  final localMs = parseAddedAtMs(entry['addedAt']);
+  if (localMs != null) {
+    return DateTime.fromMillisecondsSinceEpoch(localMs, isUtc: true)
+        .toIso8601String();
+  }
+
+  final remoteMs = parseAddedAtMs(existingAddedAt[itemId]);
+  if (remoteMs != null) {
+    return DateTime.fromMillisecondsSinceEpoch(remoteMs, isUtc: true)
+        .toIso8601String();
+  }
+
+  return DateTime.now().toUtc().toIso8601String();
+}
+
 /// Mirrors `rowsToWatchlist` in `web-files/js/sync.js`.
 WatchlistConvertResult rowsToWatchlist(List<Map<String, dynamic>> rows) {
   final movies = <String, List<dynamic>>{};
@@ -68,6 +100,9 @@ WatchlistConvertResult rowsToWatchlist(List<Map<String, dynamic>> rows) {
     final year = row['year']?.toString() ?? '';
     if (year.isNotEmpty) entry['year'] = year;
 
+    final addedMs = parseAddedAtMs(row['added_at']);
+    if (addedMs != null) entry['addedAt'] = addedMs;
+
     section[genre]!.add(entry);
 
     if (row['watched'] == true) {
@@ -104,9 +139,11 @@ WatchlistConvertResult rowsToWatchlist(List<Map<String, dynamic>> rows) {
 List<Map<String, dynamic>> watchlistToRows(
   String listId,
   WatchlistData watchlist,
-  Map<String, dynamic> watched,
-) {
+  Map<String, dynamic> watched, {
+  Map<String, dynamic> existingAddedAt = const {},
+}) {
   final rows = <Map<String, dynamic>>[];
+  final now = DateTime.now().toUtc().toIso8601String();
   final sections = {
     'movies': watchlist.movies,
     'tvSeries': watchlist.tvSeries,
@@ -151,7 +188,8 @@ List<Map<String, dynamic>> watchlistToRows(
           'watched': watchMeta.watched,
           'watch_rating': watchMeta.rating,
           'watch_note': watchMeta.note,
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
+          'added_at': resolveAddedAtIso(map, itemId, existingAddedAt),
+          'updated_at': now,
         });
       }
     }

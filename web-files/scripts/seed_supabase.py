@@ -151,6 +151,16 @@ def watchlist_to_rows(list_id: str, watchlist: dict) -> list[dict]:
 
                 leads = parse_leads(entry)
                 item_id = f"{content_type}::{genre}::{title}"
+                added_raw = entry.get("addedAt")
+                if added_raw is not None and str(added_raw).strip():
+                    try:
+                        added_at = datetime.fromtimestamp(
+                            int(added_raw) / 1000, tz=timezone.utc
+                        ).isoformat()
+                    except (TypeError, ValueError, OSError):
+                        added_at = now
+                else:
+                    added_at = now
 
                 rows.append(
                     {
@@ -172,6 +182,7 @@ def watchlist_to_rows(list_id: str, watchlist: dict) -> list[dict]:
                         "watched": False,
                         "watch_rating": None,
                         "watch_note": "",
+                        "added_at": added_at,
                         "updated_at": now,
                     }
                 )

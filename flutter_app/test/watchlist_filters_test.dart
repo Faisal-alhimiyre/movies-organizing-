@@ -13,6 +13,7 @@ void main() {
       summary: 'A hero saves the day.',
       imdbRating: '8.0',
       addedAt: 100,
+      year: 2020,
     ),
     const WatchlistItem(
       id: 'movies::Comedy::Beta',
@@ -23,6 +24,16 @@ void main() {
       summary: 'A funny night.',
       imdbRating: '6.5',
       addedAt: 200,
+      year: 2015,
+    ),
+    const WatchlistItem(
+      id: 'movies::Drama::Gamma',
+      contentType: 'movies',
+      genre: 'Drama',
+      title: 'Gamma',
+      lead: 'Actor Three',
+      summary: 'No year.',
+      addedAt: 150,
     ),
   ];
 
@@ -32,6 +43,13 @@ void main() {
     expect(matchesSearch(sampleItems[0], 'missing'), isFalse);
     expect(matchesSearch(sampleItems[0], 'hero'), isFalse);
     expect(matchesSearch(sampleItems[0], 'saves'), isFalse);
+  });
+
+  test('parseReleaseYear extracts year from varied formats', () {
+    expect(parseReleaseYear(2020), 2020);
+    expect(parseReleaseYear('2019-05-01'), 2019);
+    expect(parseReleaseYear('N/A'), isNull);
+    expect(parseReleaseYear(null), isNull);
   });
 
   test('filterWatchlistItems respects watched filter', () {
@@ -55,11 +73,44 @@ void main() {
       items: sampleItems,
       watched: const {},
       typeFilter: WatchlistTypeFilter.all,
-      filters: const WatchlistFilterState(ratingFilterValue: 'imdb-best'),
+      filters: const WatchlistFilterState(
+        sortSource: 'imdb',
+        sortDirection: 'best',
+      ),
     );
 
     expect(groups, hasLength(1));
     expect(groups.first.isFlatSorted, isTrue);
     expect(groups.first.items.first.title, 'Alpha');
+  });
+
+  test('buildFilteredGroups sorts by release date newest first', () {
+    final groups = buildFilteredGroups(
+      items: sampleItems,
+      watched: const {},
+      typeFilter: WatchlistTypeFilter.all,
+      filters: const WatchlistFilterState(
+        sortSource: 'release',
+        sortDirection: 'newest',
+      ),
+    );
+
+    expect(groups.first.items.map((i) => i.title).toList(),
+        ['Alpha', 'Beta', 'Gamma']);
+  });
+
+  test('buildFilteredGroups sorts by release date oldest first', () {
+    final groups = buildFilteredGroups(
+      items: sampleItems,
+      watched: const {},
+      typeFilter: WatchlistTypeFilter.all,
+      filters: const WatchlistFilterState(
+        sortSource: 'release',
+        sortDirection: 'oldest',
+      ),
+    );
+
+    expect(groups.first.items.map((i) => i.title).toList(),
+        ['Beta', 'Alpha', 'Gamma']);
   });
 }

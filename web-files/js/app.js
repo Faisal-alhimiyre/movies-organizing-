@@ -138,6 +138,7 @@
     watchedFilter: document.getElementById("watchedFilter"),
     ratingFilter: document.getElementById("ratingFilter"),
     sortDirectionBtn: document.getElementById("sortDirectionBtn"),
+    clearFiltersBtn: document.getElementById("clearFiltersBtn"),
     ratingsBackfillBanner: document.getElementById("ratingsBackfillBanner"),
     shareArrivalBanner: document.getElementById("shareArrivalBanner"),
     shareArrivalTitle: document.getElementById("shareArrivalTitle"),
@@ -577,10 +578,25 @@
       remoteHasData &&
       (!localHasData || remoteUpdated > localStamp)
     ) {
+      const localAddedById = new Map();
+      if (localHasData) {
+        for (const item of flattenWatchlist(state.data)) {
+          if (item.addedAt) localAddedById.set(item.id, item.addedAt);
+        }
+      }
+
       state.data = applyBundledGenreCorrections(remote.watchlist, bundled);
       state.watched = remote.watched || {};
       state.items = flattenWatchlist(state.data);
+
+      if (localAddedById.size) {
+        for (const item of state.items) {
+          const localAt = localAddedById.get(item.id);
+          if (localAt) item.addedAt = localAt;
+        }
+      }
       state.data = itemsToNested(state.items);
+
       if (remote.name) {
         window.WatchlistAuth.registerList(listId, {
           accountId: window.WatchlistAuth.getAccountId(),
@@ -1977,6 +1993,22 @@
     );
   }
 
+  function hasPanelFilters() {
+    return (
+      state.search.trim() !== "" ||
+      state.selectedGenres.length > 0 ||
+      state.watchedFilter !== "all" ||
+      state.ratingFilterSource !== "all"
+    );
+  }
+
+  function updateClearFiltersButton() {
+    if (!els.clearFiltersBtn) return;
+    const show = hasPanelFilters();
+    els.clearFiltersBtn.hidden = !show;
+    els.clearFiltersBtn.textContent = t("empty.clearFilters");
+  }
+
   function clearAllFilters() {
     state.type = "all";
     state.search = "";
@@ -1993,6 +2025,7 @@
     });
     updateGenreOptions();
     updateRatingFilterOptions();
+    updateClearFiltersButton();
     render();
   }
 
@@ -3115,6 +3148,7 @@
   }
 
   function render() {
+    updateClearFiltersButton();
     updateGenreOptions();
     const filtered = getFilteredItems();
     updateStats();
@@ -5588,6 +5622,10 @@
 
     els.sortDirectionBtn?.addEventListener("click", () => {
       toggleSortDirection();
+    });
+
+    els.clearFiltersBtn?.addEventListener("click", () => {
+      clearAllFilters();
     });
 
     els.accountMenuBtn?.addEventListener("click", (event) => {
