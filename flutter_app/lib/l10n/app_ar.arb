@@ -1,0 +1,16 @@
+{
+  "@@locale": "ar",
+  "appTitle": "ليالينا السينمائية",
+  "appDescription": "قائمة مشاهدة شخصية للأفلام والمسلسلات والأنمي مرتبة حسب التصنيف.",
+  "gateLogin": "تسجيل الدخول",
+  "gateCreate": "إنشاء حساب جديد",
+  "gateCodeLabel": "رمزك الشخصي",
+  "gateConfirmCode": "أكّد الرمز",
+  "gateRecoveryWarning": "احفظ رمزك في مكان آمن. لا يمكن استرداده إذا نسيته.",
+  "gateSubmitLogin": "دخول",
+  "gateSubmitCreate": "إنشاء الحساب",
+  "watchlistPlaceholder": "قائمة المشاهدة — المرحلة 3 قادمة.",
+  "aboutTitle": "حول التطبيق",
+  "aboutBody": "تطبيق قائمة مشاهدة شخصية. البيانات من TMDb وOMDb وAniList.",
+  "stage2Note": "المرحلة 2: الأساس جاهز. تسجيل الدخول الحقيقي في المرحلة 3."
+}

@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta
+      name="description"
+      content="Personal watchlist of movies, TV series, and anime organized by genre."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Our Movie Nights" />
+    <meta property="og:title" content="Our Movie Nights" />
+    <meta
+      property="og:description"
+      content="Personal watchlist of movies, TV series, and anime organized by genre."
+    />
+    <meta property="og:image" content="assets/og/og-image.svg" />
+    <meta property="og:image:type" content="image/svg+xml" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Our Movie Nights — movies, TV, and anime watchlists"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Our Movie Nights" />
+    <meta
+      name="twitter:description"
+      content="Personal watchlist of movies, TV series, and anime organized by genre."
+    />
+    <meta name="twitter:image" content="assets/og/og-image.svg" />
+    <meta name="theme-color" content="#141416" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Movie Nights" />
+    <title>Our Movie Nights</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="assets/icons/icon-192.png" type="image/png" />
+    <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" sizes="180x180" />
+    <link rel="apple-touch-icon" href="assets/icons/icon-192.png" sizes="192x192" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/theme.css" />
+    <link rel="stylesheet" href="css/theme-light.css" />
+    <link rel="stylesheet" href="css/theme-purple.css" />
+    <link rel="stylesheet" href="css/theme-brown.css" />
+    <link rel="stylesheet" href="css/theme-pink.css" />
+    <link rel="stylesheet" href="css/theme-consistency.css" />
+    <link rel="stylesheet" href="css/typography.css" />
+    <link rel="stylesheet" href="css/reduced-motion.css" />
+    <link rel="stylesheet" href="css/accessibility.css" />
+    <link rel="stylesheet" href="css/rtl.css" />
+    <script src="js/themes.js"></script>
+    <link
+      rel="stylesheet"
+      href="css/mobile.css"
+      media="(max-width: 640px)"
+    />
+  </head>
+  <body>
+    <a href="#mainContent" class="skip-link">Skip to main content</a>
+    <div class="app" id="app">
+      <header class="header">
+        <div class="header__main">
+          <div class="header__brand">
+            <h1 class="header__title" id="headerTitle"></h1>
+            <script>
+              (function () {
+                try {
+                  var sessionRaw = sessionStorage.getItem("watchlist-session-v2");
+                  var session = sessionRaw ? JSON.parse(sessionRaw) : null;
+                  if (!session?.listId) {
+                    var legacyRaw = sessionStorage.getItem("watchlist-session-v1");
+                    if (legacyRaw) {
+                      var legacy = JSON.parse(legacyRaw);
+                      session = {
+                        accountId: legacy.accountId || legacy.listId,
+                        listId: legacy.listId,
+                      };
+                    }
+                  }
+                  if (!session?.listId) return;
+                  var accountId = session.accountId || session.listId;
+                  var libraryRaw = localStorage.getItem("watchlist-library-v2-" + accountId);
+                  var library = libraryRaw ? JSON.parse(libraryRaw) : [];
+                  var entry = library.find(function (item) {
+                    return item.listId === session.listId;
+                  });
+                  var name = (entry && entry.name) || "My list";
+                  var titleEl = document.getElementById("headerTitle");
+                  if (titleEl) titleEl.textContent = name;
+                  document.title = name;
+                } catch (err) {
+                  /* ignore */
+                }
+              })();
+            </script>
+            <div class="header__stats" id="stats" aria-live="polite"></div>
+          </div>
+          <div class="header__actions">
+            <div class="header__toolbar">
+            <button type="button" class="btn btn--primary" id="addBtn">
+              Add title
+            </button>
+            <div class="account-menu" id="accountMenu">
+              <button
+                type="button"
+                class="btn btn--ghost account-menu__trigger"
+                id="accountMenuBtn"
+                aria-expanded="false"
+                aria-haspopup="menu"
+                aria-controls="accountMenuPanel"
+              >
+                <span class="account-menu__trigger-label">Menu</span>
+                <svg class="account-menu__icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="6" r="1.5" fill="currentColor" />
+                  <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+                  <circle cx="12" cy="18" r="1.5" fill="currentColor" />
+                </svg>
+              </button>
+              <div
+                class="account-menu__panel"
+                id="accountMenuPanel"
+                role="menu"
+                hidden
+              >
+                <div class="account-menu__switch" id="accountMenuSwitchWrap" hidden>
+                  <label class="account-menu__label" for="listSwitcher">Switch list</label>
+                  <select
+                    id="listSwitcher"
+                    class="account-menu__select select"
+                    aria-label="Switch list"
+                  ></select>
+                </div>
+                <button type="button" class="account-menu__item" role="menuitem" data-action="manage-lists">
+                  Manage lists
+                </button>
+                <button type="button" class="account-menu__item" role="menuitem" data-action="share">
+                  Share
+                </button>
+                <button type="button" class="account-menu__item" role="menuitem" data-action="open-theme">
+                  Theme
+                </button>
+                <div class="account-menu__lang" id="accountMenuLang">
+                  <span class="account-menu__label" id="accountMenuLangLabel">Language</span>
+                  <div class="account-menu__lang-row">
+                    <button
+                      type="button"
+                      class="account-menu__lang-btn"
+                      data-action="set-language"
+                      data-lang="en"
+                    >
+                      English
+                    </button>
+                    <button
+                      type="button"
+                      class="account-menu__lang-btn"
+                      data-action="set-language"
+                      data-lang="ar"
+                    >
+                      العربية
+                    </button>
+                  </div>
+                </div>
+                <hr class="account-menu__divider" />
+                <button type="button" class="account-menu__item" role="menuitem" data-action="change-code">
+                  Change code
+                </button>
+                <button
+                  type="button"
+                  class="account-menu__item account-menu__item--danger"
+                  role="menuitem"
+                  data-action="delete-account"
+                >
+                  Delete account
+                </button>
+                <button type="button" class="account-menu__item" role="menuitem" data-action="sign-out">
+                  Sign out
+                </button>
+              </div>
+            </div>
+            <input
+              type="file"
+              id="importInput"
+              accept="application/json,.json"
+              hidden
+            />
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="panel" aria-label="Filters">
+        <nav class="type-tabs" role="tablist" aria-label="Content type">
+            <button
+              type="button"
+              class="type-tab type-tab--active"
+              role="tab"
+              aria-selected="true"
+              data-type="all"
+            >
+              <span class="type-tab__label">All</span>
+              <span class="type-tab__count" data-count="all">0</span>
+            </button>
+            <button
+              type="button"
+              class="type-tab"
+              role="tab"
+              aria-selected="false"
+              data-type="movies"
+            >
+              <span class="type-tab__icon" aria-hidden="true">🎬</span>
+              <span class="type-tab__label">Movies</span>
+              <span class="type-tab__count" data-count="movies">0</span>
+            </button>
+            <button
+              type="button"
+              class="type-tab"
+              role="tab"
+              aria-selected="false"
+              data-type="tvSeries"
+            >
+              <span class="type-tab__icon" aria-hidden="true">📺</span>
+              <span class="type-tab__label">TV Series</span>
+              <span class="type-tab__count" data-count="tvSeries">0</span>
+            </button>
+            <button
+              type="button"
+              class="type-tab"
+              role="tab"
+              aria-selected="false"
+              data-type="anime"
+            >
+              <span class="type-tab__icon" aria-hidden="true">🎌</span>
+              <span class="type-tab__label">Anime</span>
+              <span class="type-tab__count" data-count="anime">0</span>
+            </button>
+        </nav>
+
+        <div class="panel__filters">
+          <label class="search" for="searchInput">
+            <span class="search__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2" />
+                <path d="M16 16l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </span>
+            <input
+              type="search"
+              id="searchInput"
+              class="search__input"
+              placeholder="Search titles, actors, or summaries…"
+              autocomplete="off"
+            />
+          </label>
+
+          <div class="genre-filter">
+            <select id="genreSelect" class="genre-filter__select" aria-label="Filter by genre">
+              <option value="">All genres</option>
+            </select>
+            <div class="genre-filter__chips" id="genreFilterChips"></div>
+          </div>
+
+          <select id="watchedFilter" class="genre-filter__select watched-filter__select" aria-label="Filter by watched status">
+            <option value="all">All</option>
+            <option value="watched">Watched</option>
+            <option value="unwatched">Not watched</option>
+          </select>
+
+          <div class="rating-filter">
+            <select id="ratingFilter" class="genre-filter__select rating-filter__select" aria-label="Sort by">
+              <option value="all">Default order</option>
+              <option value="added">Recently added</option>
+              <option value="release">Release date</option>
+              <option value="imdb">IMDb ratings</option>
+              <option value="anilist">AniList rating</option>
+              <option value="personal">My ratings</option>
+            </select>
+            <button
+              type="button"
+              id="sortDirectionBtn"
+              class="sort-direction-btn"
+              hidden
+              aria-label="Toggle sort direction"
+              title="Toggle sort direction"
+            >
+              <svg class="sort-direction-btn__icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="5" y1="12" x2="19" y2="12" />
+                <polyline points="14 7 19 12 14 17" />
+              </svg>
+            </button>
+          </div>
+
+          <p class="ratings-backfill-banner" id="ratingsBackfillBanner" hidden aria-live="polite"></p>
+        </div>
+      </section>
+
+      <div class="page-toolbar">
+        <div class="layout-bar" id="layoutToggles" role="toolbar" aria-label="Card layout">
+          <button
+            type="button"
+            class="layout-toggle"
+            data-layout="hover"
+            data-tip="Preview on hover"
+            aria-label="Preview on hover"
+          >
+            <svg class="layout-toggle__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="5" y="14" width="14" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.75" />
+              <rect x="7" y="4" width="10" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.75" />
+              <path fill="currentColor" d="M11.25 10h1.5L12 12.25z" />
+              <path fill="currentColor" d="M9.25 6.25h1v1.25h-1zm3.5 0h1v1.25h-1z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="layout-toggle"
+            data-layout="poster"
+            data-tip="Show poster images"
+            aria-label="Show poster images"
+          >
+            <svg class="layout-toggle__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="7" y="3" width="10" height="18" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.75" />
+              <circle cx="10" cy="8" r="1.25" fill="currentColor" />
+              <path
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M9 16.5 11 13l2 2.5 3-4.5"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="app-banner app-banner--share" id="shareArrivalBanner" hidden role="region" aria-labelledby="shareArrivalTitle">
+        <div class="app-banner__body">
+          <h2 class="app-banner__title" id="shareArrivalTitle">Shared list ready to import</h2>
+          <p class="app-banner__text" id="shareArrivalText"></p>
+        </div>
+        <div class="app-banner__actions">
+          <button type="button" class="btn btn--primary btn--sm" data-action="share-arrival-import" id="shareArrivalImportBtn">
+            Review import
+          </button>
+          <button type="button" class="btn btn--ghost btn--sm" data-action="dismiss-share-arrival">
+            Not now
+          </button>
+        </div>
+      </div>
+
+      <main class="main" id="mainContent" tabindex="-1">
+        <div class="loading" id="loading">Loading watchlist…</div>
+      </main>
+
+      <footer class="footer">
+        <p>Your list is saved on this device. Use Menu → Share to send it to a friend or add theirs.</p>
+      </footer>
+    </div>
+
+    <div class="link-preview-popover" id="linkPreviewPopover" hidden>
+      <div class="link-preview-popover__inner" id="linkPreviewPopoverInner">
+        <p class="link-preview-popover__loading">Loading preview…</p>
+      </div>
+    </div>
+
+    <div class="modal" id="changeCodeModal" hidden>
+      <div class="modal__backdrop" data-action="close-change-code-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="changeCodeModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="changeCodeModalTitle">Change list code</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-change-code-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+
+        <form class="modal__form" id="changeCodeForm" novalidate>
+          <p class="backup-modal__text">
+            Your movies stay the same. Only the sign-in code changes.
+            6+ characters, letters and numbers, no spaces. Capitals don't matter.
+          </p>
+          <label class="form-field form-field--full">
+            <span class="form-field__label">New code</span>
+            <input
+              type="password"
+              id="changeCodeNew"
+              class="form-input"
+              autocomplete="new-password"
+              required
+            />
+          </label>
+          <label class="form-field form-field--full">
+            <span class="form-field__label">Confirm new code</span>
+            <input
+              type="password"
+              id="changeCodeConfirm"
+              class="form-input"
+              autocomplete="new-password"
+              required
+            />
+          </label>
+          <p class="backup-modal__hint" id="changeCodeError" hidden></p>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-change-code-modal">
+              Cancel
+            </button>
+            <button type="submit" class="btn btn--primary" id="changeCodeSubmit">
+              Update code
+            </button>
+          </footer>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal" id="shareModal" hidden>
+      <div class="modal__backdrop" data-action="close-share-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shareModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="shareModalTitle">Share a list</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-share-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        <div class="modal__body">
+          <p class="share-modal__tagline">Send a link — not your account code</p>
+          <p class="backup-modal__text share-modal__intro">
+            Sharing creates a link anyone can open. They log in with their own account and choose how to import your titles, ratings, and notes.
+          </p>
+          <p class="backup-modal__text share-modal__note">
+            Your private login code is never included in a share link.
+          </p>
+          <div class="share-options">
+            <button type="button" class="share-option" data-action="share-send">
+              <span class="share-option__title">Send my list</span>
+              <span class="share-option__desc">Create a share link for this list</span>
+            </button>
+            <button type="button" class="share-option" data-action="share-receive">
+              <span class="share-option__title">Import a list</span>
+              <span class="share-option__desc">Open a link someone sent you, or pick a .json backup file</span>
+            </button>
+          </div>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-share-modal">
+              Cancel
+            </button>
+          </footer>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="themeModal" hidden>
+      <div class="modal__backdrop" data-action="close-theme-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="themeModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="themeModalTitle">Theme</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-theme-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        <div class="modal__body">
+          <p class="backup-modal__text theme-modal__intro" id="themeModalIntro">
+            Pick how the app looks. Your choice is saved on this device.
+          </p>
+          <div class="theme-options">
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="dark">
+              <span class="theme-option__preview theme-option__preview--dark" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="dark">Dark</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="light">
+              <span class="theme-option__preview theme-option__preview--light" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="light">Light</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="purple">
+              <span class="theme-option__preview theme-option__preview--purple" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="purple">Purple</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="brown">
+              <span class="theme-option__preview theme-option__preview--brown" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="brown">Brown</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="pink">
+              <span class="theme-option__preview theme-option__preview--pink" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="pink">Pink</span>
+            </button>
+          </div>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-theme-modal">
+              Close
+            </button>
+          </footer>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="manageListsModal" hidden>
+      <div class="modal__backdrop" data-action="close-manage-lists-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="manageListsModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="manageListsModalTitle">Manage lists</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-manage-lists-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        <div class="modal__body">
+          <button type="button" class="btn btn--primary my-lists__create" data-action="create-new-list">
+            Create a new list
+          </button>
+          <ul class="manage-lists" id="manageListsBody"></ul>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-manage-lists-modal">
+              Close
+            </button>
+          </footer>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="createListModal" hidden>
+      <div class="modal__backdrop" data-action="close-create-list-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="createListModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="createListModalTitle">New list</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-create-list-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        <form class="modal__form" id="createListForm" novalidate>
+          <label class="form-field form-field--full">
+            <span class="form-field__label">Name</span>
+            <input
+              type="text"
+              id="createListName"
+              class="form-input"
+              placeholder="Classic movies"
+              maxlength="48"
+              required
+            />
+          </label>
+          <label class="form-field form-field--full">
+            <span class="form-field__label">About this list</span>
+            <input
+              type="text"
+              id="createListDescription"
+              class="form-input"
+              placeholder="Old Hollywood picks for rainy nights"
+              maxlength="120"
+            />
+          </label>
+          <p class="backup-modal__hint" id="createListError" hidden></p>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-create-list-modal">
+              Cancel
+            </button>
+            <button type="submit" class="btn btn--primary" id="createListSubmit">Create list</button>
+          </footer>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal" id="moveListModal" hidden>
+      <div class="modal__backdrop" data-action="close-move-list-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="moveListModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="moveListModalTitle">Move to another list</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-move-list-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        <div class="modal__body">
+          <p class="backup-modal__text" id="moveListModalText"></p>
+          <ul class="move-list-picker" id="moveListPicker"></ul>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-move-list-modal">
+              Cancel
+            </button>
+          </footer>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="importShareModal" hidden>
+      <div class="modal__backdrop" data-action="close-import-share-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="importShareModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="importShareModalTitle">Import a list</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-import-share-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        <div class="modal__body">
+          <p class="backup-modal__text" id="importShareModalText"></p>
+          <p class="backup-modal__hint" id="importShareModalHint">
+            Choose how to import. Opening as a new list keeps your current list unchanged.
+          </p>
+          <footer class="modal__footer modal__footer--stacked">
+            <button type="button" class="btn btn--primary" data-action="import-new-list">
+              Open as new list
+            </button>
+            <button type="button" class="btn btn--ghost" data-action="import-merge" id="importMergeBtn">
+              Add to my current list
+            </button>
+            <button type="button" class="btn btn--ghost" data-action="import-merge-watched" id="importMergeWatchedBtn">
+              Add to current list with ratings and notes
+            </button>
+            <button type="button" class="btn btn--text" data-action="close-import-share-modal">
+              Cancel
+            </button>
+          </footer>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="importNewListModal" hidden>
+      <div class="modal__backdrop" data-action="close-import-new-list-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="importNewListModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="importNewListModalTitle">Name your new list</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-import-new-list-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        <form class="modal__form" id="importNewListForm" novalidate>
+          <p class="backup-modal__text" id="importNewListModalHint"></p>
+          <label class="form-field form-field--full">
+            <span class="form-field__label">Name</span>
+            <input
+              type="text"
+              id="importNewListName"
+              class="form-input"
+              maxlength="48"
+              required
+            />
+          </label>
+          <label class="form-field form-field--full">
+            <span class="form-field__label">About this list</span>
+            <input
+              type="text"
+              id="importNewListDescription"
+              class="form-input"
+              maxlength="120"
+            />
+          </label>
+          <p class="backup-modal__hint" id="importNewListError" hidden></p>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-import-new-list-modal">
+              Cancel
+            </button>
+            <button type="submit" class="btn btn--primary" id="importNewListSubmit">Create list</button>
+          </footer>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal" id="itemModal" hidden>
+      <div class="modal__backdrop" data-action="close-modal"></div>
+      <div
+        class="modal__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="modalTitle">Add title</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+
+        <nav class="add-mode-tabs" id="addModeTabs" role="tablist" aria-label="Add mode" hidden>
+          <button
+            type="button"
+            class="add-mode-tab add-mode-tab--active"
+            role="tab"
+            aria-selected="true"
+            data-add-mode="search"
+          >
+            Search
+          </button>
+          <button
+            type="button"
+            class="add-mode-tab"
+            role="tab"
+            aria-selected="false"
+            data-add-mode="manual"
+          >
+            Manual
+          </button>
+          <button
+            type="button"
+            class="add-mode-tab"
+            role="tab"
+            aria-selected="false"
+            data-add-mode="bulk"
+          >
+            Multiple titles
+          </button>
+        </nav>
+
+        <div class="modal__search" id="searchAddPanel" hidden>
+          <div class="title-search" id="searchAddStep">
+            <p class="add-panel-hint">
+              <strong>Can't find your title?</strong> Tap <strong>Manual</strong> at the top and add it yourself.
+            </p>
+            <label class="form-field form-field--full">
+              <span class="form-field__label">Search movies &amp; shows</span>
+              <span class="search title-search__query">
+                <span class="search__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2" />
+                    <path d="M16 16l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                </span>
+                <input
+                  type="search"
+                  id="titleSearchInput"
+                  class="search__input"
+                  placeholder="e.g. Avengers, Demon Slayer…"
+                  autocomplete="off"
+                />
+              </span>
+            </label>
+            <div class="title-search__filters">
+              <label class="title-search__filter">
+                <span class="title-search__filter-label">Type</span>
+                <select id="titleSearchType" class="select">
+                  <option value="all">All</option>
+                  <option value="movie">Movies</option>
+                  <option value="series">TV Series</option>
+                  <option value="anime">Anime</option>
+                </select>
+              </label>
+            </div>
+            <p class="title-search__status" id="titleSearchStatus" aria-live="polite"></p>
+            <ul class="title-search__results" id="titleSearchResults"></ul>
+            <button type="button" class="btn btn--ghost title-search__more" id="titleSearchMore" hidden>
+              Load more
+            </button>
+          </div>
+
+          <div class="title-search-confirm" id="searchConfirmStep" hidden>
+            <div class="title-search-confirm__preview" id="searchConfirmPreview"></div>
+            <div class="form-grid title-search-confirm__fields">
+              <div class="form-field">
+                <span class="form-field__label">Type</span>
+                <div
+                  class="content-type-picker"
+                  id="searchConfirmTypePicker"
+                  role="radiogroup"
+                  aria-label="Type"
+                >
+                  <button type="button" class="content-type-picker__btn" data-type="movies">Movie</button>
+                  <button type="button" class="content-type-picker__btn" data-type="tvSeries">TV Series</button>
+                  <button type="button" class="content-type-picker__btn" data-type="anime">Anime</button>
+                </div>
+                <input type="hidden" id="searchConfirmType" value="movies" />
+              </div>
+              <label class="form-field">
+                <span class="form-field__label">Main genre</span>
+                <select id="searchConfirmGenre" class="select" required>
+                  <option value="" disabled selected>Choose genre</option>
+                </select>
+              </label>
+              <div class="form-field form-field--full">
+                <span class="form-field__label">Secondary genres</span>
+                <select id="searchConfirmSecondaryAdd" class="select">
+                  <option value="">Add another genre…</option>
+                </select>
+                <div class="genre-chips" id="searchConfirmSecondaryChips"></div>
+              </div>
+            </div>
+            <footer class="modal__footer">
+              <button type="button" class="btn btn--ghost btn--back title-search-confirm__back" id="searchConfirmBack">
+                Back to results
+              </button>
+              <button type="button" class="btn btn--primary" id="searchConfirmAdd">
+                Add to list
+              </button>
+            </footer>
+          </div>
+        </div>
+
+        <form class="modal__form" id="itemForm" novalidate hidden>
+          <p class="add-panel-hint add-panel-hint--manual">
+            <strong>Step 1: Paste your link.</strong> IMDb, AniList, or MyAnimeList. We'll fill in the details for you.
+          </p>
+          <div class="form-grid">
+            <label class="form-field form-field--full">
+              <span class="form-field__label">Link</span>
+              <input
+                type="url"
+                name="link"
+                id="formLink"
+                class="form-input"
+                placeholder="https://www.imdb.com/title/…, anilist.co/anime/…, or myanimelist.net/anime/…"
+              />
+              <p class="form-field__status" id="formLinkStatus" aria-live="polite"></p>
+            </label>
+
+            <div class="form-link-preview" id="formLinkPreview" hidden role="status" aria-live="polite">
+              <p class="form-link-preview__hint" id="formLinkPreviewHint"></p>
+              <div class="title-search-confirm__preview form-link-preview__card" id="formLinkPreviewCard"></div>
+            </div>
+
+            <label class="form-field form-field--full">
+              <span class="form-field__label">Type</span>
+              <div class="content-type-picker" id="formTypePicker" role="radiogroup" aria-label="Type">
+                <button type="button" class="content-type-picker__btn" data-type="movies">Movie</button>
+                <button type="button" class="content-type-picker__btn" data-type="tvSeries">TV Series</button>
+                <button type="button" class="content-type-picker__btn" data-type="anime">Anime</button>
+              </div>
+              <input type="hidden" name="contentType" id="formType" value="movies" />
+            </label>
+
+            <label class="form-field form-field--full">
+              <span class="form-field__label">Main genre</span>
+              <select name="genre" id="formGenre" class="select" required>
+                <option value="" disabled selected>Choose genre</option>
+              </select>
+            </label>
+
+            <div class="form-field form-field--full">
+              <span class="form-field__label">Secondary genres</span>
+              <select id="formSecondaryAdd" class="select">
+                <option value="">Add another genre…</option>
+              </select>
+              <div class="genre-chips" id="formSecondaryChips"></div>
+            </div>
+
+            <label class="form-field form-field--full">
+              <span class="form-field__label">Title</span>
+              <input
+                type="text"
+                name="title"
+                id="formTitle"
+                class="form-input"
+                required
+              />
+            </label>
+
+            <div class="form-field form-field--full">
+              <span class="form-field__label">Lead actors</span>
+              <div class="inline-add">
+                <input
+                  type="text"
+                  id="formLeadInput"
+                  class="form-input"
+                  placeholder="Actor name"
+                />
+                <button type="button" class="btn btn--ghost btn--sm" id="formLeadAdd">
+                  Add
+                </button>
+              </div>
+              <div class="genre-chips" id="formLeadChips"></div>
+            </div>
+
+            <label class="form-field form-field--full">
+              <span class="form-field__label">Summary</span>
+              <textarea
+                name="summary"
+                id="formSummary"
+                class="form-textarea"
+                rows="2"
+                required
+              ></textarea>
+            </label>
+          </div>
+
+          <footer class="modal__footer">
+            <button
+              type="button"
+              class="btn btn--danger"
+              id="deleteBtn"
+              hidden
+            >
+              Delete
+            </button>
+            <div class="modal__footer-right">
+              <button type="button" class="btn btn--ghost" data-action="close-modal">
+                Cancel
+              </button>
+              <button type="submit" class="btn btn--primary">Save</button>
+            </div>
+          </footer>
+        </form>
+
+        <div class="modal__bulk" id="bulkAddPanel" hidden>
+          <div class="bulk-add__steps">
+            <p class="bulk-add__headline">Add many titles at once with your AI</p>
+            <ol class="bulk-add__step-list">
+              <li class="bulk-add__step">
+                <span class="bulk-add__step-num" aria-hidden="true">1</span>
+                <div class="bulk-add__step-body">
+                  <strong class="bulk-add__step-title">Copy our template</strong>
+                  <p>Click the button below. It tells your AI exactly what info to fill in for each title.</p>
+                  <button type="button" class="btn btn--ghost bulk-add__copy" id="copyBulkTemplate">
+                    Copy template for AI
+                  </button>
+                </div>
+              </li>
+              <li class="bulk-add__step">
+                <span class="bulk-add__step-num" aria-hidden="true">2</span>
+                <div class="bulk-add__step-body">
+                  <strong class="bulk-add__step-title">Send it to your AI</strong>
+                  <p>Paste the template into ChatGPT, Claude, or any AI. Then add your titles, for example:</p>
+                  <p class="bulk-add__example">“Here are my movies: Breaking Bad, Interstellar, Attack on Titan…”</p>
+                </div>
+              </li>
+              <li class="bulk-add__step">
+                <span class="bulk-add__step-num" aria-hidden="true">3</span>
+                <div class="bulk-add__step-body">
+                  <strong class="bulk-add__step-title">Paste the filled list</strong>
+                  <p>Copy what your AI returns and paste it here. We’ll add every valid title at once.</p>
+                  <textarea
+                    id="bulkPasteInput"
+                    class="form-textarea bulk-add__textarea"
+                    rows="3"
+                    placeholder="Paste here…"
+                    aria-label="Paste filled list from AI"
+                  ></textarea>
+                  <p class="backup-modal__hint" id="bulkPasteError" hidden></p>
+                </div>
+              </li>
+            </ol>
+          </div>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-modal">
+              Cancel
+            </button>
+            <button type="button" class="btn btn--primary" id="bulkAddConfirm">
+              Add all titles
+            </button>
+          </footer>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="ratingModal" hidden>
+      <div class="modal__backdrop" data-action="close-rating-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ratingModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="ratingModalTitle">Rate title</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-rating-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+
+        <form class="modal__form" id="ratingForm" novalidate>
+          <div class="form-field form-field--full">
+            <span class="form-field__label">Your rating (out of 10)</span>
+            <div class="rating-picker rating-picker--idle" id="ratingPicker">
+              <p class="rating-picker__value" aria-live="polite">
+                <span class="rating-picker__score" id="ratingValueDisplay">—</span>
+                <span class="rating-picker__max">/ 10</span>
+              </p>
+              <div class="rating-picker__stars" role="group" aria-label="Tap a star to rate out of 10">
+                <button type="button" class="rating-picker__star" data-rating-star="1" aria-label="1 out of 10">
+                  <span class="rating-picker__star-icon" aria-hidden="true">★</span>
+                </button>
+                <button type="button" class="rating-picker__star" data-rating-star="2" aria-label="2 out of 10">
+                  <span class="rating-picker__star-icon" aria-hidden="true">★</span>
+                </button>
+                <button type="button" class="rating-picker__star" data-rating-star="3" aria-label="3 out of 10">
+                  <span class="rating-picker__star-icon" aria-hidden="true">★</span>
+                </button>
+                <button type="button" class="rating-picker__star" data-rating-star="4" aria-label="4 out of 10">
+                  <span class="rating-picker__star-icon" aria-hidden="true">★</span>
+                </button>
+                <button type="button" class="rating-picker__star" data-rating-star="5" aria-label="5 out of 10">
+                  <span class="rating-picker__star-icon" aria-hidden="true">★</span>
+                </button>
+                <button type="button" class="rating-picker__star" data-rating-star="6" aria-label="6 out of 10">
+                  <span class="rating-picker__star-icon" aria-hidden="true">★</span>
+                </button>
+                <button type="button" class="rating-picker__star" data-rating-star="7" aria-label="7 out of 10">
+                  <span class="rating-picker__star-icon" aria-hidden="true">★</span>
+                </button>
+                <button type="button" class="rating-picker__star" data-rating-star="8" aria-label="8 out of 10">
+                  <span class="rating-picker__star-icon" aria-hidden="true">★</span>
+                </button>
+                <button type="button" class="rating-picker__star" data-rating-star="9" aria-label="9 out of 10">
+                  <span class="rating-picker__star-icon" aria-hidden="true">★</span>
+                </button>
+                <button type="button" class="rating-picker__star" data-rating-star="10" aria-label="10 out of 10">
+                  <span class="rating-picker__star-icon" aria-hidden="true">★</span>
+                </button>
+              </div>
+              <div class="rating-picker__fine">
+                <button
+                  type="button"
+                  class="rating-picker__step"
+                  data-rating-adjust="-0.1"
+                  aria-label="Lower rating by 0.1"
+                >
+                  −
+                </button>
+                <span class="rating-picker__fine-label">Fine-tune</span>
+                <button
+                  type="button"
+                  class="rating-picker__step"
+                  data-rating-adjust="0.1"
+                  aria-label="Raise rating by 0.1"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <label class="form-field form-field--full">
+            <span class="form-field__label">Note for yourself</span>
+            <textarea
+              id="ratingNote"
+              class="form-textarea"
+              rows="2"
+              placeholder="What stood out? Would you watch again?"
+            ></textarea>
+          </label>
+
+          <p class="backup-modal__hint" id="ratingError" hidden></p>
+
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="rate-later">
+              Rate later
+            </button>
+            <button type="submit" class="btn btn--primary">Save rating</button>
+          </footer>
+        </form>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/i18n.js"></script>
+    <script src="js/accessibility.js"></script>
+    <script src="js/dialog.js"></script>
+    <script src="js/metadata.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/sync.js"></script>
+    <script src="js/genres.js"></script>
+    <script src="js/bulk-titles.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/mobile.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/pwa.js"></script>
+  </body>
+</html>

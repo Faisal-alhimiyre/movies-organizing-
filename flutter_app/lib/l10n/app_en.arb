@@ -1,0 +1,16 @@
+{
+  "@@locale": "en",
+  "appTitle": "Our Movie Nights",
+  "appDescription": "Personal watchlist of movies, TV series, and anime organized by genre.",
+  "gateLogin": "Log in",
+  "gateCreate": "Create new account",
+  "gateCodeLabel": "Your personal code",
+  "gateConfirmCode": "Confirm code",
+  "gateRecoveryWarning": "Save your code somewhere safe. It cannot be recovered if you forget it.",
+  "gateSubmitLogin": "Sign in",
+  "gateSubmitCreate": "Create account",
+  "watchlistPlaceholder": "Watchlist — Stage 3 coming next.",
+  "aboutTitle": "About",
+  "aboutBody": "Personal watchlist app. Metadata from TMDb, OMDb, and AniList.",
+  "stage2Note": "Stage 2: Foundation ready. Real sign-in arrives in Stage 3."
+}

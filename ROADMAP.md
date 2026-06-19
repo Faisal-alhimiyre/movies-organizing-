@@ -170,6 +170,6 @@ then B3 → B4 → D2 → D3 → D5 → F1–F4 → G1–G3
 ## Ops checklist (when deploying)
 
 - [ ] Run `supabase/migrate-incremental.sql` if not done
-- [ ] Set `publicAppUrl` in `js/config.js`
+- [ ] Set `publicAppUrl` in `web-files/js/config.js`
 - [ ] Deploy latest frontend to GitHub Pages
 - [ ] Own OMDb API key (not demo `thewdb`)
