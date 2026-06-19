@@ -2404,6 +2404,7 @@
 
     if (source === "release") {
       if (yearsBackfillRunning) return t("empty.releaseYearLoading");
+      if (yearBackfillNeedsMovieApiKeys()) return t("empty.yearsNeedConfig");
       const withYear = state.items.some((item) => hasValidReleaseYear(item));
       if (!withYear) return t("empty.releaseYearMissing");
       return null;
@@ -2467,12 +2468,16 @@
 
   async function fetchYearForItem(item) {
     const imdbId = getImdbId(item);
-    if (imdbId && window.WatchlistMetadata?.hasOmdbKey?.()) {
+    if (
+      imdbId &&
+      (window.WatchlistMetadata?.hasOmdbKey?.() ||
+        window.WatchlistMetadata?.hasTmdbKey?.())
+    ) {
       const meta = await window.WatchlistMetadata.getMetadata(imdbId);
       if (meta?.year) return { year: meta.year, anilistRating: meta.anilistRating };
     }
 
-    if (item.link && !imdbId) {
+    if (item.link) {
       const meta = await window.WatchlistMetadata.resolveMetadataFromLink(item.link);
       if (meta?.year) return { year: meta.year, anilistRating: meta.anilistRating };
     }
@@ -2499,11 +2504,30 @@
     return null;
   }
 
+  function yearBackfillNeedsMovieApiKeys() {
+    const hasMovieKeys =
+      window.WatchlistMetadata?.hasOmdbKey?.() ||
+      window.WatchlistMetadata?.hasTmdbKey?.();
+    if (hasMovieKeys) return false;
+
+    return state.items.some((item) => {
+      if (hasValidReleaseYear(item) || !itemNeedsYearBackfill(item)) return false;
+      if (getImdbId(item)) return true;
+      if (item.contentType !== "anime" && item.link) return true;
+      return false;
+    });
+  }
+
   async function backfillMissingYears() {
     if (yearsBackfillRunning) return;
 
     const queue = state.items.filter(itemNeedsYearBackfill);
     if (!queue.length) return;
+
+    if (yearBackfillNeedsMovieApiKeys()) {
+      if (isReleaseSortActive()) render();
+      return;
+    }
 
     yearsBackfillRunning = true;
     let done = 0;
@@ -2631,6 +2655,11 @@
   }
 
   async function runMetadataBackfill() {
+    if (isReleaseSortActive()) {
+      await backfillMissingYears();
+      await backfillMissingRatings();
+      return;
+    }
     await backfillMissingRatings();
     await backfillMissingYears();
   }

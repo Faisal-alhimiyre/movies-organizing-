@@ -130,6 +130,8 @@
       "empty.releaseYearLoading": "Loading release years for your titles…",
       "empty.releaseYearMissing":
         "Release years are not saved yet. They load automatically from IMDb/AniList — give it a moment, or add titles via search.",
+      "empty.yearsNeedConfig":
+        "Movie years need an OMDb or TMDB key in config.js on the live site. Anime years still load from AniList.",
       "ratings.backfillProgress": "Loading ratings… {done}/{total}",
       "ratings.backfillAnilist": "Loading AniList scores… {done}/{total}",
       "ratings.backfillImdb": "Loading IMDb ratings… {done}/{total}",
@@ -628,6 +630,8 @@
       "empty.releaseYearLoading": "جاري تحميل سنوات الإصدار لعناوينك…",
       "empty.releaseYearMissing":
         "سنوات الإصدار غير محفوظة بعد. تُحمّل تلقائياً من IMDb/AniList — انتظر قليلاً أو أضف عبر البحث.",
+      "empty.yearsNeedConfig":
+        "سنوات الأفلام تحتاج مفتاح OMDb أو TMDB في config.js على الموقع المنشور. سنوات الأنمي تُحمّل من AniList.",
       "ratings.backfillProgress": "جاري تحميل التقييمات… {done}/{total}",
       "ratings.backfillAnilist": "جاري تحميل تقييمات AniList… {done}/{total}",
       "ratings.backfillImdb": "جاري تحميل تقييمات IMDb… {done}/{total}",
