@@ -51,9 +51,6 @@ WatchlistConvertResult rowsToWatchlist(List<Map<String, dynamic>> rows) {
     final link = row['link']?.toString() ?? '';
     if (link.isNotEmpty) entry['link'] = link;
 
-    final altTitle = row['alt_title']?.toString() ?? '';
-    if (altTitle.isNotEmpty) entry['altTitle'] = altTitle;
-
     final secondaryGenres = row['secondary_genres'];
     if (secondaryGenres is List && secondaryGenres.isNotEmpty) {
       entry['secondaryGenres'] = secondaryGenres;
@@ -144,7 +141,6 @@ List<Map<String, dynamic>> watchlistToRows(
           'leads': leads,
           'summary': map['summary']?.toString() ?? '',
           'link': map['link']?.toString() ?? '',
-          'alt_title': map['altTitle']?.toString() ?? '',
           'secondary_genres': map['secondaryGenres'] is List
               ? map['secondaryGenres']
               : <String>[],

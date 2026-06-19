@@ -101,7 +101,6 @@
             leads,
             summary: entry.summary || entry.reminder || "",
             link: entry.link || "",
-            alt_title: entry.altTitle || "",
             secondary_genres: entry.secondaryGenres || [],
             poster: entry.poster || "",
             imdb_rating: entry.imdbRating || "",
@@ -141,7 +140,6 @@
       if (row.lead) entry.lead = row.lead;
       if (Array.isArray(row.leads) && row.leads.length) entry.leads = row.leads;
       if (row.link) entry.link = row.link;
-      if (row.alt_title) entry.altTitle = row.alt_title;
       if (Array.isArray(row.secondary_genres) && row.secondary_genres.length) {
         entry.secondaryGenres = row.secondary_genres;
       }

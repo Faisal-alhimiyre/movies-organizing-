@@ -26,10 +26,12 @@ void main() {
     ),
   ];
 
-  test('matchesSearch finds title and lead text', () {
+  test('matchesSearch finds title and lead text only', () {
     expect(matchesSearch(sampleItems[0], 'alpha'), isTrue);
     expect(matchesSearch(sampleItems[0], 'actor one'), isTrue);
     expect(matchesSearch(sampleItems[0], 'missing'), isFalse);
+    expect(matchesSearch(sampleItems[0], 'hero'), isFalse);
+    expect(matchesSearch(sampleItems[0], 'saves'), isFalse);
   });
 
   test('filterWatchlistItems respects watched filter', () {

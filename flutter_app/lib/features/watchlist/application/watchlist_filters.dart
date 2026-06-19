@@ -72,15 +72,6 @@ bool matchesSearch(WatchlistItem item, String query) {
   final haystack = [
     item.title,
     item.lead,
-    item.summary,
-    item.genre,
-    ...item.secondaryGenres,
-    switch (item.contentType) {
-      'movies' => 'movies',
-      'tvSeries' => 'tv series',
-      'anime' => 'anime',
-      _ => item.contentType,
-    },
   ].join(' ').toLowerCase();
 
   return haystack.contains(q);

@@ -51,5 +51,9 @@ create policy "list_snapshots_insert"
   on public.list_snapshots for insert to anon, authenticated
   with check (true);
 
+-- 4) Drop unused alt_title (alternate titles stay in local JSON only)
+alter table public.watchlist_items
+  drop column if exists alt_title;
+
 -- Note: "addedAt" for recently-added sort lives in the JSON watchlist payload
 -- (local + share snapshots), not as a separate DB column.

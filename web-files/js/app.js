@@ -1385,10 +1385,6 @@
       item.altTitle,
       item.lead,
       ...(item.leads || []),
-      item.summary,
-      item.genre,
-      ...(item.secondaryGenres || []),
-      TYPE_META[item.contentType]?.label,
     ]
       .filter(Boolean)
       .join(" ")

@@ -119,8 +119,8 @@ class L10n {
       : 'No titles in this category.';
 
   String get searchPlaceholder => _ar
-      ? 'ابحث في العناوين أو الممثلين أو الملخصات…'
-      : 'Search titles, actors, or summaries…';
+      ? 'ابحث في العناوين أو أسماء الممثلين…'
+      : 'Search titles or actors…';
   String get filterAll => _ar ? 'الكل' : 'All';
   String get filterWatched => _ar ? 'مشاهَد' : 'Watched';
   String get filterUnwatched => _ar ? 'غير مشاهَد' : 'Not watched';

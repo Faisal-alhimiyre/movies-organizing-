@@ -164,7 +164,6 @@ def watchlist_to_rows(list_id: str, watchlist: dict) -> list[dict]:
                         "leads": leads,
                         "summary": entry.get("summary") or entry.get("reminder") or "",
                         "link": entry.get("link") or "",
-                        "alt_title": entry.get("altTitle") or "",
                         "secondary_genres": entry.get("secondaryGenres") or [],
                         "poster": entry.get("poster") or "",
                         "imdb_rating": entry.get("imdbRating") or "",

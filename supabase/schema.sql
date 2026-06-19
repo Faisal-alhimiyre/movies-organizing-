@@ -50,7 +50,6 @@ create table if not exists public.watchlist_items (
   leads jsonb not null default '[]'::jsonb,
   summary text not null default '',
   link text not null default '',
-  alt_title text not null default '',
   secondary_genres jsonb not null default '[]'::jsonb,
   poster text not null default '',
   imdb_rating text not null default '',
