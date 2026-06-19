@@ -85,6 +85,18 @@ class L10n {
       : 'Tap + to add your first title to the list.';
 
   String get addTitle => _ar ? 'إضافة عنوان' : 'Add title';
+  String get addTabSearch => _ar ? 'بحث' : 'Search';
+  String get addTabManual => _ar ? 'يدوي' : 'Manual';
+  String get titleSearchPlaceholder => _ar
+      ? 'مثال: Avengers، Demon Slayer…'
+      : 'e.g. Avengers, Demon Slayer…';
+  String get titleSearchType => _ar ? 'النوع' : 'Type';
+  String get titleSearchTypeAll => _ar ? 'الكل' : 'All';
+  String get searchConfirmTitle => _ar ? 'تأكيد العنوان' : 'Confirm title';
+  String get fieldType => _ar ? 'النوع' : 'Type';
+  String searchFoundMany(int count) => _ar
+      ? 'وُجد $count نتيجة'
+      : 'Found $count matches';
   String get editTitle => _ar ? 'تعديل العنوان' : 'Edit title';
   String get btnSave => _ar ? 'حفظ' : 'Save';
   String get btnDelete => _ar ? 'حذف' : 'Delete';
@@ -331,6 +343,32 @@ class L10n {
             : 'Keep the name under 48 characters.';
       case 'list.notFound':
         return _ar ? 'القائمة غير موجودة.' : 'List not found.';
+      case 'search.notConfigured':
+        return _ar
+            ? 'البحث غير مهيأ. أضف مفاتيح OMDb أو TMDb.'
+            : 'Search is not configured. Add OMDb or TMDb API keys.';
+      case 'search.failed':
+        return _ar ? 'فشل البحث.' : 'Search failed.';
+      case 'search.noMatches':
+        return _ar
+            ? 'لا توجد نتائج. جرّب تهجئة أخرى.'
+            : 'No matches found. Try another spelling.';
+      case 'search.foundOne':
+        return _ar ? 'وُجدت نتيجة واحدة' : 'Found 1 match';
+      case 'search.loadingDetails':
+        return _ar ? 'جاري تحميل التفاصيل…' : 'Loading details…';
+      case 'search.loadFailed':
+        return _ar
+            ? 'تعذّر تحميل تفاصيل هذا العنوان.'
+            : 'Could not load details for this title.';
+      case 'search.incomplete':
+        return _ar
+            ? 'بيانات العنوان ناقصة.'
+            : 'Title details are incomplete.';
+      case 'search.missingActors':
+        return _ar
+            ? 'لا يوجد ممثل أو طاقم — أضف العنوان يدوياً.'
+            : 'No cast found — add the title manually instead.';
       default:
         return key;
     }

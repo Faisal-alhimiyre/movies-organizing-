@@ -16,6 +16,7 @@ import '../../../models/share_snapshot_payload.dart';
 import '../../../models/watchlist_item.dart';
 import '../../../repositories/auth_repository.dart';
 import '../../../repositories/watchlist_repository.dart';
+import '../../add_title/presentation/add_title_sheet.dart';
 import '../../lists/presentation/widgets/list_switcher_bar.dart';
 import '../../lists/presentation/widgets/manage_lists_sheet.dart';
 import '../application/watchlist_controller.dart';
@@ -343,10 +344,13 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
           icon: const Icon(Icons.logout),
         ),
       ],
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openAddForm(context, ref, l10n, typeFilter),
-        icon: const Icon(Icons.add),
-        label: Text(l10n.addTitle),
+      floatingActionButton: watchlistAsync.maybeWhen(
+        data: (snapshot) => FloatingActionButton.extended(
+          onPressed: () => _openAddForm(context, ref, l10n, typeFilter, snapshot),
+          icon: const Icon(Icons.add),
+          label: Text(l10n.addTitle),
+        ),
+        orElse: () => null,
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -398,18 +402,17 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
     WidgetRef ref,
     L10n l10n,
     WatchlistTypeFilter typeFilter,
+    WatchlistSnapshot? snapshot,
   ) async {
     final initialType = typeFilter.contentTypeKey ?? 'movies';
-    await showTitleFormSheet(
+    final items = snapshot?.items ?? const [];
+    await showAddTitleSheet(
       context,
-      mode: TitleFormMode.add,
       l10n: l10n,
       initialContentType: initialType,
-      onSave: (item, watch) => ref.read(watchlistControllerProvider.notifier).saveItem(
+      existingItems: items,
+      onSave: (item) => ref.read(watchlistControllerProvider.notifier).saveItem(
             item: item,
-            markWatched: watch.markWatched,
-            rating: watch.rating,
-            watchNote: watch.note,
           ),
     );
   }
