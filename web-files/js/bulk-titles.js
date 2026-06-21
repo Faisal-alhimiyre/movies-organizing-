@@ -91,6 +91,109 @@ Replace the example with one object per title the user gives you. Output the ful
     return null;
   }
 
+  function findJsonObjectEnd(input, start) {
+    if (start >= input.length || input[start] !== "{") return -1;
+
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+
+    for (let i = start; i < input.length; i++) {
+      const char = input[i];
+
+      if (escape) {
+        escape = false;
+        continue;
+      }
+
+      if (inString) {
+        if (char === "\\") escape = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+
+      if (char === '"') {
+        inString = true;
+        continue;
+      }
+
+      if (char === "{") {
+        depth += 1;
+        if (depth === 1) continue;
+      } else if (char === "}") {
+        depth -= 1;
+        if (depth === 0) return i;
+      }
+    }
+
+    return -1;
+  }
+
+  function extractJsonArrayInner(raw) {
+    const trimmed = String(raw || "").trim();
+    if (!trimmed) return null;
+
+    const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const source = fence ? fence[1].trim() : trimmed;
+
+    const start = source.indexOf("[");
+    const end = source.lastIndexOf("]");
+    if (start < 0 || end <= start) return null;
+    return source.slice(start + 1, end);
+  }
+
+  function extractJsonObjectsLenient(inner) {
+    const rows = [];
+    const syntaxErrors = [];
+    let index = 0;
+    let rowNum = 0;
+
+    while (index < inner.length) {
+      while (index < inner.length && /[\s,]/.test(inner[index])) {
+        index += 1;
+      }
+      if (index >= inner.length) break;
+
+      if (inner[index] !== "{") {
+        const nextObject = inner.indexOf("{", index);
+        if (nextObject === -1) break;
+        index = nextObject;
+      }
+
+      rowNum += 1;
+      const end = findJsonObjectEnd(inner, index);
+      if (end === -1) {
+        syntaxErrors.push(
+          `Row ${rowNum}: unclosed JSON object — check braces and quotes.`
+        );
+        break;
+      }
+
+      const slice = inner.slice(index, end + 1);
+      try {
+        rows.push(JSON.parse(slice));
+      } catch {
+        syntaxErrors.push(
+          `Row ${rowNum}: invalid JSON — check commas, quotes, and braces.`
+        );
+      }
+
+      index = end + 1;
+    }
+
+    return { rows, syntaxErrors };
+  }
+
+  function extractJsonArrayWithFallback(raw) {
+    const rows = extractJsonArray(raw);
+    if (rows) return { rows, syntaxErrors: [] };
+
+    const inner = extractJsonArrayInner(raw);
+    if (!inner) return { rows: [], syntaxErrors: [] };
+
+    return extractJsonObjectsLenient(inner);
+  }
+
   function sanitizeLinkRaw(value) {
     let raw = String(value || "").trim();
     if (!raw) return "";
@@ -152,13 +255,16 @@ Replace the example with one object per title the user gives you. Output the ful
         return standardGenres.includes(normalized) ? normalized : null;
       });
 
-    const rows = extractJsonArray(raw);
-    if (!rows) {
+    const extracted = extractJsonArrayWithFallback(raw);
+    const rows = extracted.rows;
+    const errors = [...extracted.syntaxErrors];
+
+    if (!rows.length && !errors.length) {
       const trimmed = String(raw || "").trim();
       let hint = "Paste the JSON array your AI returned (starts with [ and ends with ]).";
-      if (trimmed && !trimmed.startsWith("[")) {
+      if (trimmed && !trimmed.includes("[")) {
         hint = "Expected a JSON array starting with [. Remove any text before the opening [.";
-      } else if (trimmed.startsWith("[")) {
+      } else if (trimmed.includes("[")) {
         hint =
           "Could not parse that JSON. Check for missing commas, extra commas, or unquoted text.";
       }
@@ -170,11 +276,15 @@ Replace the example with one object per title the user gives you. Output the ful
     }
 
     if (!rows.length) {
-      return { ok: false, error: "The list is empty.", items: [] };
+      return {
+        ok: false,
+        error: formatBulkErrors(errors),
+        items: [],
+        errors,
+      };
     }
 
     const items = [];
-    const errors = [];
 
     rows.forEach((row, index) => {
       const line = index + 1;

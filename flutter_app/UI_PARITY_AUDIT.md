@@ -15,7 +15,7 @@
 | 2 | Menu and list selector | Implemented — pending visual verification |
 | 3 | Tabs | Implemented — pending visual verification |
 | 4 | Search and filters | Implemented — pending visual verification |
-| 5 | Section headers | Not inspected |
+| 5 | Section headers | Implemented — pending visual verification |
 | 6 | Cards and grid | Not inspected |
 | 7 | Themes | Not inspected |
 | 8 | Dialogs and secondary screens | Not inspected |
@@ -320,7 +320,57 @@
 
 ### What remains after Checkpoint 4
 - Visual verification at all widths/themes/locales (search/filters)
-- Checkpoint 5+: Section headers, cards, layout toggle (Section 6), etc.
+- Checkpoint 6+: Cards and grid (Section 8), etc.
+
+---
+
+## Checkpoint 5 — Section headings and view controls
+
+**Status:** Implemented — pending visual verification
+
+### Section 6 — View Controls (Layout Toggle)
+
+| Property | Website | Flutter (CP5) | Status |
+|----------|---------|---------------|--------|
+| Toggle container | `.layout-bar` pill (`padding: 0.2rem`, `border-radius: 999px`, `bg-elevated`) | `DecoratedBox` pill with per-theme bar gradient/bg | ✓ |
+| Toggle position | `.page-toolbar { margin: -0.75rem 0 1.5rem }` (mobile: `-0.35rem 0 0.55rem`) | `Padding` negative top + bottom margin on toolbar | ✓ |
+| Button size | `2.25rem` desktop / `2.1rem` mobile | `36` / `33.6` px | ✓ |
+| Icon size | `1.2rem` | `19.2` px | ✓ |
+| Active state (dark) | `#262626` bg, `border-strong`, `var(--text)` icon | Neutral active style per theme (not accent tint) | ✓ |
+| Button radius | `999px` inside bar | `BorderRadius.circular(999)` | ✓ |
+| Grid/list logic | `CARD_LAYOUTS` in `app.js` | `cardLayoutProvider` unchanged | ✓ |
+
+**Flutter files:** `card_layout_toggle.dart`, `watchlist_screen.dart`
+
+### Section 7 — Genre Section Headers
+
+| Property | Website | Flutter (CP5) | Status |
+|----------|---------|---------------|--------|
+| Bar structure | `.genre-section__header` > `.genre-section__bar` | `DecoratedBox` bar with badges row | ✓ |
+| Type badge | `.genre-section__type` pill | `_TypePill` with `typeSectionShort()` | ✓ |
+| Combined-genre badge | `.genre-section__match` “All selected” | `_AllMatchPill` when `isAllMatch` | ✓ |
+| All-match bar | `.genre-section--all-match` blue/gradient border | Per-theme `isAllMatch` decoration | ✓ |
+| Title typography | `0.88rem` mobile / `1.2rem` desktop, weight 700 | Responsive `titleSize` | ✓ |
+| Count badge | `titleCount()` pill, uppercase desktop | `_CountPill` + `l10n.titleCount` | ✓ |
+| Section spacing | `0.85rem` mobile / `2.75rem` desktop bottom | `13.6` / `44` px | ✓ |
+| Header-to-grid gap | `0.35rem` mobile / `1.1rem` desktop | `5.6` / `17.6` px | ✓ |
+| Bar radius | `8px` mobile / `0` dark desktop | `metrics.barRadius` | ✓ |
+| Theme gradients | purple / pink / brown per `theme-*.css` | `_genreBarStyle()` per `AppThemeId` | ✓ |
+| Mobile badges layout | grid areas when badges present | Column: badges+count row, title below | ✓ |
+| RTL | `rtl.css` bar direction + count margin | `Row`/`Wrap` + `AlignmentDirectional` | ✓ |
+| Divider underline | `theme.css` hides `header::after` | No underline (bar only) | ✓ |
+
+**Flutter files:** `genre_section.dart`, `l10n.dart` (`genreAllSelected`, `typeSectionShort`)
+
+**Tests:** `test/section_headers_test.dart` — 4 cases (toggle bar, layout switch, 320px combined header, Arabic RTL)
+
+**English:** Implemented | **Arabic RTL:** Smoke tested | **Themes:** Per-theme bar/active styles | **Responsive:** Mobile/desktop metrics | **Card internals:** Not changed (CP6)
+
+**Hot restart required:** Yes — layout toggle + genre header widgets
+
+### What remains after Checkpoint 5
+- Visual verification: grid/list toggle, multiple sections, long genre names, all themes
+- Checkpoint 6: Card internals and grid layout
 
 ### Section 5 (archived audit notes — pre-CP4)
 

@@ -129,32 +129,34 @@ class _PosterTitleCard extends StatelessWidget {
                         ),
                       ),
 
-                      // Top-left: type + year + primary genre
+                      // Top overlay: DETAILS + GENRES sections
                       Positioned(
-                        top: 5,
-                        left: 5,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                _MobileTypeBadge(
-                                  contentType: item.contentType,
-                                  tc: tc,
-                                ),
-                                if (yearLabel != null) ...[
-                                  const SizedBox(width: 3),
-                                  _OverlayYearBadge(label: yearLabel),
-                                ],
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.black.withValues(alpha: 0.88),
+                                Colors.black.withValues(alpha: 0.72),
+                                Colors.black.withValues(alpha: 0),
                               ],
+                              stops: const [0.0, 0.72, 1.0],
                             ),
-                            if (item.genre.isNotEmpty) ...[
-                              const SizedBox(height: 3),
-                              _OverlayGenreBadge(
-                                  label: l10n.genreLabel(item.genre)),
-                            ],
-                          ],
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(5, 4.5, 5, 7),
+                            child: _CardSections(
+                              item: item,
+                              l10n: l10n,
+                              tc: tc,
+                              yearLabel: yearLabel,
+                              onOverlay: true,
+                            ),
+                          ),
                         ),
                       ),
 
@@ -191,13 +193,13 @@ class _PosterTitleCard extends StatelessWidget {
                   ),
                 ),
 
-                // ── Meta badges (age, seasons, episode length) ───────
+                // ── External ratings (IMDb / AniList) ────────────────
                 Padding(
                   padding: const EdgeInsets.fromLTRB(5, 4, 5, 0),
-                  child: ContentTitleMetaBadges.fromItem(item),
+                  child: ContentCardRatingBadges.fromItem(item),
                 ),
 
-                // ── Footer: border-top + watch status chips + menu ─────
+                // ── Footer: border-top + watch status + menu ─────────
                 DecoratedBox(
                   decoration: BoxDecoration(
                     border: Border(
@@ -213,14 +215,10 @@ class _PosterTitleCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Flexible(
-                          child: _WatchStatusRow(
+                          child: _MobileFooterStatus(
                             l10n: l10n,
                             isWatched: isWatched,
                             watched: watched,
-                            // Website hides .card__rating from the poster
-                            // footer on mobile — only watch-status pill shows.
-                            imdbRating: null,
-                            anilistRating: null,
                             tc: tc,
                           ),
                         ),
@@ -331,36 +329,6 @@ class _HoverTitleCardState extends ConsumerState<_HoverTitleCard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Row 1: type + year ─────────────────────────────
-                    Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
-                      children: [
-                        _MobileTypeBadge(contentType: item.contentType, tc: tc),
-                        if (yearLabel != null)
-                          _CompactYearBadge(label: yearLabel),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-
-                    // ── Row 2: genres ──────────────────────────────────
-                    Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
-                      children: [
-                        if (item.genre.isNotEmpty)
-                          _CompactGenreBadge(
-                              label: widget.l10n.genreLabel(item.genre),
-                              primary: true),
-                        ...item.secondaryGenres.map(
-                          (g) => _CompactGenreBadge(
-                              label: widget.l10n.genreLabel(g),
-                              primary: false),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-
                     // ── Title ──────────────────────────────────────────
                     Text(
                       item.title,
@@ -381,10 +349,20 @@ class _HoverTitleCardState extends ConsumerState<_HoverTitleCard> {
                             theme.colorScheme.onSurface.withValues(alpha: 0.45),
                       ),
                     ),
+                    const SizedBox(height: 6),
+
+                    // ── DETAILS + GENRES sections ──────────────────────
+                    _CardSections(
+                      item: item,
+                      l10n: widget.l10n,
+                      tc: tc,
+                      yearLabel: yearLabel,
+                      onOverlay: false,
+                    ),
 
                     // ── Lead ───────────────────────────────────────────
                     if (item.lead.isNotEmpty) ...[
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 6),
                       Text(
                         item.lead,
                         maxLines: isDesktop ? 1 : 2,
@@ -397,44 +375,51 @@ class _HoverTitleCardState extends ConsumerState<_HoverTitleCard> {
                       ),
                     ],
 
-                    const SizedBox(height: 4),
-                    ContentTitleMetaBadges.fromItem(item),
-
-                    // ── Summary ────────────────────────────────────────
-                    if (item.summary.isNotEmpty) ...[
+                    // ── Summary (desktop only — hidden on mobile web) ──
+                    if (item.summary.isNotEmpty && isDesktop) ...[
                       const SizedBox(height: 5),
                       Expanded(
                         child: Text(
                           item.summary,
-                          maxLines: isDesktop ? 3 : 2,
+                          maxLines: 3,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: isDesktop ? 13.5 : 10,
+                            fontSize: 13.5,
                             color: tc?.textMuted ??
                                 theme.colorScheme.onSurface
                                     .withValues(alpha: 0.6),
-                            height: isDesktop ? 1.45 : 1.32,
+                            height: 1.45,
                           ),
                         ),
                       ),
                     ] else
                       const Spacer(),
 
+                    // ── External ratings ───────────────────────────────
+                    ContentCardRatingBadges.fromItem(
+                      item,
+                      compact: !isDesktop,
+                    ),
                     const SizedBox(height: 6),
 
-                    // ── Footer: watch status + scores + menu ───────────
+                    // ── Footer: watch status + menu ────────────────────
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Expanded(
-                          child: _WatchStatusRow(
-                            l10n: widget.l10n,
-                            isWatched: isWatched,
-                            watched: widget.watched,
-                            imdbRating: item.imdbRating,
-                            anilistRating: item.anilistRating,
-                            tc: tc,
-                          ),
+                          child: isDesktop
+                              ? _WatchStatusRow(
+                                  l10n: widget.l10n,
+                                  isWatched: isWatched,
+                                  watched: widget.watched,
+                                  tc: tc,
+                                )
+                              : _MobileFooterStatus(
+                                  l10n: widget.l10n,
+                                  isWatched: isWatched,
+                                  watched: widget.watched,
+                                  tc: tc,
+                                ),
                         ),
                         _CardMenuButton(
                           l10n: widget.l10n,
@@ -448,6 +433,218 @@ class _HoverTitleCardState extends ConsumerState<_HoverTitleCard> {
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DETAILS / GENRES sections — mirrors web `.card__sections` + section labels
+// ══════════════════════════════════════════════════════════════════════════════
+
+class _CardSections extends StatelessWidget {
+  const _CardSections({
+    required this.item,
+    required this.l10n,
+    required this.tc,
+    required this.yearLabel,
+    required this.onOverlay,
+  });
+
+  final WatchlistItem item;
+  final L10n l10n;
+  final AppTypeColors? tc;
+  final String? yearLabel;
+  final bool onOverlay;
+
+  @override
+  Widget build(BuildContext context) {
+    final genreBadges = <Widget>[
+      if (item.genre.isNotEmpty)
+        _SolidGenreBadge(
+          label: l10n.genreLabel(item.genre),
+          primary: true,
+        ),
+      ...item.secondaryGenres.map(
+        (g) => _SolidGenreBadge(
+          label: l10n.genreLabel(g),
+          primary: false,
+        ),
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _CardSectionBlock(
+          label: l10n.cardSectionDetails,
+          onOverlay: onOverlay,
+          child: Wrap(
+            spacing: 3,
+            runSpacing: 3,
+            children: [
+              _MobileTypeBadge(contentType: item.contentType, tc: tc),
+              if (yearLabel != null) _SolidYearBadge(label: yearLabel!),
+              ContentTitleMetaBadges(
+                contentType: item.contentType,
+                ageRating: item.ageRating,
+                runtime: item.runtime,
+                seasonCount: item.seasonCount,
+                episodeCount: item.episodeCount,
+                solid: true,
+                spacing: 3,
+                runSpacing: 3,
+                fontSize: 7.5,
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              ),
+            ],
+          ),
+        ),
+        if (genreBadges.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          _CardSectionBlock(
+            label: l10n.cardSectionGenres,
+            onOverlay: onOverlay,
+            showTopDivider: true,
+            child: Wrap(
+              spacing: 3,
+              runSpacing: 3,
+              children: genreBadges,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _CardSectionBlock extends StatelessWidget {
+  const _CardSectionBlock({
+    required this.label,
+    required this.onOverlay,
+    required this.child,
+    this.showTopDivider = false,
+  });
+
+  final String label;
+  final bool onOverlay;
+  final Widget child;
+  final bool showTopDivider;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final labelColor = onOverlay
+        ? Colors.white.withValues(alpha: 0.58)
+        : (theme.extension<AppTypeColors>()?.textMuted ??
+            theme.colorScheme.onSurface.withValues(alpha: 0.55));
+    final dividerColor = onOverlay
+        ? Colors.white.withValues(alpha: 0.2)
+        : theme.dividerColor;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (showTopDivider)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: dividerColor),
+                ),
+              ),
+              child: const SizedBox(height: 3),
+            ),
+          ),
+        Text(
+          label.toUpperCase(),
+          style: TextStyle(
+            color: labelColor,
+            fontSize: onOverlay ? 6.5 : 8,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.6,
+            height: 1.15,
+            shadows: onOverlay
+                ? const [Shadow(color: Colors.black87, blurRadius: 3, offset: Offset(0, 1))]
+                : null,
+          ),
+        ),
+        const SizedBox(height: 3),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: dividerColor),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 3),
+            child: child,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SolidYearBadge extends StatelessWidget {
+  const _SolidYearBadge({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xEB060608),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.42)),
+        boxShadow: const [
+          BoxShadow(color: Colors.black54, blurRadius: 5, offset: Offset(0, 1)),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2.5),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 7.5,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.2,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SolidGenreBadge extends StatelessWidget {
+  const _SolidGenreBadge({required this.label, required this.primary});
+  final String label;
+  final bool primary;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xF50E0E12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+        boxShadow: const [
+          BoxShadow(color: Colors.black38, blurRadius: 3, offset: Offset(0, 1)),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: const Color(0xFFF3F4F6).withValues(alpha: primary ? 1 : 0.82),
+            fontSize: 7.5,
+            fontWeight: primary ? FontWeight.w600 : FontWeight.w500,
+            letterSpacing: 0.3,
           ),
         ),
       ),
@@ -495,138 +692,11 @@ class _MobileTypeBadge extends StatelessWidget {
 
   static (String, Color) _resolve(String contentType, AppTypeColors? tc) {
     return switch (contentType) {
-      'tvSeries' => ('TV', tc?.tv ?? const Color(0xFFA855F7)),
+      'tvSeries' => ('TV SERIES', tc?.tv ?? const Color(0xFFA855F7)),
       'anime' => ('ANIME', tc?.anime ?? const Color(0xFFED4956)),
       'franchise' => ('FRANCHISE', tc?.franchise ?? const Color(0xFF58C322)),
       _ => ('MOVIE', tc?.movie ?? const Color(0xFF0095F6)),
     };
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Compact badges for hover card (both rows)
-// ══════════════════════════════════════════════════════════════════════════════
-
-class _CompactYearBadge extends StatelessWidget {
-  const _CompactYearBadge({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: onSurface.withValues(alpha: 0.28)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: Color(0xFFF3F4F6),
-            fontSize: 8,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.2,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CompactGenreBadge extends StatelessWidget {
-  const _CompactGenreBadge({required this.label, required this.primary});
-  final String label;
-  final bool primary;
-
-  @override
-  Widget build(BuildContext context) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: onSurface.withValues(alpha: primary ? 0.08 : 0.04),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: onSurface.withValues(alpha: primary ? 0.3 : 0.15),
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: onSurface.withValues(alpha: primary ? 0.9 : 0.6),
-            fontSize: 8,
-            fontWeight: primary ? FontWeight.w600 : FontWeight.w500,
-            letterSpacing: 0.3,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Overlay badges (shown on top of poster image)
-// ══════════════════════════════════════════════════════════════════════════════
-
-/// Dark translucent genre badge on poster overlay
-class _OverlayGenreBadge extends StatelessWidget {
-  const _OverlayGenreBadge({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: Color(0xFFF3F4F6),
-            fontSize: 7.5,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.3,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Year badge on poster overlay (inline with type badge)
-class _OverlayYearBadge extends StatelessWidget {
-  const _OverlayYearBadge({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.65),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2.5),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: Color(0xFFF3F4F6),
-            fontSize: 7.5,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.2,
-          ),
-        ),
-      ),
-    );
   }
 }
 
@@ -657,7 +727,91 @@ class _WatchedCheck extends StatelessWidget {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Watch status row — pill chips matching `.card__watch-status`
+// Mobile footer — unwatched pill or personal rating block (no external scores)
+// ══════════════════════════════════════════════════════════════════════════════
+
+class _MobileFooterStatus extends StatelessWidget {
+  const _MobileFooterStatus({
+    required this.l10n,
+    required this.isWatched,
+    required this.watched,
+    required this.tc,
+  });
+
+  final L10n l10n;
+  final bool isWatched;
+  final WatchEntry? watched;
+  final AppTypeColors? tc;
+
+  @override
+  Widget build(BuildContext context) {
+    final watchedColor = tc?.watched ?? const Color(0xFF58C322);
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    if (!isWatched) {
+      return _StatusPill(
+        label: l10n.cardUnwatched,
+        isWatched: false,
+        watchedColor: watchedColor,
+        onSurface: onSurface,
+      );
+    }
+
+    if (!hasWatchRating(watched)) {
+      return _StatusPill(
+        label: l10n.cardWatched,
+        isWatched: true,
+        watchedColor: watchedColor,
+        onSurface: onSurface,
+      );
+    }
+
+    final note = watched?.note?.trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          l10n.cardYourRating.toUpperCase(),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: onSurface.withValues(alpha: 0.55),
+            fontSize: 7.5,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.4,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          '${formatWatchRating(watched!.rating!)}/10',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: watchedColor,
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        if (note != null && note.isNotEmpty) ...[
+          const SizedBox(height: 1),
+          Text(
+            note,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: onSurface.withValues(alpha: 0.55),
+              fontSize: 7,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Watch status row — desktop footer (watch pill only; scores live in body)
 // ══════════════════════════════════════════════════════════════════════════════
 
 class _WatchStatusRow extends StatelessWidget {
@@ -666,16 +820,12 @@ class _WatchStatusRow extends StatelessWidget {
     required this.isWatched,
     required this.watched,
     required this.tc,
-    this.imdbRating,
-    this.anilistRating,
   });
 
   final L10n l10n;
   final bool isWatched;
   final WatchEntry? watched;
   final AppTypeColors? tc;
-  final String? imdbRating;
-  final String? anilistRating;
 
   @override
   Widget build(BuildContext context) {
@@ -683,35 +833,15 @@ class _WatchStatusRow extends StatelessWidget {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final personalRating = watched?.rating;
 
-    return Wrap(
-      spacing: 4,
-      runSpacing: 4,
-      children: [
-        _StatusPill(
-          label: isWatched
-              ? (hasWatchRating(watched)
-                  ? '${l10n.cardWatched} · ${formatWatchRating(personalRating!)}'
-                  : l10n.cardWatched)
-              : l10n.cardUnwatched,
-          isWatched: isWatched,
-          watchedColor: watchedColor,
-          onSurface: onSurface,
-        ),
-        if (imdbRating != null && imdbRating!.isNotEmpty)
-          ContentScorePill(
-            value: imdbRating!,
-            sourceLabel: 'IMDb',
-            bg: const Color(0xFFF5C518),
-            fg: Colors.black,
-          ),
-        if (anilistRating != null && anilistRating!.isNotEmpty)
-          ContentScorePill(
-            value: anilistRating!,
-            sourceLabel: 'AL',
-            bg: const Color(0xFF02A9FF),
-            fg: Colors.white,
-          ),
-      ],
+    return _StatusPill(
+      label: isWatched
+          ? (hasWatchRating(watched)
+              ? '${l10n.cardWatched} · ${formatWatchRating(personalRating!)}'
+              : l10n.cardWatched)
+          : l10n.cardUnwatched,
+      isWatched: isWatched,
+      watchedColor: watchedColor,
+      onSurface: onSurface,
     );
   }
 }

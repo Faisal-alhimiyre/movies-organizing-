@@ -245,6 +245,9 @@ create policy "list_snapshots_insert"
 -- Already have watchlist_items but no anilist_rating? Run once:
 --   supabase/migrate-anilist-rating.sql
 --
+-- Already have watchlist_items but no age_rating / runtime? Run once:
+--   supabase/migrate-title-metadata.sql
+--
 -- Upgrading an older project? Run once:
 --   supabase/migrate-incremental.sql
 --

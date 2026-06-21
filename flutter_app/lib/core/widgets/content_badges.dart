@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../app/theme/theme_extensions.dart';
+import '../../core/utils/rating_utils.dart';
 import '../../core/utils/title_meta_format.dart';
 import '../../models/watchlist_item.dart';
 
@@ -166,6 +167,9 @@ class ContentTitleMetaBadges extends StatelessWidget {
     this.episodeCount,
     this.spacing = 4,
     this.runSpacing = 4,
+    this.solid = false,
+    this.fontSize = 10,
+    this.padding = const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
   });
 
   final String contentType;
@@ -175,6 +179,9 @@ class ContentTitleMetaBadges extends StatelessWidget {
   final int? episodeCount;
   final double spacing;
   final double runSpacing;
+  final bool solid;
+  final double fontSize;
+  final EdgeInsets padding;
 
   factory ContentTitleMetaBadges.fromItem(WatchlistItem item) {
     return ContentTitleMetaBadges(
@@ -200,34 +207,69 @@ class ContentTitleMetaBadges extends StatelessWidget {
     return Wrap(
       spacing: spacing,
       runSpacing: runSpacing,
-      children: badges.map((badge) => _TitleMetaBadge(badge: badge)).toList(),
+      children: badges
+          .map(
+            (badge) => _TitleMetaBadge(
+              badge: badge,
+              solid: solid,
+              fontSize: fontSize,
+              padding: padding,
+            ),
+          )
+          .toList(),
     );
   }
 }
 
 class _TitleMetaBadge extends StatelessWidget {
-  const _TitleMetaBadge({required this.badge});
+  const _TitleMetaBadge({
+    required this.badge,
+    required this.solid,
+    required this.fontSize,
+    required this.padding,
+  });
 
   final TitleMetaBadge badge;
+  final bool solid;
+  final double fontSize;
+  final EdgeInsets padding;
 
   @override
   Widget build(BuildContext context) {
     final (fg, bg, border) = switch (badge.kind) {
-      TitleMetaBadgeKind.age => (
-          const Color(0xFFFBBF24),
-          const Color(0x1FFBBF24),
-          const Color(0x59FBBF24),
-        ),
-      TitleMetaBadgeKind.duration => (
-          const Color(0xFF93C5FD),
-          const Color(0x1A93C5FD),
-          const Color(0x4D93C5FD),
-        ),
-      TitleMetaBadgeKind.seasons => (
-          const Color(0xFFA5B4FC),
-          const Color(0x1AA5B4FC),
-          const Color(0x4DA5B4FC),
-        ),
+      TitleMetaBadgeKind.age => solid
+          ? (
+              const Color(0xFFFCD34D),
+              const Color(0xF2181206),
+              const Color(0x80FBBF24),
+            )
+          : (
+              const Color(0xFFFBBF24),
+              const Color(0x1FFBBF24),
+              const Color(0x59FBBF24),
+            ),
+      TitleMetaBadgeKind.duration => solid
+          ? (
+              const Color(0xFF93C5FD),
+              const Color(0xF2080E1A),
+              const Color(0x7393C5FD),
+            )
+          : (
+              const Color(0xFF93C5FD),
+              const Color(0x1A93C5FD),
+              const Color(0x4D93C5FD),
+            ),
+      TitleMetaBadgeKind.seasons => solid
+          ? (
+              const Color(0xFFA5B4FC),
+              const Color(0xF20C0C1E),
+              const Color(0x73A5B4FC),
+            )
+          : (
+              const Color(0xFFA5B4FC),
+              const Color(0x1AA5B4FC),
+              const Color(0x4DA5B4FC),
+            ),
     };
 
     return DecoratedBox(
@@ -235,14 +277,17 @@ class _TitleMetaBadge extends StatelessWidget {
         color: bg,
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: border, width: 1),
+        boxShadow: solid
+            ? const [BoxShadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 1))]
+            : null,
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        padding: padding,
         child: Text(
           badge.label,
           style: TextStyle(
             color: fg,
-            fontSize: 10,
+            fontSize: fontSize,
             fontWeight: FontWeight.w700,
             letterSpacing: 0.2,
           ),
@@ -256,6 +301,67 @@ class _TitleMetaBadge extends StatelessWidget {
 // ScorePill — branded IMDb / AniList score
 // ══════════════════════════════════════════════════════════════════════════════
 
+/// Compact IMDb / AniList row for list cards — side-by-side, no wrap.
+class ContentCardRatingBadges extends StatelessWidget {
+  const ContentCardRatingBadges({
+    super.key,
+    required this.imdbRating,
+    required this.anilistRating,
+    this.compact = true,
+  });
+
+  final String? imdbRating;
+  final String? anilistRating;
+  final bool compact;
+
+  factory ContentCardRatingBadges.fromItem(WatchlistItem item, {bool compact = true}) {
+    return ContentCardRatingBadges(
+      imdbRating: item.imdbRating,
+      anilistRating: item.anilistRating,
+      compact: compact,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final imdb = formatImdbDisplay(imdbRating);
+    final anilist = formatAnilistDisplay(anilistRating);
+    if (imdb == null && anilist == null) return const SizedBox.shrink();
+
+    final children = <Widget>[
+      if (imdb != null)
+        Flexible(
+          flex: 0,
+          child: ContentScorePill(
+            value: imdb,
+            sourceLabel: 'IMDb',
+            bg: const Color(0xFFF5C518),
+            fg: Colors.black,
+            compact: compact,
+          ),
+        ),
+      if (imdb != null && anilist != null) SizedBox(width: compact ? 2.5 : 8),
+      if (anilist != null)
+        Flexible(
+          flex: 0,
+          child: ContentScorePill(
+            value: anilist,
+            sourceLabel: 'AL',
+            bg: const Color(0xFF02A9FF),
+            fg: Colors.white,
+            compact: compact,
+          ),
+        ),
+    ];
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.start,
+      mainAxisSize: MainAxisSize.max,
+      children: children,
+    );
+  }
+}
+
 class ContentScorePill extends StatelessWidget {
   const ContentScorePill({
     super.key,
@@ -263,22 +369,34 @@ class ContentScorePill extends StatelessWidget {
     required this.sourceLabel,
     required this.bg,
     required this.fg,
+    this.compact = false,
   });
 
   final String value;
   final String sourceLabel;
   final Color bg;
   final Color fg;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
+    final pad = compact
+        ? const EdgeInsets.fromLTRB(4.8, 1.6, 5.4, 1.6)
+        : const EdgeInsets.symmetric(horizontal: 8, vertical: 3);
+    final valueSize = compact ? 7.0 : 10.5;
+    final labelSize = compact ? 6.5 : 9.0;
+    final gap = compact ? 2.5 : 4.0;
+
     return DecoratedBox(
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(999),
+        boxShadow: compact
+            ? const [BoxShadow(color: Colors.black26, blurRadius: 3, offset: Offset(0, 1))]
+            : null,
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: pad,
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -286,18 +404,20 @@ class ContentScorePill extends StatelessWidget {
               value,
               style: TextStyle(
                 color: fg,
-                fontSize: 10.5,
+                fontSize: valueSize,
                 fontWeight: FontWeight.w800,
+                height: 1,
               ),
             ),
-            const SizedBox(width: 4),
+            SizedBox(width: gap),
             Text(
               sourceLabel,
               style: TextStyle(
                 color: fg.withValues(alpha: 0.75),
-                fontSize: 9,
+                fontSize: labelSize,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.2,
+                height: 1,
               ),
             ),
           ],

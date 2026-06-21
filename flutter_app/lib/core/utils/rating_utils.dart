@@ -30,3 +30,18 @@ bool watchEntryHasUserData(WatchEntry? entry) {
   return hasWatchRating(entry) ||
       (entry.note != null && entry.note!.trim().isNotEmpty);
 }
+
+String? formatImdbDisplay(String? raw) {
+  final num = double.tryParse(raw?.replaceAll(',', '.') ?? '');
+  if (num == null || !num.isFinite) return null;
+  return num == num.roundToDouble()
+      ? num.round().toString()
+      : num.toStringAsFixed(1);
+}
+
+String? formatAnilistDisplay(String? raw) {
+  final num = double.tryParse(raw?.replaceAll(',', '.') ?? '');
+  if (num == null || !num.isFinite) return null;
+  final pct = num > 10 ? num.round() : (num * 10).round();
+  return '$pct%';
+}

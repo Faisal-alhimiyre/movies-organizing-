@@ -3,6 +3,15 @@
 --
 -- Safe to re-run: uses IF NOT EXISTS / IF EXISTS where possible.
 -- Fresh installs: use schema.sql instead (already includes everything below).
+--
+-- Sections:
+--   1) watch_rating, watch_note
+--   2) anilist_rating
+--   3) list_snapshots
+--   4) drop alt_title
+--   5) added_at
+--   6) list title_count / watched_count
+--   7) age_rating, runtime, season_count, episode_count  ← duration + age group
 
 -- 1) Personal watch ratings + notes (migrate-watch-ratings.sql)
 alter table public.watchlist_items

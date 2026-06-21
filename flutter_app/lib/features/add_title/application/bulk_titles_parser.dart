@@ -144,6 +144,134 @@ List<dynamic>? extractJsonArray(String raw) {
   return null;
 }
 
+class JsonArrayExtractResult {
+  const JsonArrayExtractResult({
+    required this.rows,
+    this.syntaxErrors = const [],
+  });
+
+  final List<dynamic> rows;
+  final List<String> syntaxErrors;
+}
+
+bool _isJsonArraySeparator(int codeUnit) {
+  final char = String.fromCharCode(codeUnit);
+  return char == ',' || char.trim().isEmpty;
+}
+
+int _findJsonObjectEnd(String input, int start) {
+  if (start >= input.length || input[start] != '{') return -1;
+
+  var depth = 0;
+  var inString = false;
+  var escape = false;
+
+  for (var i = start; i < input.length; i++) {
+    final char = input[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (inString) {
+      if (char == r'\') {
+        escape = true;
+      } else if (char == '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char == '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char == '{') {
+      depth++;
+      if (depth == 1) continue;
+    } else if (char == '}') {
+      depth--;
+      if (depth == 0) return i;
+    }
+  }
+
+  return -1;
+}
+
+String? _extractJsonArrayInner(String raw) {
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return null;
+
+  final fence = RegExp(
+    r'```(?:json)?\s*([\s\S]*?)```',
+    caseSensitive: false,
+  ).firstMatch(trimmed);
+  final source = fence != null ? fence.group(1)!.trim() : trimmed;
+
+  final start = source.indexOf('[');
+  final end = source.lastIndexOf(']');
+  if (start < 0 || end <= start) return null;
+  return source.substring(start + 1, end);
+}
+
+JsonArrayExtractResult _extractJsonObjectsLenient(String inner) {
+  final rows = <dynamic>[];
+  final syntaxErrors = <String>[];
+  var index = 0;
+  var rowNum = 0;
+
+  while (index < inner.length) {
+    while (index < inner.length && _isJsonArraySeparator(inner.codeUnitAt(index))) {
+      index++;
+    }
+    if (index >= inner.length) break;
+
+    if (inner[index] != '{') {
+      final nextObject = inner.indexOf('{', index);
+      if (nextObject == -1) break;
+      index = nextObject;
+    }
+
+    rowNum++;
+    final end = _findJsonObjectEnd(inner, index);
+    if (end == -1) {
+      syntaxErrors.add(
+        'Row $rowNum: unclosed JSON object — check braces and quotes.',
+      );
+      break;
+    }
+
+    final slice = inner.substring(index, end + 1);
+    try {
+      rows.add(jsonDecode(slice));
+    } catch (_) {
+      syntaxErrors.add(
+        'Row $rowNum: invalid JSON — check commas, quotes, and braces.',
+      );
+    }
+
+    index = end + 1;
+  }
+
+  return JsonArrayExtractResult(rows: rows, syntaxErrors: syntaxErrors);
+}
+
+JsonArrayExtractResult extractJsonArrayWithFallback(String raw) {
+  final rows = extractJsonArray(raw);
+  if (rows != null) {
+    return JsonArrayExtractResult(rows: rows);
+  }
+
+  final inner = _extractJsonArrayInner(raw);
+  if (inner == null) {
+    return const JsonArrayExtractResult(rows: []);
+  }
+
+  return _extractJsonObjectsLenient(inner);
+}
+
 String sanitizeBulkLinkRaw(String value) {
   var raw = value.trim();
   if (raw.isEmpty) return '';
@@ -229,15 +357,18 @@ List<String> parseBulkLeads(Map<String, dynamic> row) {
 }
 
 BulkParseResult parseBulkPaste(String raw) {
-  final rows = extractJsonArray(raw);
-  if (rows == null) {
+  final extracted = extractJsonArrayWithFallback(raw);
+  final rows = extracted.rows;
+  final errors = [...extracted.syntaxErrors];
+
+  if (rows.isEmpty && errors.isEmpty) {
     final trimmed = raw.trim();
     var hint =
         'Paste the JSON array your AI returned (starts with [ and ends with ]).';
-    if (trimmed.isNotEmpty && !trimmed.startsWith('[')) {
+    if (trimmed.isNotEmpty && !trimmed.contains('[')) {
       hint =
           'Expected a JSON array starting with [. Remove any text before the opening [.';
-    } else if (trimmed.startsWith('[')) {
+    } else if (trimmed.contains('[')) {
       hint =
           'Could not parse that JSON. Check for missing commas, extra commas, or unquoted text.';
     }
@@ -245,11 +376,14 @@ BulkParseResult parseBulkPaste(String raw) {
   }
 
   if (rows.isEmpty) {
-    return const BulkParseResult(ok: false, error: 'The list is empty.');
+    return BulkParseResult(
+      ok: false,
+      error: formatBulkErrors(errors),
+      errors: errors,
+    );
   }
 
   final items = <BulkParsedEntry>[];
-  final errors = <String>[];
 
   for (var index = 0; index < rows.length; index++) {
     final line = index + 1;

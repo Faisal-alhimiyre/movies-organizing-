@@ -123,6 +123,16 @@ class L10n {
   String get typeTv => _ar ? 'مسلسلات' : 'TV';
   String get typeAnime => _ar ? 'أنمي' : 'Anime';
 
+  /// Short type label in genre section badges — mirrors `typeSectionShort()` on web.
+  String typeSectionShort(String? contentType) => switch (contentType) {
+        'movies' => _ar ? 'فيلم' : 'Movie',
+        'tvSeries' => _ar ? 'مسلسل' : 'TV Series',
+        'anime' => typeAnime,
+        _ => '',
+      };
+
+  String get genreAllSelected => _ar ? 'كل المحدد' : 'All selected';
+
   String get statsTotal => _ar ? 'عناوين' : 'titles';
   String get statsWatched => _ar ? 'مشاهَد' : 'watched';
 
@@ -136,6 +146,8 @@ class L10n {
   String get layoutPoster => _ar ? 'عرض صور الغلاف' : 'Show poster images';
   String get layoutToolbar => _ar ? 'شكل البطاقات' : 'Card layout';
   String get cardYourRating => _ar ? 'تقييمك' : 'Your rating';
+  String get cardSectionDetails => _ar ? 'التفاصيل' : 'Details';
+  String get cardSectionGenres => _ar ? 'الأنواع' : 'Genres';
   String get cardOpenLink => _ar ? 'فتح الرابط' : 'Open link';
   String get typeFilmSeries => _ar ? 'سلسلة أفلام' : 'Film series';
   String get mobileNotWatched => _ar ? 'لم تُشاهد بعد' : 'Not watched yet';

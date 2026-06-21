@@ -950,15 +950,17 @@ class _WatchlistBody extends ConsumerWidget {
                     ? WatchlistFilterBar(items: snapshot.items, l10n: l10n)
                     : null,
               ),
-              if (snapshot.items.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                // View toggle — start-aligned, below panel (matches website .page-toolbar)
-                Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: CardLayoutToggle(l10n: l10n),
+              if (snapshot.items.isNotEmpty)
+                Padding(
+                  padding: EdgeInsets.only(
+                    top: AppBreakpoints.isMobile(context) ? -5.6 : -12,
+                    bottom: AppBreakpoints.isMobile(context) ? 8.8 : 24,
+                  ),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: CardLayoutToggle(l10n: l10n),
+                  ),
                 ),
-              ],
-              const SizedBox(height: 20),
               if (snapshot.isEmptyList || snapshot.items.isEmpty)
                 WatchlistEmptyState(l10n: l10n)
               else if (filtered.isEmpty)

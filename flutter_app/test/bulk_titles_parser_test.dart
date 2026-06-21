@@ -80,6 +80,66 @@ Here you go:
     );
   });
 
+  test('parseBulkPaste skips broken JSON rows and adds valid ones', () {
+    const raw = '''
+[
+  {
+    "type": "movies",
+    "genre": "Action",
+    "title": "Good One",
+    "kind": "movie",
+    "lead": "Actor A",
+    "summary": "Works fine.",
+    "link": ""
+  },
+  {
+    "type": "movies",
+    "genre": "Action",
+    "title": "Broken",
+    "kind": movie,
+    "lead": "Actor B",
+    "summary": "Unquoted kind value.",
+    "link": ""
+  },
+  {
+    "type": "movies",
+    "genre": "Drama",
+    "title": "Good Two",
+    "kind": "movie",
+    "lead": "Actor C",
+    "summary": "Also works.",
+    "link": ""
+  }
+]
+''';
+    final result = parseBulkPaste(raw);
+    expect(result.ok, isTrue);
+    expect(result.items.length, 2);
+    expect(result.items.map((e) => e.title), ['Good One', 'Good Two']);
+    expect(result.errors.length, 1);
+    expect(result.errors.first, contains('Row 2'));
+    expect(result.errors.first, contains('invalid JSON'));
+  });
+
+  test('parseBulkPaste tolerates trailing comma via lenient parse', () {
+    const raw = '''
+[
+  {
+    "type": "movies",
+    "genre": "Action",
+    "title": "Trailing Comma",
+    "kind": "movie",
+    "lead": "Actor",
+    "summary": "Summary.",
+    "link": ""
+  },
+]
+''';
+    final result = parseBulkPaste(raw);
+    expect(result.ok, isTrue);
+    expect(result.items.length, 1);
+    expect(result.items.first.title, 'Trailing Comma');
+  });
   test('buildBulkTemplate includes genre list', () {
     final template = buildBulkTemplate(['Action', 'Drama']);
     expect(template, contains('Action, Drama'));
