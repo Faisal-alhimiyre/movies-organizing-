@@ -5,24 +5,52 @@ import '../core/utils/watchlist_sync_converter.dart';
 import '../models/share_snapshot_payload.dart';
 import '../models/watchlist_data.dart';
 
-class RemoteListRow {
-  const RemoteListRow({
+class AccountListMigrationPayload {
+  const AccountListMigrationPayload({
     required this.listId,
     required this.name,
-    this.description = '',
+    required this.description,
+    required this.watchlist,
+    required this.watched,
   });
 
   final String listId;
   final String name;
   final String description;
+  final WatchlistData watchlist;
+  final Map<String, dynamic> watched;
+}
+
+class RemoteListRow {
+  const RemoteListRow({
+    required this.listId,
+    required this.name,
+    this.description = '',
+    this.titleCount = 0,
+    this.watchedCount = 0,
+  });
+
+  final String listId;
+  final String name;
+  final String description;
+  final int titleCount;
+  final int watchedCount;
 
   factory RemoteListRow.fromJson(Map<String, dynamic> json) {
     return RemoteListRow(
       listId: json['list_id'] as String? ?? '',
       name: json['name'] as String? ?? 'My list',
       description: json['description'] as String? ?? '',
+      titleCount: _parseCount(json['title_count']),
+      watchedCount: _parseCount(json['watched_count']),
     );
   }
+}
+
+int _parseCount(dynamic raw) {
+  if (raw is int) return raw;
+  if (raw is num) return raw.round();
+  return int.tryParse(raw?.toString() ?? '') ?? 0;
 }
 
 class RemoteListSnapshot {
@@ -86,7 +114,8 @@ class SupabaseSyncRepository {
     try {
       final data = await client
           .from(listsTable)
-          .select('list_id, name, description, updated_at')
+          .select(
+              'list_id, name, description, title_count, watched_count, updated_at')
           .eq('account_id', accountId)
           .order('updated_at');
 
@@ -114,10 +143,8 @@ class SupabaseSyncRepository {
           .eq('list_id', listId)
           .maybeSingle();
 
-      final itemsResult = await client
-          .from(itemsTable)
-          .select()
-          .eq('list_id', listId);
+      final itemsResult =
+          await client.from(itemsTable).select().eq('list_id', listId);
 
       final rows = <Map<String, dynamic>>[];
       if (itemsResult is List) {
@@ -185,6 +212,8 @@ class SupabaseSyncRepository {
         watched,
         existingAddedAt: existingAddedAt,
       );
+      final titleCount = rows.length;
+      final watchedCount = rows.where((row) => row['watched'] == true).length;
       final now = DateTime.now().toUtc().toIso8601String();
 
       await client.from(accountsTable).upsert(
@@ -208,6 +237,12 @@ class SupabaseSyncRepository {
       if (rows.isNotEmpty) {
         await client.from(itemsTable).insert(rows);
       }
+
+      await client.from(listsTable).update({
+        'title_count': titleCount,
+        'watched_count': watchedCount,
+        'updated_at': now,
+      }).eq('list_id', listId);
 
       return true;
     } catch (error, stackTrace) {
@@ -367,6 +402,52 @@ class SupabaseSyncRepository {
       return true;
     } catch (error, stackTrace) {
       debugPrint('[sync] deleteList failed: $error\n$stackTrace');
+      return false;
+    }
+  }
+
+  Future<bool> deleteAccount(String accountId) async {
+    final client = _client;
+    if (client == null || accountId.isEmpty) return false;
+
+    try {
+      await client.from(accountsTable).delete().eq('account_id', accountId);
+      return true;
+    } catch (error, stackTrace) {
+      debugPrint('[sync] deleteAccount failed: $error\n$stackTrace');
+      return false;
+    }
+  }
+
+  Future<bool> migrateAccount({
+    required String oldAccountId,
+    required String newAccountId,
+    required List<AccountListMigrationPayload> lists,
+  }) async {
+    final client = _client;
+    if (client == null || oldAccountId.isEmpty || newAccountId.isEmpty) {
+      return false;
+    }
+
+    try {
+      for (final entry in lists) {
+        final pushed = await pushSnapshot(
+          listId: entry.listId,
+          accountId: newAccountId,
+          watchlist: entry.watchlist,
+          watched: entry.watched,
+          listName: entry.name,
+          description: entry.description,
+        );
+        if (!pushed) return false;
+      }
+
+      if (oldAccountId == newAccountId) return true;
+
+      await client.from(accountsTable).delete().eq('account_id', oldAccountId);
+      return true;
+    } catch (error, stackTrace) {
+      debugPrint('[sync] migrateAccount failed: $error\n$stackTrace');
       return false;
     }
   }

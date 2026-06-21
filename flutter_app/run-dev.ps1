@@ -116,29 +116,44 @@ if ($lanIp) {
   Write-Host "On your iPhone: run 'ipconfig' in another terminal and use your Wi-Fi IPv4 address."
 }
 Write-Host ""
-Write-Host "When you see 'is being served at', open this in Chrome:" -ForegroundColor Yellow
-Write-Host "  http://localhost:$port/gate" -ForegroundColor White
-Write-Host ""
+Write-Host "Flutter will open Chrome automatically." -ForegroundColor Gray
 Write-Host "Hot reload: click THIS terminal after 'Flutter run key commands', then press r." -ForegroundColor Gray
+Write-Host "Hot restart: press R (capital) if hot reload times out." -ForegroundColor Gray
 Write-Host "Do NOT type r at the PS prompt - PowerShell reruns the script and port $port will be busy." -ForegroundColor Gray
 Write-Host ""
 
 $portBusy = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
 if ($portBusy) {
   Write-Host "Port $port is already in use. The dev server may still be running." -ForegroundColor Yellow
-  Write-Host "  Open http://localhost:$port/gate in the browser, or press q in the flutter terminal, then run this script again." -ForegroundColor Yellow
+  Write-Host "  Press q in the flutter terminal to quit, then run this script again." -ForegroundColor Yellow
   Write-Host ""
   exit 1
 }
 
-Write-Host "Starting server (first launch can take ~60 seconds)..." -ForegroundColor Gray
+Write-Host "Starting Chrome (first launch can take ~60 seconds)..." -ForegroundColor Gray
 Write-Host ""
 
-$url = "http://localhost:$port/gate"
-Start-Job -ScriptBlock {
-  param($openUrl)
-  Start-Sleep -Seconds 45
-  Start-Process $openUrl
-} -ArgumentList $url | Out-Null
+# Use -d chrome so Flutter owns the browser process — hot reload stays connected.
+# Falls back to web-server if Chrome is not found.
+$chromeAvailable = $false
+$chromePaths = @(
+  "C:\Program Files\Google\Chrome\Application\chrome.exe",
+  "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+)
+foreach ($p in $chromePaths) {
+  if (Test-Path $p) { $chromeAvailable = $true; break }
+}
+# Also check if flutter can see Chrome devices
+if (-not $chromeAvailable) {
+  $devices = & $flutterCmd devices 2>&1
+  if ($devices -match "chrome") { $chromeAvailable = $true }
+}
 
-& $flutterCmd run -d web-server --web-hostname 0.0.0.0 --web-port $port @defines
+if ($chromeAvailable) {
+  & $flutterCmd run -d chrome --web-port $port @defines
+} else {
+  Write-Host "Chrome not found - falling back to web-server mode." -ForegroundColor Yellow
+  Write-Host "Open http://localhost:${port}/gate in a browser after startup." -ForegroundColor Yellow
+  Write-Host ""
+  & $flutterCmd run -d web-server --web-hostname 0.0.0.0 --web-port $port @defines
+}

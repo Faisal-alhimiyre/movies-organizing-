@@ -19,12 +19,17 @@ abstract final class AppBreakpoints {
 }
 
 /// Centers content with max width on large screens.
+///
+/// Does NOT apply SafeArea — the enclosing Scaffold is responsible for that.
+/// Default padding matches the website `.app` dark-theme spacing:
+///   horizontal: 1.5rem (24 px), top: 2.25rem (36 px), bottom: 0
+///   (scrollable lists manage their own bottom clearance).
 class ResponsiveBody extends StatelessWidget {
   const ResponsiveBody({
     super.key,
     required this.child,
-    this.maxWidth = 960,
-    this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    this.maxWidth = 1200,
+    this.padding = const EdgeInsets.fromLTRB(24, 36, 24, 0),
   });
 
   final Widget child;
@@ -33,13 +38,11 @@ class ResponsiveBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Align(
-        alignment: Alignment.topCenter,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: maxWidth),
-          child: Padding(padding: padding, child: child),
-        ),
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: Padding(padding: padding, child: child),
       ),
     );
   }

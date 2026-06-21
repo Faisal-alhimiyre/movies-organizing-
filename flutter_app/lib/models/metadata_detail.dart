@@ -14,6 +14,9 @@ class MetadataDetail {
     this.year = '',
     this.plot = '',
     this.runtime = '',
+    this.ageRating = '',
+    this.seasonCount,
+    this.episodeCount,
     this.director = '',
     this.actors = const [],
     this.genres = const [],
@@ -33,6 +36,9 @@ class MetadataDetail {
   final String year;
   final String plot;
   final String runtime;
+  final String ageRating;
+  final int? seasonCount;
+  final int? episodeCount;
   final String director;
   final List<String> actors;
   final List<String> genres;
@@ -52,6 +58,9 @@ class MetadataDetail {
         'year': year,
         'plot': plot,
         'runtime': runtime,
+        'ageRating': ageRating,
+        'seasonCount': seasonCount,
+        'episodeCount': episodeCount,
         'director': director,
         'actors': actors,
         'genres': genres,
@@ -77,10 +86,26 @@ class MetadataDetail {
       year: json['year']?.toString() ?? '',
       plot: json['plot']?.toString() ?? '',
       runtime: json['runtime']?.toString() ?? '',
+      ageRating: json['ageRating']?.toString() ?? '',
+      seasonCount: parseMetadataCount(json['seasonCount']),
+      episodeCount: parseMetadataCount(json['episodeCount']),
       director: json['director']?.toString() ?? '',
-      actors: (json['actors'] as List?)?.map((e) => e.toString()).toList() ?? const [],
-      genres: (json['genres'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+      actors: (json['actors'] as List?)?.map((e) => e.toString()).toList() ??
+          const [],
+      genres: (json['genres'] as List?)?.map((e) => e.toString()).toList() ??
+          const [],
       contentType: json['contentType']?.toString() ?? 'movies',
     );
+  }
+
+  static int? parseMetadataCount(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is int) return raw > 0 ? raw : null;
+    if (raw is num && raw.isFinite) {
+      final value = raw.round();
+      return value > 0 ? value : null;
+    }
+    final parsed = int.tryParse(raw.toString().trim());
+    return parsed != null && parsed > 0 ? parsed : null;
   }
 }

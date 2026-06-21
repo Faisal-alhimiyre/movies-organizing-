@@ -110,11 +110,32 @@
     return `watchlist-last-list-${accountId}`;
   }
 
+  function defaultListKey(accountId) {
+    return `watchlist-default-list-${accountId}`;
+  }
+
+  function getDefaultListId(accountId) {
+    const id = accountId || getAccountId();
+    if (!id) return null;
+    const stored = localStorage.getItem(defaultListKey(id));
+    if (stored) return stored;
+    return localStorage.getItem(lastListKey(id));
+  }
+
+  function assignDefaultList(listId) {
+    const accountId = getAccountId();
+    if (!accountId || !listId) return false;
+    if (!getLibrary(accountId).some((entry) => entry.listId === listId)) {
+      return false;
+    }
+    localStorage.setItem(defaultListKey(accountId), listId);
+    return true;
+  }
+
   function switchList(listId) {
     const accountId = getAccountId();
     if (!accountId || !listId) return;
     if (!getLibrary(accountId).some((entry) => entry.listId === listId)) return;
-    localStorage.setItem(lastListKey(accountId), listId);
     setSession(accountId, listId);
   }
 
@@ -375,6 +396,7 @@
         description: options.description || "",
       });
       localStorage.setItem(emptyListKey(listId), "1");
+      localStorage.setItem(defaultListKey(accountId), listId);
       setSession(accountId, listId);
       return { ok: true, accountId, listId };
     }
@@ -382,10 +404,10 @@
     clearEmptySavedWatchlist(accountId);
     const listId = ensureDefaultList(accountId);
     const library = getLibrary(accountId);
-    const lastListId = localStorage.getItem(lastListKey(accountId));
+    const defaultListId = getDefaultListId(accountId);
     const activeListId =
-      (lastListId && library.some((entry) => entry.listId === lastListId)
-        ? lastListId
+      (defaultListId && library.some((entry) => entry.listId === defaultListId)
+        ? defaultListId
         : null) ||
       library[0]?.listId ||
       listId;
@@ -475,6 +497,12 @@
     saveLibrary(newAccountId, library);
     localStorage.removeItem(libraryKey(oldAccountId));
 
+    const defaultId = localStorage.getItem(defaultListKey(oldAccountId));
+    if (defaultId) {
+      localStorage.setItem(defaultListKey(newAccountId), defaultId);
+      localStorage.removeItem(defaultListKey(oldAccountId));
+    }
+
     const currentListId = getProfile();
     setSession(newAccountId, currentListId);
   }
@@ -537,8 +565,17 @@
     const accountId = getAccountId();
     if (!accountId) return;
 
+    const wasDefault = getDefaultListId(accountId) === listId;
     const library = getLibrary(accountId).filter((entry) => entry.listId !== listId);
     saveLibrary(accountId, library);
+
+    if (wasDefault) {
+      if (library.length > 0) {
+        localStorage.setItem(defaultListKey(accountId), library[0].listId);
+      } else {
+        localStorage.removeItem(defaultListKey(accountId));
+      }
+    }
   }
 
   function purgeAccount(accountId) {
@@ -555,6 +592,8 @@
     }
 
     localStorage.removeItem(libraryKey(accountId));
+    localStorage.removeItem(lastListKey(accountId));
+    localStorage.removeItem(defaultListKey(accountId));
   }
 
   function signOut(options = {}) {
@@ -598,6 +637,8 @@
     getListEntry,
     getListTitleCount,
     switchList,
+    getDefaultListId,
+    assignDefaultList,
     writeListData,
     purgeList,
     purgeAccount,

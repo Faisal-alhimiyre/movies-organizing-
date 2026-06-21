@@ -22,7 +22,8 @@ class AppConfig {
 
   static const AppConfig fromEnvironment = AppConfig(
     supabaseUrl: String.fromEnvironment('SUPABASE_URL', defaultValue: ''),
-    supabaseAnonKey: String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: ''),
+    supabaseAnonKey:
+        String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: ''),
     omdbApiKey: String.fromEnvironment('OMDB_API_KEY', defaultValue: ''),
     tmdbApiKey: String.fromEnvironment('TMDB_API_KEY', defaultValue: ''),
     publicAppUrl: String.fromEnvironment('PUBLIC_APP_URL', defaultValue: ''),

@@ -12,6 +12,10 @@ class WatchlistItem {
     this.poster,
     this.imdbRating,
     this.anilistRating,
+    this.ageRating,
+    this.runtime,
+    this.seasonCount,
+    this.episodeCount,
     this.year,
     this.addedAt,
     this.secondaryGenres = const [],
@@ -28,6 +32,10 @@ class WatchlistItem {
   final String? poster;
   final String? imdbRating;
   final String? anilistRating;
+  final String? ageRating;
+  final String? runtime;
+  final int? seasonCount;
+  final int? episodeCount;
   final int? year;
   final int? addedAt;
   final List<String> secondaryGenres;
@@ -41,6 +49,10 @@ class WatchlistItem {
         if (poster != null) 'poster': poster,
         if (imdbRating != null) 'imdbRating': imdbRating,
         if (anilistRating != null) 'anilistRating': anilistRating,
+        if (ageRating != null && ageRating!.isNotEmpty) 'ageRating': ageRating,
+        if (runtime != null && runtime!.isNotEmpty) 'runtime': runtime,
+        if (seasonCount != null) 'seasonCount': seasonCount,
+        if (episodeCount != null) 'episodeCount': episodeCount,
         if (year != null) 'year': year,
         if (addedAt != null) 'addedAt': addedAt,
         if (secondaryGenres.isNotEmpty) 'secondaryGenres': secondaryGenres,

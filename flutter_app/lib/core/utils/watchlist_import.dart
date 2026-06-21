@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../models/share_snapshot_payload.dart';
 import '../../models/watchlist_data.dart';
 import '../../models/watchlist_item.dart';
@@ -97,7 +99,8 @@ ImportMergeResult mergeImportIntoCurrentList({
 
   if (includeWatched) {
     for (final item in importItems) {
-      final raw = payload.watched[makeItemId(item.contentType, item.genre, item.title)] ??
+      final raw = payload
+              .watched[makeItemId(item.contentType, item.genre, item.title)] ??
           _findWatchedByTitleKey(payload.watched, item.contentType, item.title);
       if (raw == null) continue;
       watched[makeItemId(item.contentType, item.genre, item.title)] =
@@ -112,8 +115,11 @@ ImportMergeResult mergeImportIntoCurrentList({
   );
 }
 
-({List<WatchlistItem> items, Map<String, WatchEntry> watched, ImportMergeResult result})
-    applyMergeImport({
+({
+  List<WatchlistItem> items,
+  Map<String, WatchEntry> watched,
+  ImportMergeResult result
+}) applyMergeImport({
   required List<WatchlistItem> currentItems,
   required Map<String, WatchEntry> currentWatched,
   required ShareSnapshotPayload payload,
@@ -133,7 +139,8 @@ ImportMergeResult mergeImportIntoCurrentList({
 
   if (includeWatched) {
     for (final item in flattenWatchlist(payload.watchlist)) {
-      final raw = payload.watched[makeItemId(item.contentType, item.genre, item.title)] ??
+      final raw = payload
+              .watched[makeItemId(item.contentType, item.genre, item.title)] ??
           _findWatchedByTitleKey(payload.watched, item.contentType, item.title);
       if (raw == null) continue;
       watched[makeItemId(item.contentType, item.genre, item.title)] =
@@ -144,7 +151,8 @@ ImportMergeResult mergeImportIntoCurrentList({
   return (items: items, watched: watched, result: merge);
 }
 
-({List<WatchlistItem> items, Map<String, WatchEntry> watched}) applyReplaceImport(
+({List<WatchlistItem> items, Map<String, WatchEntry> watched})
+    applyReplaceImport(
   ShareSnapshotPayload payload,
 ) {
   final items = applyImportReplace(payload);
@@ -184,4 +192,41 @@ Map<String, WatchEntry> watchedFromImport(
     result[item.id] = WatchEntry.fromJson(raw);
   }
   return result;
+}
+
+ShareSnapshotPayload? parseImportPayload(String jsonText) {
+  try {
+    final decoded = json.decode(jsonText);
+    if (decoded is! Map) return null;
+    final payload =
+        ShareSnapshotPayload.fromJson(Map<String, dynamic>.from(decoded));
+    return payload.isValid ? payload : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+String uniqueImportedListName(String baseName, Iterable<String> existingNames) {
+  var base = baseName.trim();
+  if (base.isEmpty) base = 'Imported list';
+  if (base.length > 48) base = base.substring(0, 48);
+  final taken = existingNames.map((name) => name.trim()).toSet();
+
+  if (!taken.contains(base)) return base;
+
+  for (var suffix = 2; suffix < 100; suffix++) {
+    final prefix = base.length > 44 ? base.substring(0, 44) : base;
+    final candidate = '$prefix ($suffix)';
+    if (!taken.contains(candidate)) return candidate;
+  }
+
+  final prefix = base.length > 40 ? base.substring(0, 40) : base;
+  return '$prefix ${DateTime.now().millisecondsSinceEpoch}';
+}
+
+String importedListDescription(ShareSnapshotPayload payload) {
+  final raw = payload.listDescription.trim();
+  if (raw.isNotEmpty) return raw.length > 120 ? raw.substring(0, 120) : raw;
+  final count = payload.titleCount;
+  return count == 1 ? '1 title' : '$count titles';
 }

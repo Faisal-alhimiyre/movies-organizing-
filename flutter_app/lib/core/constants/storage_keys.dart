@@ -8,6 +8,8 @@ abstract final class StorageKeys {
 
   static String library(String accountId) => 'watchlist-library-v2-$accountId';
   static String lastList(String accountId) => 'watchlist-last-list-$accountId';
+  static String defaultList(String accountId) =>
+      'watchlist-default-list-$accountId';
   static String data(String listId) => 'watchlist-data-v2-$listId';
   static String watched(String listId) => 'watchlist-watched-v1-$listId';
   static String syncMeta(String listId) => 'watchlist-sync-meta-$listId';

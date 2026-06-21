@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../core/constants/storage_keys.dart';
+import '../core/utils/account_id.dart';
 import '../core/utils/watchlist_parser.dart';
 import '../core/storage/hive_boxes.dart';
 import '../models/list_library_entry.dart';
@@ -17,7 +18,8 @@ class LocalStorageRepository {
         .toList();
   }
 
-  Future<void> saveLibrary(String accountId, List<ListLibraryEntry> entries) async {
+  Future<void> saveLibrary(
+      String accountId, List<ListLibraryEntry> entries) async {
     await HiveBoxes.preferences.put(
       StorageKeys.library(accountId),
       entries.map((e) => e.toJson()).toList(),
@@ -100,11 +102,27 @@ class LocalStorageRepository {
   }
 
   String? getLastListId(String accountId) {
-    return HiveBoxes.preferences.get(StorageKeys.lastList(accountId)) as String?;
+    return HiveBoxes.preferences.get(StorageKeys.lastList(accountId))
+        as String?;
   }
 
   Future<void> setLastListId(String accountId, String listId) async {
     await HiveBoxes.preferences.put(StorageKeys.lastList(accountId), listId);
+  }
+
+  String? getDefaultListId(String accountId) {
+    final raw = HiveBoxes.preferences.get(StorageKeys.defaultList(accountId));
+    if (raw is String && raw.isNotEmpty) return raw;
+    // Migrate from legacy last-list preference.
+    return getLastListId(accountId);
+  }
+
+  Future<void> setDefaultListId(String accountId, String listId) async {
+    await HiveBoxes.preferences.put(StorageKeys.defaultList(accountId), listId);
+  }
+
+  Future<void> clearDefaultListId(String accountId) async {
+    await HiveBoxes.preferences.delete(StorageKeys.defaultList(accountId));
   }
 
   Future<void> clearEmptySavedWatchlist(String listId) async {
@@ -166,13 +184,68 @@ class LocalStorageRepository {
       await _purgeListData(entry.listId);
     }
     await HiveBoxes.preferences.delete(StorageKeys.library(accountId));
+    await HiveBoxes.preferences.delete(StorageKeys.lastList(accountId));
+    await HiveBoxes.preferences.delete(StorageKeys.defaultList(accountId));
+  }
+
+  Map<String, dynamic> readWatchedJson(String listId) {
+    final raw = HiveBoxes.preferences.get(StorageKeys.watched(listId));
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return {};
+  }
+
+  bool codeHasLocalList(String code) {
+    final accountId = accountIdFromCode(code.trim().toLowerCase());
+    return hasLocalAccountData(accountId);
+  }
+
+  Future<void> migrateLocalAccount({
+    required String oldAccountId,
+    required String newAccountId,
+    required String currentListId,
+  }) async {
+    final library = getLibrary(oldAccountId)
+        .map(
+          (entry) => ListLibraryEntry(
+            listId: entry.listId,
+            accountId: newAccountId,
+            name: entry.name,
+            description: entry.description,
+            addedAt: entry.addedAt,
+            updatedAt: DateTime.now().millisecondsSinceEpoch,
+          ),
+        )
+        .toList();
+
+    await saveLibrary(newAccountId, library);
+    await HiveBoxes.preferences.delete(StorageKeys.library(oldAccountId));
+
+    final lastListId = getLastListId(oldAccountId);
+    if (lastListId != null) {
+      await setLastListId(newAccountId, lastListId);
+    }
+    final defaultListId = getDefaultListId(oldAccountId);
+    if (defaultListId != null) {
+      await setDefaultListId(newAccountId, defaultListId);
+    }
+    await HiveBoxes.preferences.delete(StorageKeys.lastList(oldAccountId));
+    await HiveBoxes.preferences.delete(StorageKeys.defaultList(oldAccountId));
   }
 
   Future<void> purgeList(String listId, String accountId) async {
+    final wasDefault = getDefaultListId(accountId) == listId;
     await _purgeListData(listId);
     final library =
         getLibrary(accountId).where((e) => e.listId != listId).toList();
     await saveLibrary(accountId, library);
+
+    if (wasDefault) {
+      if (library.isNotEmpty) {
+        await setDefaultListId(accountId, library.first.listId);
+      } else {
+        await clearDefaultListId(accountId);
+      }
+    }
   }
 
   int getListTitleCount(String listId) {

@@ -21,8 +21,10 @@ dependencies:
   connectivity_plus: ^6.1.4
   url_launcher: ^6.3.1
   share_plus: ^10.1.4
+  file_picker: ^8.1.7
   cached_network_image: ^3.4.1
   http: ^1.2.2
+  google_fonts: ^8.1.0
 
 dev_dependencies:
   flutter_test:

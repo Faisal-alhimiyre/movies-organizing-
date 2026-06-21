@@ -12,7 +12,7 @@ String accountIdFromCode(String code) {
 
 String generateListId() {
   final time = DateTime.now().millisecondsSinceEpoch.toRadixString(36);
-  final rand = (DateTime.now().microsecondsSinceEpoch % 0xFFFFFF)
-      .toRadixString(36);
+  final rand =
+      (DateTime.now().microsecondsSinceEpoch % 0xFFFFFF).toRadixString(36);
   return 'lst_${time}_$rand';
 }

@@ -47,6 +47,31 @@
           sessionStorage.setItem('watchlist-pending-share', share.trim());
         }
       } catch (e) {}
+
+      // Stale Flutter service workers on localhost often leave the page stuck on
+      // "Loading…" after hot restart or code changes. Clear them in dev only.
+      if (
+        (location.hostname === 'localhost' || location.hostname === '127.0.0.1') &&
+        'serviceWorker' in navigator
+      ) {
+        navigator.serviceWorker.getRegistrations().then(function (regs) {
+          regs.forEach(function (reg) { reg.unregister(); });
+        });
+      }
+
+      // If Flutter never boots, show a hint instead of an endless splash.
+      setTimeout(function () {
+        var splash = document.getElementById('boot-splash');
+        if (!splash || splash.dataset.booted === '1') return;
+        splash.innerHTML =
+          'Still loading…<br><br>' +
+          '<span style="font-size:14px;color:#a8a8a8">' +
+          '1. In the Flutter terminal, press <b>q</b> to quit<br>' +
+          '2. Run <b>.\\run-dev.ps1</b> again<br>' +
+          '3. Open <b>http://localhost:53100/gate</b><br>' +
+          '4. Hard refresh: Ctrl+Shift+R' +
+          '</span>';
+      }, 60000);
     })();
   </script>
 </head>

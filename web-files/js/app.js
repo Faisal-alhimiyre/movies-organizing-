@@ -89,6 +89,7 @@
   let searchPickLoading = false;
   let searchConfirmReturnFocus = null;
   let ratingsBackfillRunning = false;
+  let titleMetaBackfillRunning = false;
   let yearsBackfillRunning = false;
 
   const state = {
@@ -176,6 +177,11 @@
     changeCodeError: document.getElementById("changeCodeError"),
     listSwitcherWrap: document.getElementById("accountMenuSwitchWrap"),
     listSwitcher: document.getElementById("listSwitcher"),
+    headerTitle: document.getElementById("headerTitle"),
+    listTitleDropdown: document.getElementById("listTitleDropdown"),
+    listTitleDropdownBtn: document.getElementById("listTitleDropdownBtn"),
+    listTitleDropdownLabel: document.getElementById("listTitleDropdownLabel"),
+    listTitleDropdownPanel: document.getElementById("listTitleDropdownPanel"),
     importShareModal: document.getElementById("importShareModal"),
     importShareModalText: document.getElementById("importShareModalText"),
     importShareModalHint: document.getElementById("importShareModalHint"),
@@ -771,6 +777,10 @@
       anilistRating: meta.anilistRating || "",
       year: meta.year || "",
       imdbId: meta.imdbId || "",
+      ageRating: meta.ageRating || "",
+      runtime: meta.runtime || "",
+      seasonCount: meta.seasonCount || null,
+      episodeCount: meta.episodeCount || null,
     };
   }
 
@@ -928,6 +938,10 @@
       if (item.poster) entry.poster = item.poster;
       if (item.imdbRating) entry.imdbRating = item.imdbRating;
       if (item.anilistRating) entry.anilistRating = item.anilistRating;
+      if (item.ageRating) entry.ageRating = item.ageRating;
+      if (item.runtime) entry.runtime = item.runtime;
+      if (item.seasonCount) entry.seasonCount = item.seasonCount;
+      if (item.episodeCount) entry.episodeCount = item.episodeCount;
       if (item.year) entry.year = item.year;
       if (item.link) entry.link = item.link;
       entry.addedAt = item.addedAt || Date.now();
@@ -1359,6 +1373,10 @@
       if (item.poster) entry.poster = item.poster;
       if (item.imdbRating) entry.imdbRating = item.imdbRating;
       if (item.anilistRating) entry.anilistRating = item.anilistRating;
+      if (item.ageRating) entry.ageRating = item.ageRating;
+      if (item.runtime) entry.runtime = item.runtime;
+      if (item.seasonCount) entry.seasonCount = item.seasonCount;
+      if (item.episodeCount) entry.episodeCount = item.episodeCount;
       if (item.year) entry.year = item.year;
       if (item.addedAt) entry.addedAt = item.addedAt;
       if (item.secondaryGenres?.length) {
@@ -1953,9 +1971,7 @@
 
     renderGenreFilterChips();
 
-    const placeholder = state.selectedGenres.length
-      ? t("filter.addGenre")
-      : t("filter.allGenres");
+    const placeholder = t("filter.allGenres");
     const remaining = [...available].filter(
       (genre) => !state.selectedGenres.includes(genre)
     );
@@ -2621,8 +2637,17 @@
 
     const applyAnilistBackfill = async (item) => {
       const meta = await fetchAnilistMetaForItem(item);
+      let changed = false;
       if (meta?.anilistRating && !item.anilistRating) {
         item.anilistRating = meta.anilistRating;
+        changed = true;
+      }
+      if (meta) {
+        const before = itemHasTitleMeta(item);
+        window.WatchlistMetadata.applyTitleMetaFromDetails(meta, item);
+        if (!before && itemHasTitleMeta(item)) changed = true;
+      }
+      if (changed) {
         updated += 1;
         state.data = itemsToNested(state.items);
         saveData();
@@ -2653,8 +2678,17 @@
 
         const imdbId = getImdbId(item);
         const meta = await window.WatchlistMetadata.getMetadata(imdbId);
+        let changed = false;
         if (meta?.rating && !item.imdbRating) {
           item.imdbRating = meta.rating;
+          changed = true;
+        }
+        if (meta) {
+          const before = itemHasTitleMeta(item);
+          window.WatchlistMetadata.applyTitleMetaFromDetails(meta, item);
+          if (!before && itemHasTitleMeta(item)) changed = true;
+        }
+        if (changed) {
           updated += 1;
           if (state.ratingFilterSource !== "all" && updated % 3 === 0) {
             state.data = itemsToNested(state.items);
@@ -2683,14 +2717,87 @@
     }
   }
 
+  function itemHasTitleMeta(item) {
+    if (item?.ageRating) return true;
+    if (item?.runtime) return true;
+    const seasons = parseInt(String(item?.seasonCount || "").trim(), 10);
+    if (Number.isFinite(seasons) && seasons > 0) return true;
+    const episodes = parseInt(String(item?.episodeCount || "").trim(), 10);
+    if (Number.isFinite(episodes) && episodes > 0) return true;
+    return false;
+  }
+
+  function itemNeedsEpisodeRuntime(item) {
+    if (item?.contentType === "movies") return false;
+    if (item?.runtime) return false;
+    return true;
+  }
+
+  function itemNeedsTitleMetaBackfill(item) {
+    const hasLink =
+      getImdbId(item) ||
+      Boolean(item?.link && window.WatchlistMetadata?.isSupportedLink?.(item.link));
+    if (!hasLink) return false;
+    if (!itemHasTitleMeta(item)) return true;
+    return itemNeedsEpisodeRuntime(item);
+  }
+
+  async function backfillTitleMeta() {
+    if (titleMetaBackfillRunning) return;
+
+    const queue = state.items.filter(itemNeedsTitleMetaBackfill);
+    if (!queue.length) return;
+
+    titleMetaBackfillRunning = true;
+    let updated = 0;
+
+    for (const item of queue) {
+      try {
+        let meta = null;
+        const imdbId = getImdbId(item);
+        if (imdbId) {
+          meta = await window.WatchlistMetadata?.getMetadata(imdbId);
+        } else if (window.WatchlistMetadata?.isSupportedLink?.(item.link)) {
+          meta = await window.WatchlistMetadata.resolveMetadataFromLink(item.link);
+        }
+
+        if (meta) {
+          const before = itemHasTitleMeta(item);
+          const beforeRuntime = item.runtime || "";
+          window.WatchlistMetadata.applyTitleMetaFromDetails(meta, item);
+          if (
+            (!before && itemHasTitleMeta(item)) ||
+            (!beforeRuntime && item.runtime)
+          ) {
+            updated += 1;
+          }
+        }
+      } catch (error) {
+        console.warn("[title-meta] backfill failed:", item.title, error);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 280));
+    }
+
+    titleMetaBackfillRunning = false;
+
+    if (updated > 0) {
+      state.data = itemsToNested(state.items);
+      saveData();
+      render();
+    }
+  }
+
   async function runMetadataBackfill() {
     if (isReleaseSortActive()) {
       await backfillMissingYears();
       await backfillMissingRatings();
+      await backfillTitleMeta();
       return;
     }
     await backfillMissingRatings();
     await backfillMissingYears();
+    await backfillTitleMeta();
   }
 
   function loadCardLayout() {
@@ -2735,13 +2842,21 @@
     const anilistRating = meta?.anilistRating || item.anilistRating || "";
     const plot = meta?.plot || item.summary || parseSummary(item) || "";
     const poster = meta?.poster || item.poster || "";
+    const contentType = meta?.contentType || item.contentType || "";
+    const titleMetaBadges = renderTitleMetaBadges({
+      ageRating: meta?.ageRating || item.ageRating || "",
+      runtime: meta?.runtime || item.runtime || "",
+      seasonCount: meta?.seasonCount || item.seasonCount || null,
+      episodeCount: meta?.episodeCount || item.episodeCount || null,
+      contentType,
+    });
     const metaParts = [
       year,
       rating ? `IMDb ${rating}` : "",
       anilistRating ? `AniList ${formatAnilistDisplay(anilistRating)}` : "",
     ].filter(Boolean);
 
-    return { title, year, rating, plot, poster, metaParts };
+    return { title, year, rating, plot, poster, metaParts, titleMetaBadges };
   }
 
   function renderPreviewMarkup(meta, item) {
@@ -2756,8 +2871,16 @@
         <div>
           <p class="link-preview-popover__title">${escapeHtml(details.title)}</p>
           ${
-            details.metaParts.length
-              ? `<p class="link-preview-popover__meta">${escapeHtml(details.metaParts.join(" · "))}</p>`
+            details.titleMetaBadges || details.metaParts.length
+              ? `<div class="link-preview-popover__meta-row">${
+                  details.titleMetaBadges
+                    ? `<div class="card__meta-badges">${details.titleMetaBadges}</div>`
+                    : ""
+                }${
+                  details.metaParts.length
+                    ? `<p class="link-preview-popover__meta">${escapeHtml(details.metaParts.join(" · "))}</p>`
+                    : ""
+                }</div>`
               : ""
           }
           ${
@@ -2928,9 +3051,14 @@
         meta = await window.WatchlistMetadata?.resolveMetadataFromLink(item.link);
       }
 
-      if (meta?.poster) {
-        item.poster = meta.poster;
-        setCardPoster(card, meta.poster);
+      if (meta) {
+        window.WatchlistMetadata?.applyTitleMetaFromDetails(meta, item);
+        if (meta.poster) {
+          item.poster = meta.poster;
+          setCardPoster(card, meta.poster);
+        } else {
+          markCardPosterBroken(card, item);
+        }
       } else {
         markCardPosterBroken(card, item);
       }
@@ -2947,6 +3075,33 @@
     if (shouldHydratePosters()) {
       hydratePosters();
     }
+  }
+
+  function renderWatchedCheck() {
+    return `<span class="card__watched-check" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>`;
+  }
+
+  function renderTitleMetaBadges(item) {
+    const badges =
+      window.WatchlistMetadata?.buildTitleMetaBadges(item, item.contentType) || [];
+    if (!badges.length) return "";
+    return badges
+      .map(
+        (badge) =>
+          `<span class="badge badge--${badge.kind}">${escapeHtml(badge.label)}</span>`
+      )
+      .join("");
+  }
+
+  function renderCardSection(labelKey, content, modifierClass = "") {
+    const body = String(content || "").trim();
+    if (!body) return "";
+    return `
+      <div class="card__section ${modifierClass}">
+        <span class="card__section-label">${escapeHtml(t(labelKey))}</span>
+        ${body}
+      </div>
+    `;
   }
 
   function renderCard(item) {
@@ -2976,26 +3131,53 @@
     const externalScores = renderExternalRatings(item);
     const yearBadge = renderReleaseYearBadge(item);
     const hasLink = Boolean(item.link);
+    const titleMetaBadges = renderTitleMetaBadges(item);
+    const genreBadges = `${mainGenreBadge}${secondaryBadges}`;
     const titleBlock = `
       <div class="card__top">
+        ${isWatched ? renderWatchedCheck() : ""}
         <h3 class="card__title">
           <span class="text-ltr">${escapeHtml(ltr(item.title))}</span>
           ${altTitle}
         </h3>
       </div>
     `;
-    const badgesBlock = `
-      <div class="card__badges">
-        <div class="card__type-row">
-          <span class="badge badge--${typeBadge.className}">${escapeHtml(typeBadge.label)}</span>
-          ${yearBadge}
-        </div>
-        <div class="card__genre-row">
-          ${mainGenreBadge}
-          ${secondaryBadges}
-        </div>
+    const detailsContent = `
+      <div class="card__info-row">
+        <span class="badge badge--${typeBadge.className}">${escapeHtml(typeBadge.label)}</span>
+        ${yearBadge}
+        ${titleMetaBadges}
       </div>
     `;
+    const cardSections = `
+      <div class="card__sections">
+        ${renderCardSection("card.sectionDetails", detailsContent, "card__section--details")}
+        ${
+          genreBadges
+            ? renderCardSection(
+                "card.sectionGenres",
+                `<div class="card__genre-row">${genreBadges}</div>`,
+                "card__section--genres"
+              )
+            : ""
+        }
+      </div>
+    `;
+    const overlaySections = `
+      <div class="card__sections card__sections--overlay">
+        ${renderCardSection("card.sectionDetails", detailsContent, "card__section--details")}
+        ${
+          genreBadges
+            ? renderCardSection(
+                "card.sectionGenres",
+                `<div class="card__genre-row">${genreBadges}</div>`,
+                "card__section--genres"
+              )
+            : ""
+        }
+      </div>
+    `;
+    const overlayBlock = `${overlaySections}${titleBlock}`;
 
     const posterBlock = hasLink
       ? `<div class="card__media">${
@@ -3004,13 +3186,13 @@
             : item.poster
               ? `<img class="card__poster" src="${escapeHtml(item.poster)}" alt="" loading="lazy" />`
               : posterPlaceholderMarkup(false)
-        }<div class="card__overlay">${badgesBlock}${titleBlock}</div></div>`
+        }<div class="card__overlay">${overlayBlock}</div></div>`
       : "";
 
     const useCardBody = state.cardLayout === "poster" || hasLink;
     const bodyStart = useCardBody ? '<div class="card__body">' : "";
     const bodyEnd = useCardBody ? "</div>" : "";
-    const bodyHeader = `<div class="card__head">${badgesBlock}${titleBlock}</div>`;
+    const bodyHeader = `<div class="card__head">${titleBlock}${cardSections}</div>`;
     const listIds = window.WatchlistAuth?.discoverListIds() || [];
     const canMoveToList = listIds.length > 1;
     const ratingFooter = rated
@@ -3329,6 +3511,10 @@
     const ratingHtml = rating
       ? `<span class="title-search-confirm__rating">${escapeHtml(rating)}</span>`
       : "";
+    const titleMetaBadges = renderTitleMetaBadges(details);
+    const titleMetaHtml = titleMetaBadges
+      ? `<span class="title-search-confirm__meta-badges">${titleMetaBadges}</span>`
+      : "";
     const actors = details.actors?.length
       ? details.actors.slice(0, 4)
       : details.director
@@ -3348,8 +3534,8 @@
       <div class="title-search-confirm__body">
         <h3 class="title-search-confirm__name">${escapeHtml(details.title)}</h3>
         ${
-          yearHtml || ratingHtml || actorsHtml
-            ? `<div class="title-search-confirm__meta">${yearHtml}${ratingHtml}${actorsHtml}</div>`
+          yearHtml || titleMetaHtml || ratingHtml || actorsHtml
+            ? `<div class="title-search-confirm__meta">${yearHtml}${titleMetaHtml}${ratingHtml}${actorsHtml}</div>`
             : ""
         }
         <p class="title-search-confirm__plot">${escapeHtml(details.plot || t("search.noSummary"))}</p>
@@ -3805,6 +3991,7 @@
     if (details.poster) item.poster = details.poster;
     applyRatingsFromDetails(details, item);
     if (details.year) item.year = details.year;
+    window.WatchlistMetadata?.applyTitleMetaFromDetails(details, item);
     item.id = makeId(contentType, genre, item.title);
     stampItemAddedAt(item);
     return item;
@@ -4184,6 +4371,7 @@
 
     const library = window.WatchlistAuth?.getLibrary() || [];
     const currentId = window.WatchlistAuth?.getProfile();
+    const defaultId = window.WatchlistAuth?.getDefaultListId?.();
     const listIds = window.WatchlistAuth?.discoverListIds() || [];
 
     if (!listIds.length) {
@@ -4198,8 +4386,12 @@
         const description = entry?.description || "";
         const titleCount = window.WatchlistAuth.getListTitleCount(listId);
         const isCurrent = listId === currentId;
+        const isDefault = listId === defaultId;
         const badge = isCurrent
           ? `<span class="manage-lists__badge">${escapeHtml(t("manage.signedInNow"))}</span>`
+          : "";
+        const defaultBadge = isDefault
+          ? `<span class="manage-lists__badge manage-lists__badge--default">${escapeHtml(t("manage.defaultList"))}</span>`
           : "";
         const meta = `<span class="manage-lists__meta">${escapeHtml(
           window.WatchlistI18n?.titleCountPhrase?.(titleCount) ?? `${titleCount} titles`
@@ -4207,16 +4399,16 @@
         const about = description
           ? `<span class="manage-lists__about">${escapeHtml(description)}</span>`
           : "";
-        const switchBtn = isCurrent
+        const assignBtn = isDefault
           ? ""
           : `<button
               type="button"
               class="btn btn--ghost btn--sm"
-              data-action="switch-list"
+              data-action="assign-default-list"
               data-list-id="${escapeHtml(listId)}"
-              aria-label="${escapeHtml(t("manage.switchListName", { name: label }))}"
+              aria-label="${escapeHtml(t("manage.assignDefault"))}: ${escapeHtml(label)}"
             >
-              ${escapeHtml(t("manage.switchToList"))}
+              ${escapeHtml(t("manage.assignDefault"))}
             </button>`;
         return `<li class="manage-lists__item"${isCurrent ? ' aria-current="true"' : ""}>
           <div class="manage-lists__info">
@@ -4224,9 +4416,10 @@
             ${about}
             ${meta}
             ${badge}
+            ${defaultBadge}
           </div>
           <div class="manage-lists__actions">
-            ${switchBtn}
+            ${assignBtn}
             <button
               type="button"
               class="btn btn--ghost btn--sm"
@@ -4577,8 +4770,7 @@
           closeCreateListModal();
           openManageListsModal();
           if (editedId === window.WatchlistAuth.getProfile()) {
-            const headerTitle = document.getElementById("headerTitle");
-            if (headerTitle) headerTitle.textContent = name.trim();
+            updateHeaderTitle();
           }
           renderListSwitcher();
           await notifyCloudSyncFailed();
@@ -4590,8 +4782,7 @@
       openManageListsModal();
 
       if (editedId === window.WatchlistAuth.getProfile()) {
-        const headerTitle = document.getElementById("headerTitle");
-        if (headerTitle) headerTitle.textContent = name.trim();
+        updateHeaderTitle();
       }
 
       renderListSwitcher();
@@ -4698,7 +4889,12 @@
     if (isCurrent) {
       const remaining = window.WatchlistAuth.getLibrary();
       if (remaining.length > 0) {
-        window.WatchlistAuth.switchList(remaining[0].listId);
+        const defaultId = window.WatchlistAuth.getDefaultListId();
+        const nextId =
+          (defaultId && remaining.some((e) => e.listId === defaultId)
+            ? defaultId
+            : null) || remaining[0].listId;
+        window.WatchlistAuth.switchList(nextId);
         window.location.reload();
         return;
       }
@@ -4751,6 +4947,14 @@
         item.anilistRating = existing.anilistRating;
       }
       if (existing?.year && !item.year) item.year = existing.year;
+      if (existing?.ageRating && !item.ageRating) item.ageRating = existing.ageRating;
+      if (existing?.runtime && !item.runtime) item.runtime = existing.runtime;
+      if (existing?.seasonCount && !item.seasonCount) {
+        item.seasonCount = existing.seasonCount;
+      }
+      if (existing?.episodeCount && !item.episodeCount) {
+        item.episodeCount = existing.episodeCount;
+      }
       stampItemAddedAt(item, { existing });
     } else {
       stampItemAddedAt(item);
@@ -4765,6 +4969,14 @@
         item.anilistRating = state.manualLinkMeta.anilistRating;
       }
       if (state.manualLinkMeta.year) item.year = state.manualLinkMeta.year;
+      if (state.manualLinkMeta.ageRating) item.ageRating = state.manualLinkMeta.ageRating;
+      if (state.manualLinkMeta.runtime) item.runtime = state.manualLinkMeta.runtime;
+      if (state.manualLinkMeta.seasonCount) {
+        item.seasonCount = state.manualLinkMeta.seasonCount;
+      }
+      if (state.manualLinkMeta.episodeCount) {
+        item.episodeCount = state.manualLinkMeta.episodeCount;
+      }
       item.posterBroken = false;
     }
 
@@ -5020,24 +5232,100 @@
     updateBodyScrollLock();
   }
 
-  function renderListSwitcher() {
-    if (!els.listSwitcher || !els.accountMenuSwitchWrap) return;
+  function closeListTitleDropdown() {
+    if (!els.listTitleDropdownPanel || !els.listTitleDropdownBtn) return;
+    els.listTitleDropdownPanel.hidden = true;
+    els.listTitleDropdownBtn.setAttribute("aria-expanded", "false");
+  }
+
+  function openListTitleDropdown() {
+    if (!els.listTitleDropdownPanel || !els.listTitleDropdownBtn) return;
+    closeAccountMenu();
+    renderListTitleDropdownPanel();
+    els.listTitleDropdownPanel.hidden = false;
+    els.listTitleDropdownBtn.setAttribute("aria-expanded", "true");
+  }
+
+  function toggleListTitleDropdown() {
+    if (!els.listTitleDropdownPanel) return;
+    if (els.listTitleDropdownPanel.hidden) {
+      openListTitleDropdown();
+    } else {
+      closeListTitleDropdown();
+    }
+  }
+
+  function renderListTitleDropdownPanel() {
+    if (!els.listTitleDropdownPanel) return;
 
     const library = window.WatchlistAuth?.getLibrary() || [];
     const currentId = window.WatchlistAuth?.getProfile();
+    const sorted = [...library].sort((a, b) => {
+      if (a.listId === currentId) return -1;
+      if (b.listId === currentId) return 1;
+      return 0;
+    });
+    const checkIcon =
+      '<svg class="list-title-dropdown__check" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 
-    if (library.length <= 1) {
-      els.accountMenuSwitchWrap.hidden = true;
+    els.listTitleDropdownPanel.innerHTML = sorted
+      .map((entry) => {
+        const isCurrent = entry.listId === currentId;
+        const name = escapeHtml(entry.name || entry.label || t("list.myList"));
+        return `<button type="button" class="list-title-dropdown__item${
+          isCurrent ? " list-title-dropdown__item--active" : ""
+        }" role="option" data-list-id="${escapeHtml(entry.listId)}" aria-selected="${isCurrent}"><span>${name}</span>${
+          isCurrent ? checkIcon : ""
+        }</button>`;
+      })
+      .join("");
+  }
+
+  function renderListTitleDropdown() {
+    const name = window.WatchlistAuth?.getListLabel() || t("list.myList");
+    const library = window.WatchlistAuth?.getLibrary() || [];
+    const hasMultiple = library.length > 1;
+
+    if (els.headerTitle) {
+      els.headerTitle.hidden = hasMultiple;
+      if (!hasMultiple) els.headerTitle.textContent = name;
+    }
+
+    if (els.listTitleDropdown) {
+      els.listTitleDropdown.hidden = !hasMultiple;
+    }
+
+    if (els.listTitleDropdownLabel) {
+      els.listTitleDropdownLabel.textContent = name;
+    }
+
+    if (!hasMultiple) {
+      closeListTitleDropdown();
       return;
     }
 
-    els.accountMenuSwitchWrap.hidden = false;
-    els.listSwitcher.innerHTML = library
-      .map((entry) => {
-        const selected = entry.listId === currentId ? " selected" : "";
-        return `<option value="${escapeHtml(entry.listId)}"${selected}>${escapeHtml(entry.name || entry.label || t("list.myList"))}</option>`;
-      })
-      .join("");
+    renderListTitleDropdownPanel();
+  }
+
+  function renderListSwitcher() {
+    const library = window.WatchlistAuth?.getLibrary() || [];
+    const currentId = window.WatchlistAuth?.getProfile();
+
+    // List switching lives in the header title dropdown (matches Flutter app).
+    if (els.accountMenuSwitchWrap) {
+      els.accountMenuSwitchWrap.hidden = true;
+    }
+
+    if (els.listSwitcher && library.length > 1) {
+      els.listSwitcher.innerHTML = library
+        .map((entry) => {
+          const selected = entry.listId === currentId ? " selected" : "";
+          return `<option value="${escapeHtml(entry.listId)}"${selected}>${escapeHtml(entry.name || entry.label || t("list.myList"))}</option>`;
+        })
+        .join("");
+    }
+
+    renderListTitleDropdown();
   }
 
   function uniqueImportedListName(baseName) {
@@ -5187,12 +5475,9 @@
   }
 
   function updateHeaderTitle() {
-    const headerTitle = document.getElementById("headerTitle");
     const name = window.WatchlistAuth?.getListLabel() || t("list.myList");
-    if (headerTitle) {
-      headerTitle.textContent = name;
-    }
     document.title = name;
+    renderListTitleDropdown();
   }
 
   async function syncCurrentListToCloud() {
@@ -5647,6 +5932,24 @@
       toggleAccountMenu();
     });
 
+    els.listTitleDropdownBtn?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleListTitleDropdown();
+    });
+
+    els.listTitleDropdownPanel?.addEventListener("click", (event) => {
+      const item = event.target.closest("[data-list-id]");
+      if (!item) return;
+      const listId = item.dataset.listId;
+      if (!listId || listId === window.WatchlistAuth?.getProfile()) {
+        closeListTitleDropdown();
+        return;
+      }
+      closeListTitleDropdown();
+      window.WatchlistAuth.switchList(listId);
+      window.location.reload();
+    });
+
     els.accountMenuPanel?.addEventListener("click", async (event) => {
       const action = event.target.closest("[data-action]")?.dataset.action;
       if (!action) return;
@@ -5693,6 +5996,12 @@
       if (!els.accountMenuPanel || els.accountMenuPanel.hidden) return;
       if (event.target.closest("#accountMenu")) return;
       closeAccountMenu();
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!els.listTitleDropdownPanel || els.listTitleDropdownPanel.hidden) return;
+      if (event.target.closest("#listTitleDropdown")) return;
+      closeListTitleDropdown();
     });
     els.shareModal?.addEventListener("click", async (event) => {
       const action = event.target.closest("[data-action]")?.dataset.action;
@@ -5746,6 +6055,15 @@
       if (action === "edit-list") {
         const listId = event.target.closest("[data-list-id]")?.dataset.listId;
         openEditListModal(listId);
+        return;
+      }
+
+      if (action === "assign-default-list") {
+        const listId = event.target.closest("[data-list-id]")?.dataset.listId;
+        if (listId) {
+          window.WatchlistAuth.assignDefaultList(listId);
+          renderManageLists();
+        }
         return;
       }
 
@@ -6090,6 +6408,10 @@
       if (event.key !== "Escape") return;
       if (!els.accountMenuPanel?.hidden) {
         closeAccountMenu();
+        return;
+      }
+      if (!els.listTitleDropdownPanel?.hidden) {
+        closeListTitleDropdown();
         return;
       }
       if (!els.createListModal?.hidden) {

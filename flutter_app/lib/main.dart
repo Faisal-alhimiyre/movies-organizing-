@@ -48,7 +48,14 @@ class _BootstrapAppState extends State<_BootstrapApp> {
     try {
       const config = AppConfig.fromEnvironment;
       await HiveBoxes.init();
-      await bootstrapSupabase(config);
+      await bootstrapSupabase(config).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          debugPrint(
+            'Supabase init timed out after 15s — continuing in local mode.',
+          );
+        },
+      );
       if (mounted) setState(() => _ready = true);
     } catch (error, stackTrace) {
       debugPrint('Startup failed: $error\n$stackTrace');

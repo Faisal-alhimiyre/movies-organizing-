@@ -65,10 +65,17 @@ String? mapAnilistGenre(String genre) {
 
 List<String> parseGenreList(dynamic raw) {
   if (raw is List) {
-    return raw.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+    return raw
+        .map((e) => e.toString().trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
   }
   if (raw is String) {
-    return raw.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    return raw
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
   }
   return const [];
 }

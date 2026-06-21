@@ -67,7 +67,10 @@ body {
   flex: 1;
 }
 
-.header__title {
+html[data-theme="dark"] .header__title,
+html:not([data-theme]) .header__title,
+html[data-theme="dark"] .list-title-dropdown__trigger,
+html:not([data-theme]) .list-title-dropdown__trigger {
   margin: 0;
   font-weight: 700;
   font-style: normal;
@@ -633,6 +636,13 @@ html:not([data-theme]) .select option:hover {
 .card__lead {
   color: #0095f6;
   font-size: 0.8rem;
+}
+
+.card__facts {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
 }
 
 .card__summary {

@@ -9,7 +9,8 @@ Future<void> showImportShareSheet(
   required ShareSnapshotPayload payload,
   required String currentListName,
   required int currentCount,
-  required Future<void> Function(bool includeWatched) onImport,
+  required Future<void> Function() onNewList,
+  required Future<void> Function(bool includeWatched) onMerge,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -30,6 +31,8 @@ Future<void> showImportShareSheet(
               count: titleCount,
             );
       final hint = currentCount > 0 ? l10n.importHint : l10n.importHintEmpty;
+      final mergeLabel =
+          currentCount == 0 ? l10n.importAddToList : l10n.importMerge;
 
       return SafeArea(
         child: Padding(
@@ -57,17 +60,23 @@ Future<void> showImportShareSheet(
               FilledButton(
                 onPressed: () async {
                   Navigator.pop(context);
-                  await onImport(false);
+                  await onNewList();
                 },
-                child: Text(
-                  currentCount == 0 ? l10n.importAddToList : l10n.importMerge,
-                ),
+                child: Text(l10n.importNewList),
               ),
               const SizedBox(height: 8),
               OutlinedButton(
                 onPressed: () async {
                   Navigator.pop(context);
-                  await onImport(true);
+                  await onMerge(false);
+                },
+                child: Text(mergeLabel),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  await onMerge(true);
                 },
                 child: Text(l10n.importMergeWithWatch),
               ),

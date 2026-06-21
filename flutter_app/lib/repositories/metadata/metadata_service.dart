@@ -10,11 +10,12 @@ import '../../core/storage/hive_boxes.dart';
 import '../../models/metadata_detail.dart';
 import '../../models/title_search_result.dart';
 import 'genre_mapper.dart';
+import '../../core/utils/title_meta_format.dart';
 
 const _anilistApi = 'https://graphql.anilist.co';
 const _tmdbImage = 'https://image.tmdb.org/t/p/w500';
 const _tmdbImageSm = 'https://image.tmdb.org/t/p/w92';
-const _cachePrefix = 'metadata:';
+const _cachePrefix = 'metadata:v4:';
 
 final metadataServiceProvider = Provider<MetadataService>((ref) {
   return MetadataService(
@@ -99,30 +100,48 @@ class MetadataService {
     return null;
   }
 
-  Future<MetadataDetail?> resolveMetadataFromLink(String url) async {
+  Future<MetadataDetail?> resolveMetadataFromLink(
+    String url, {
+    bool requirePoster = false,
+    bool forceRefresh = false,
+  }) async {
     final value = url.trim();
     if (value.isEmpty) return null;
 
     final imdbId = extractImdbId(value);
     if (imdbId != null) {
-      final data = await getMetadata(imdbId);
+      final data = await getMetadata(
+        imdbId,
+        requirePoster: requirePoster,
+        forceRefresh: forceRefresh,
+      );
       if (data != null) return data;
     }
 
     final anilistId = parseAnilistId(value);
-    if (anilistId != null) return fetchAnilistById(anilistId);
+    if (anilistId != null) {
+      return fetchAnilistById(anilistId, requirePoster: requirePoster);
+    }
 
     final malId = parseMalId(value);
-    if (malId != null) return fetchAnilistByMalId(malId);
+    if (malId != null) {
+      return fetchAnilistByMalId(malId, requirePoster: requirePoster);
+    }
 
     return null;
   }
 
-  Future<MetadataDetail?> getMetadata(String imdbId) async {
+  Future<MetadataDetail?> getMetadata(
+    String imdbId, {
+    bool requirePoster = false,
+    bool forceRefresh = false,
+  }) async {
     final id = imdbId.toLowerCase();
     final cacheKey = 'omdb:$id';
-    final cached = _readCached(cacheKey);
-    if (cached != null) return cached;
+    if (!forceRefresh) {
+      final cached = _readCached(cacheKey, requirePoster: requirePoster);
+      if (cached != null && _cachedHasTitleMeta(cached)) return cached;
+    }
 
     var data = await _fetchFromOmdb(id);
     if (data == null && _config.hasTmdbKey) {
@@ -132,9 +151,12 @@ class MetadataService {
     return data;
   }
 
-  Future<MetadataDetail?> fetchAnilistById(int anilistId) async {
+  Future<MetadataDetail?> fetchAnilistById(
+    int anilistId, {
+    bool requirePoster = false,
+  }) async {
     final cacheKey = 'anilist:$anilistId';
-    final cached = _readCached(cacheKey);
+    final cached = _readCached(cacheKey, requirePoster: requirePoster);
     if (cached != null) return cached;
 
     final data = await _anilistQuery(
@@ -149,6 +171,9 @@ class MetadataService {
           description
           genres
           coverImage { large }
+          episodes
+          duration
+          isAdult
           characters(perPage: 6, sort: ROLE) {
             nodes {
               name { full }
@@ -161,14 +186,18 @@ class MetadataService {
       {'id': anilistId},
     );
 
-    final payload = _normalizeAnilistMedia(data?['Media'] as Map<String, dynamic>?);
+    final payload =
+        _normalizeAnilistMedia(data?['Media'] as Map<String, dynamic>?);
     if (payload != null) _writeCache(cacheKey, payload);
     return payload;
   }
 
-  Future<MetadataDetail?> fetchAnilistByMalId(int malId) async {
+  Future<MetadataDetail?> fetchAnilistByMalId(
+    int malId, {
+    bool requirePoster = false,
+  }) async {
     final cacheKey = 'mal:$malId';
-    final cached = _readCached(cacheKey);
+    final cached = _readCached(cacheKey, requirePoster: requirePoster);
     if (cached != null) return cached;
 
     final data = await _anilistQuery(
@@ -183,6 +212,9 @@ class MetadataService {
           description
           genres
           coverImage { large }
+          episodes
+          duration
+          isAdult
           characters(perPage: 6, sort: ROLE) {
             nodes {
               name { full }
@@ -195,7 +227,8 @@ class MetadataService {
       {'malId': malId},
     );
 
-    final payload = _normalizeAnilistMedia(data?['Media'] as Map<String, dynamic>?);
+    final payload =
+        _normalizeAnilistMedia(data?['Media'] as Map<String, dynamic>?);
     if (payload != null) _writeCache(cacheKey, payload);
     return payload;
   }
@@ -206,7 +239,9 @@ class MetadataService {
     if (cached != null) return cached;
 
     final json = await _fetchTmdb('$mediaType/$tmdbId', {
-      'append_to_response': 'credits',
+      'append_to_response': mediaType == 'tv'
+          ? 'credits,content_ratings'
+          : 'credits,release_dates',
     });
     final payload = _normalizeTmdbDetail(json, mediaType);
     if (payload != null) _writeCache(cacheKey, payload);
@@ -218,10 +253,29 @@ class MetadataService {
     return match?.group(0)?.toLowerCase();
   }
 
+  static bool isAnilistLink(String url) => parseAnilistId(url) != null;
+
+  static bool isMalLink(String url) => parseMalId(url) != null;
+
+  static bool isSupportedLink(String url) {
+    final value = url.trim();
+    if (value.isEmpty) return false;
+    return extractImdbId(value) != null ||
+        isAnilistLink(value) ||
+        isMalLink(value);
+  }
+
+  static String? normalizeLink(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return null;
+    return trimmed.startsWith('http') ? trimmed : 'https://$trimmed';
+  }
+
   static int? parseAnilistId(String url) {
     try {
       final uri = Uri.parse(url);
-      if (!uri.host.replaceFirst('www.', '').contains('anilist.co')) return null;
+      if (!uri.host.replaceFirst('www.', '').contains('anilist.co'))
+        return null;
       final parts = uri.pathSegments.where((p) => p.isNotEmpty).toList();
       if (parts.isNotEmpty && parts[0] == 'anime' && parts.length > 1) {
         return int.tryParse(parts[1]);
@@ -242,6 +296,98 @@ class MetadataService {
       }
     } catch (_) {}
     return null;
+  }
+
+  /// Lightweight AniList title match for year/rating backfill.
+  Future<({String year, String anilistRating})?> fetchAnilistMatchByTitle(
+    String title,
+    int? year,
+  ) async {
+    final query = title.trim();
+    if (query.length < 2) return null;
+
+    final data = await _anilistQuery(
+      r'''
+      query ($search: String) {
+        Page(page: 1, perPage: 8) {
+          media(search: $search, type: ANIME, sort: SEARCH_MATCH) {
+            id
+            title { english romaji }
+            averageScore
+            startDate { year }
+          }
+        }
+      }
+      ''',
+      {'search': query},
+    );
+
+    final media = data?['Page']?['media'] as List? ?? [];
+    if (media.isEmpty) return null;
+
+    final results = media.map((raw) {
+      final entry = raw as Map<String, dynamic>;
+      final titles = entry['title'] as Map<String, dynamic>?;
+      return (
+        title: titles?['english']?.toString() ??
+            titles?['romaji']?.toString() ??
+            '',
+        year: (entry['startDate'] as Map?)?['year']?.toString() ?? '',
+        averageScore: entry['averageScore'],
+      );
+    }).toList();
+
+    var match = _pickBestSearchMatch(results, query);
+    if (year != null) {
+      final yearStr = year.toString();
+      final yearMatch =
+          results.where((entry) => entry.year == yearStr).firstOrNull;
+      if (yearMatch != null) match = yearMatch;
+    }
+
+    if (match == null) return null;
+
+    final rating = match.averageScore;
+    return (
+      year: match.year,
+      anilistRating: rating == null ? '' : rating.toString(),
+    );
+  }
+
+  static ({String title, String year, dynamic averageScore})?
+      _pickBestSearchMatch(
+    List<({String title, String year, dynamic averageScore})> results,
+    String query,
+  ) {
+    if (results.isEmpty) return null;
+    final key = _normalizeTitleKey(query);
+    if (key.isEmpty) return results.first;
+
+    ({String title, String year, dynamic averageScore})? best = results.first;
+    var bestScore = -1;
+
+    for (final result in results) {
+      final titleKey = _normalizeTitleKey(result.title);
+      var score = 0;
+      if (titleKey == key) {
+        score = 100;
+      } else if (titleKey.contains(key) || key.contains(titleKey)) {
+        score = 50;
+      } else {
+        final words = key.split(' ').where((word) => word.length > 2);
+        score = words.where((word) => titleKey.contains(word)).length * 10;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = result;
+      }
+    }
+
+    return best;
+  }
+
+  static String _normalizeTitleKey(String title) {
+    return title.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
   }
 
   Future<List<TitleSearchResult>> _searchOmdb(
@@ -278,7 +424,8 @@ class MetadataService {
     final results = <TitleSearchResult>[];
 
     if (type == 'all' || type == 'movie') {
-      final movies = await _fetchTmdb('search/movie', {'query': query, 'page': '$page'});
+      final movies =
+          await _fetchTmdb('search/movie', {'query': query, 'page': '$page'});
       for (final item in movies?['results'] as List? ?? []) {
         final map = item as Map<String, dynamic>;
         results.add(
@@ -300,7 +447,8 @@ class MetadataService {
     }
 
     if (type == 'all' || type == 'series') {
-      final shows = await _fetchTmdb('search/tv', {'query': query, 'page': '$page'});
+      final shows =
+          await _fetchTmdb('search/tv', {'query': query, 'page': '$page'});
       for (final item in shows?['results'] as List? ?? []) {
         final map = item as Map<String, dynamic>;
         results.add(
@@ -372,10 +520,12 @@ class MetadataService {
   }
 
   Future<MetadataDetail?> _fetchTmdbByImdbId(String imdbId) async {
-    final json = await _fetchTmdb('find/$imdbId', {'external_source': 'imdb_id'});
+    final json =
+        await _fetchTmdb('find/$imdbId', {'external_source': 'imdb_id'});
     if (json == null) return null;
 
-    final movie = (json['movie_results'] as List?)?.cast<Map<String, dynamic>>();
+    final movie =
+        (json['movie_results'] as List?)?.cast<Map<String, dynamic>>();
     if (movie != null && movie.isNotEmpty) {
       final payload = await fetchTmdbDetails('movie', movie.first['id'] as int);
       if (payload == null) return null;
@@ -392,6 +542,9 @@ class MetadataService {
         year: payload.year,
         plot: payload.plot,
         runtime: payload.runtime,
+        ageRating: payload.ageRating,
+        seasonCount: payload.seasonCount,
+        episodeCount: payload.episodeCount,
         director: payload.director,
         actors: payload.actors,
         genres: payload.genres,
@@ -416,6 +569,9 @@ class MetadataService {
         year: payload.year,
         plot: payload.plot,
         runtime: payload.runtime,
+        ageRating: payload.ageRating,
+        seasonCount: payload.seasonCount,
+        episodeCount: payload.episodeCount,
         director: payload.director,
         actors: payload.actors,
         genres: payload.genres,
@@ -452,7 +608,8 @@ class MetadataService {
         body: jsonEncode({'query': query, 'variables': variables}),
       );
       final json = jsonDecode(response.body) as Map<String, dynamic>;
-      if (response.statusCode != 200 || (json['errors'] as List?)?.isNotEmpty == true) {
+      if (response.statusCode != 200 ||
+          (json['errors'] as List?)?.isNotEmpty == true) {
         return null;
       }
       return json['data'] as Map<String, dynamic>?;
@@ -494,6 +651,11 @@ class MetadataService {
       plot: _na(json['Plot']),
       poster: _na(json['Poster']),
       rating: _na(json['imdbRating']),
+      runtime: _na(json['Runtime']),
+      ageRating: _na(json['Rated']),
+      seasonCount: json['Type']?.toString() == 'series'
+          ? parsePositiveCount(json['totalSeasons'])
+          : null,
       actors: actors,
       genres: genres,
       director: director != null && director != 'N/A' ? director : '',
@@ -509,7 +671,9 @@ class MetadataService {
     if (item == null) return null;
 
     final title = item['title']?.toString() ?? item['name']?.toString() ?? '';
-    final date = item['release_date']?.toString() ?? item['first_air_date']?.toString() ?? '';
+    final date = item['release_date']?.toString() ??
+        item['first_air_date']?.toString() ??
+        '';
     final year = date.length >= 4 ? date.substring(0, 4) : '';
     final genres = (item['genres'] as List?)
             ?.map((g) => (g as Map)['name']?.toString() ?? '')
@@ -535,12 +699,22 @@ class MetadataService {
       title: title,
       year: year,
       plot: item['overview']?.toString() ?? '',
-      poster: item['poster_path'] != null ? '$_tmdbImage${item['poster_path']}' : '',
+      poster: item['poster_path'] != null
+          ? '$_tmdbImage${item['poster_path']}'
+          : '',
       rating: rating,
       actors: actors,
       genres: genres,
       mediaType: mediaType == 'tv' ? 'series' : 'movie',
       omdbType: mediaType == 'tv' ? 'series' : 'movie',
+      ageRating: _pickTmdbAgeRating(item, mediaType),
+      runtime: _pickTmdbRuntime(item, mediaType),
+      seasonCount: mediaType == 'tv'
+          ? parsePositiveCount(item['number_of_seasons'])
+          : null,
+      episodeCount: mediaType == 'tv'
+          ? parsePositiveCount(item['number_of_episodes'])
+          : null,
     );
   }
 
@@ -568,7 +742,8 @@ class MetadataService {
     }
 
     final format = media['format']?.toString().toUpperCase() ?? '';
-    final mediaType = format == 'MOVIE' || format == 'ONE_SHOT' ? 'movie' : 'anime';
+    final mediaType =
+        format == 'MOVIE' || format == 'ONE_SHOT' ? 'movie' : 'anime';
     final score = media['averageScore'];
 
     return _buildDetailPayload(
@@ -581,8 +756,12 @@ class MetadataService {
       poster: media['coverImage']?['large']?.toString() ?? '',
       anilistRating: score != null ? score.toString() : '',
       actors: leads,
-      genres: (media['genres'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+      genres: (media['genres'] as List?)?.map((e) => e.toString()).toList() ??
+          const [],
       mediaType: mediaType,
+      ageRating: media['isAdult'] == true ? '18+' : '',
+      runtime: formatRuntimeMinutes(parsePositiveCount(media['duration'])),
+      episodeCount: parsePositiveCount(media['episodes']),
     );
   }
 
@@ -599,6 +778,10 @@ class MetadataService {
     String poster = '',
     String rating = '',
     String anilistRating = '',
+    String runtime = '',
+    String ageRating = '',
+    int? seasonCount,
+    int? episodeCount,
     List<String> actors = const [],
     List<String> genres = const [],
     String director = '',
@@ -606,7 +789,8 @@ class MetadataService {
     String omdbType = '',
   }) {
     final genreList = parseGenreList(genres);
-    final contentType = inferContentType(mediaType.isNotEmpty ? mediaType : omdbType, genreList);
+    final contentType = inferContentType(
+        mediaType.isNotEmpty ? mediaType : omdbType, genreList);
     final resolvedLink = link.isNotEmpty
         ? link
         : defaultLinkForDetails(
@@ -632,6 +816,10 @@ class MetadataService {
       anilistRating: anilistRating,
       year: year,
       plot: plot,
+      runtime: runtime,
+      ageRating: ageRating,
+      seasonCount: seasonCount,
+      episodeCount: episodeCount,
       director: director,
       actors: actors,
       genres: genreList,
@@ -639,7 +827,8 @@ class MetadataService {
     );
   }
 
-  List<TitleSearchResult> _mergeSearchResults(List<List<TitleSearchResult>> lists) {
+  List<TitleSearchResult> _mergeSearchResults(
+      List<List<TitleSearchResult>> lists) {
     final merged = <TitleSearchResult>[];
     final seen = <String>{};
 
@@ -669,12 +858,20 @@ class MetadataService {
     return merged;
   }
 
-  MetadataDetail? _readCached(String key) {
+  MetadataDetail? _readCached(String key, {bool requirePoster = false}) {
     final raw = _cache.get('$_cachePrefix$key');
     if (raw is Map) {
-      return MetadataDetail.fromCacheJson(Map<String, dynamic>.from(raw));
+      final detail =
+          MetadataDetail.fromCacheJson(Map<String, dynamic>.from(raw));
+      if (requirePoster && !_hasUsablePoster(detail)) return null;
+      return detail;
     }
     return null;
+  }
+
+  static bool _hasUsablePoster(MetadataDetail detail) {
+    final poster = detail.poster.trim();
+    return poster.isNotEmpty && poster.startsWith('http');
   }
 
   void _writeCache(String key, MetadataDetail detail) {
@@ -688,7 +885,19 @@ class MetadataService {
 
   static List<String> _parseActorList(String? raw) {
     if (raw == null || raw.isEmpty || raw == 'N/A') return const [];
-    return raw.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    return raw
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+  }
+
+  static bool _cachedHasTitleMeta(MetadataDetail detail) {
+    if (detail.ageRating.trim().isNotEmpty) return true;
+    if (detail.runtime.trim().isNotEmpty) return true;
+    if (detail.seasonCount != null && detail.seasonCount! > 0) return true;
+    if (detail.episodeCount != null && detail.episodeCount! > 0) return true;
+    return false;
   }
 
   static String _stripHtml(String html) {
@@ -699,5 +908,47 @@ class MetadataService {
         .replaceAll('&amp;', '&')
         .replaceAll('&quot;', '"')
         .trim();
+  }
+
+  static String _pickTmdbAgeRating(Map<String, dynamic> item, String mediaType) {
+    if (mediaType == 'tv') {
+      final results = item['content_ratings']?['results'] as List? ?? [];
+      for (final raw in results) {
+        final entry = raw as Map<String, dynamic>;
+        if (entry['iso_3166_1']?.toString() != 'US') continue;
+        final rating = entry['rating']?.toString().trim() ?? '';
+        if (rating.isNotEmpty && rating != 'N/A') return rating;
+      }
+      return '';
+    }
+
+    final results = item['release_dates']?['results'] as List? ?? [];
+    for (final raw in results) {
+      final entry = raw as Map<String, dynamic>;
+      if (entry['iso_3166_1']?.toString() != 'US') continue;
+      final dates = entry['release_dates'] as List? ?? [];
+      for (final dateRaw in dates) {
+        final date = dateRaw as Map<String, dynamic>;
+        final certification = date['certification']?.toString().trim() ?? '';
+        if (certification.isNotEmpty && certification != 'N/A') {
+          return certification;
+        }
+      }
+    }
+    return '';
+  }
+
+  static String _pickTmdbRuntime(Map<String, dynamic> item, String mediaType) {
+    if (mediaType == 'tv') {
+      final times = (item['episode_run_time'] as List? ?? [])
+          .map((value) => parsePositiveCount(value))
+          .whereType<int>()
+          .toList();
+      if (times.isEmpty) return '';
+      final avg =
+          (times.reduce((sum, value) => sum + value) / times.length).round();
+      return formatRuntimeMinutes(avg);
+    }
+    return formatRuntimeMinutes(parsePositiveCount(item['runtime']));
   }
 }

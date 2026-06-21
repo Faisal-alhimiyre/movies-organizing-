@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/theme/theme_extensions.dart';
 import '../../../../l10n/l10n.dart';
 import '../../../../models/watchlist_item.dart';
 
@@ -22,62 +23,137 @@ class WatchlistStatsBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final syncChip = _syncChip(theme);
+    final tc = Theme.of(context).extension<AppTypeColors>();
+    final syncLabel = _syncLabel();
 
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        _statChip(theme, l10n.statsTotal, '$total'),
-        _statChip(theme, l10n.statsWatched, '$watchedCount'),
+        _StatChip(value: '$total', label: l10n.statsTotal),
+        _StatChip(
+          value: '$watchedCount',
+          label: l10n.statsWatched,
+          valueColor: tc?.watched,
+        ),
         if (!cloudConfigured)
-          Chip(
-            avatar: const Icon(Icons.storage_outlined, size: 18),
-            label: Text(l10n.syncLocal),
+          _SyncChip(
+            icon: Icons.storage_outlined,
+            label: l10n.syncLocal,
+            theme: theme,
           )
-        else if (syncChip != null)
-          syncChip,
+        else if (syncLabel != null)
+          _SyncChip(
+            icon: syncStatus == SyncDisplayStatus.pending
+                ? Icons.cloud_upload_outlined
+                : Icons.cloud_off_outlined,
+            label: syncLabel,
+            theme: theme,
+            isError: syncStatus == SyncDisplayStatus.error ||
+                syncStatus == SyncDisplayStatus.offline,
+          ),
       ],
     );
   }
 
-  Widget _statChip(ThemeData theme, String label, String value) {
-    return Chip(
-      label: Text.rich(
-        TextSpan(
+  String? _syncLabel() => switch (syncStatus) {
+        SyncDisplayStatus.pending => l10n.syncSaving,
+        SyncDisplayStatus.error => l10n.syncFailed,
+        SyncDisplayStatus.offline => l10n.syncOffline,
+        SyncDisplayStatus.saved => null,
+        SyncDisplayStatus.local => null,
+      };
+}
+
+/// Premium glass-style stat chip — matches CSS `.header__stat-chip`.
+class _StatChip extends StatelessWidget {
+  const _StatChip({
+    required this.value,
+    required this.label,
+    this.valueColor,
+  });
+
+  final String value;
+  final String label;
+  final Color? valueColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final onSurface = theme.colorScheme.onSurface;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            onSurface.withValues(alpha: 0.04),
+            onSurface.withValues(alpha: 0.07),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: onSurface.withValues(alpha: 0.1),
+          width: 1,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            TextSpan(
-              text: value,
+            Text(
+              value,
               style: theme.textTheme.labelLarge?.copyWith(
                 fontWeight: FontWeight.w700,
+                color: valueColor ?? onSurface,
               ),
             ),
-            TextSpan(text: ' $label'),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: onSurface.withValues(alpha: 0.6),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget? _syncChip(ThemeData theme) {
-    final label = switch (syncStatus) {
-      SyncDisplayStatus.pending => l10n.syncSaving,
-      SyncDisplayStatus.error => l10n.syncFailed,
-      SyncDisplayStatus.offline => l10n.syncOffline,
-      SyncDisplayStatus.saved => null,
-      SyncDisplayStatus.local => null,
-    };
-    if (label == null) return null;
+class _SyncChip extends StatelessWidget {
+  const _SyncChip({
+    required this.icon,
+    required this.label,
+    required this.theme,
+    this.isError = false,
+  });
 
-    return Chip(
-      avatar: Icon(
-        syncStatus == SyncDisplayStatus.pending
-            ? Icons.cloud_upload_outlined
-            : Icons.cloud_off_outlined,
-        size: 18,
-      ),
-      label: Text(label),
+  final IconData icon;
+  final String label;
+  final ThemeData theme;
+  final bool isError;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isError
+        ? theme.colorScheme.error
+        : theme.colorScheme.onSurface.withValues(alpha: 0.6);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(color: color),
+        ),
+      ],
     );
   }
 }

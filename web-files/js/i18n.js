@@ -56,6 +56,9 @@
       "filter.searchPlaceholder": "Search titles or actors…",
       "filter.allGenres": "All genres",
       "filter.addGenre": "Add genre…",
+      "filter.labelGenre": "Genre",
+      "filter.labelWatched": "Status",
+      "filter.labelSort": "Sort",
       "filter.all": "All",
       "filter.watched": "Watched",
       "filter.unwatched": "Not watched",
@@ -70,7 +73,7 @@
       "filter.ratingOptionAdded": "Recently added",
       "filter.ratingOptionRelease": "Release date",
       "filter.ratingOptionImdb": "IMDb ratings",
-      "filter.ratingOptionAnilist": "AniList rating",
+      "filter.ratingOptionAnilist": "AniList ratings",
       "filter.ratingOptionPersonal": "My ratings",
       "filter.ratingOptionAddedNewest": "Recently added",
       "filter.ratingOptionAddedOldest": "Oldest first",
@@ -182,6 +185,9 @@
       "card.actions": "Title actions",
       "card.openLink": "Open link",
       "card.releaseYear": "Release year",
+      "card.sectionDetails": "Details",
+      "card.sectionTitle": "Title",
+      "card.sectionGenres": "Genres",
       "search.type.all": "All",
       "search.type.movie": "Movies",
       "search.type.series": "TV Series",
@@ -273,7 +279,8 @@
       "manage.create": "Create a new list",
       "manage.unnamedList": "Unnamed list",
       "manage.signedInNow": "Signed in now",
-      "manage.switchToList": "Open list",
+      "manage.defaultList": "Default list",
+      "manage.assignDefault": "Assign as default",
       "manage.editListName": "Edit \"{name}\"",
       "manage.deleteListName": "Delete \"{name}\"",
       "manage.switchListName": "Open \"{name}\"",
@@ -553,6 +560,9 @@
       "filter.searchPlaceholder": "ابحث في العناوين أو أسماء الممثلين…",
       "filter.allGenres": "كل التصنيفات",
       "filter.addGenre": "أضف تصنيفاً…",
+      "filter.labelGenre": "التصنيف",
+      "filter.labelWatched": "الحالة",
+      "filter.labelSort": "الترتيب",
       "filter.all": "الكل",
       "filter.watched": "تمت المشاهدة",
       "filter.unwatched": "لم تُشاهد",
@@ -567,7 +577,7 @@
       "filter.ratingOptionAdded": "المضاف مؤخراً",
       "filter.ratingOptionRelease": "تاريخ الإصدار",
       "filter.ratingOptionImdb": "تقييمات IMDb",
-      "filter.ratingOptionAnilist": "تقييم AniList",
+      "filter.ratingOptionAnilist": "تقييمات AniList",
       "filter.ratingOptionPersonal": "تقييماتي",
       "filter.ratingOptionAddedNewest": "المضاف مؤخراً",
       "filter.ratingOptionAddedOldest": "الأقدم أولاً",
@@ -679,6 +689,9 @@
       "card.actions": "إجراءات العنوان",
       "card.openLink": "فتح الرابط",
       "card.releaseYear": "سنة الإصدار",
+      "card.sectionDetails": "التفاصيل",
+      "card.sectionTitle": "العنوان",
+      "card.sectionGenres": "الأنواع",
       "search.type.all": "الكل",
       "search.type.movie": "أفلام",
       "search.type.series": "مسلسلات",
@@ -769,7 +782,8 @@
       "manage.create": "إنشاء قائمة جديدة",
       "manage.unnamedList": "قائمة بدون اسم",
       "manage.signedInNow": "مسجل الدخول الآن",
-      "manage.switchToList": "فتح القائمة",
+      "manage.defaultList": "القائمة الافتراضية",
+      "manage.assignDefault": "تعيين كقائمة افتراضية",
       "manage.editListName": "تعديل «{name}»",
       "manage.deleteListName": "حذف «{name}»",
       "manage.switchListName": "فتح «{name}»",
@@ -1338,12 +1352,16 @@
       btn.classList.toggle("account-menu__lang-btn--active", btn.dataset.lang === getLang());
     });
 
-    const headerTitle = document.getElementById("headerTitle");
     const listName = window.WatchlistAuth?.getListLabel?.();
-    if (headerTitle && listName) {
-      headerTitle.textContent = listName;
+    const headerTitle = document.getElementById("headerTitle");
+    const listTitleDropdownLabel = document.getElementById("listTitleDropdownLabel");
+    if (listName) {
+      if (headerTitle && !headerTitle.hidden) headerTitle.textContent = listName;
+      if (listTitleDropdownLabel) listTitleDropdownLabel.textContent = listName;
+      document.title = listName;
+    } else {
+      document.title = t("app.title");
     }
-    document.title = listName || t("app.title");
     const meta = document.querySelector('meta[name="description"]');
     if (meta) meta.content = t("app.description");
   }

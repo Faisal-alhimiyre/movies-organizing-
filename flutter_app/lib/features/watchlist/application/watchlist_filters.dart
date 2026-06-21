@@ -15,8 +15,10 @@ class WatchlistFilterState {
   final String search;
   final List<String> selectedGenres;
   final WatchedFilter watchedFilter;
+
   /// Sort mode: all, added, release, imdb, anilist, personal
   final String sortSource;
+
   /// newest/oldest for date sorts; best/worst for rating sorts
   final String sortDirection;
 
@@ -119,7 +121,8 @@ bool itemMatchesGenreFilter(WatchlistItem item, List<String> selectedGenres) {
   return selectedGenres.any((genre) => itemHasGenre(item, genre));
 }
 
-bool itemMatchesAllSelectedGenres(WatchlistItem item, List<String> selectedGenres) {
+bool itemMatchesAllSelectedGenres(
+    WatchlistItem item, List<String> selectedGenres) {
   if (selectedGenres.isEmpty) return false;
   return selectedGenres.every((genre) => itemHasGenre(item, genre));
 }
@@ -136,7 +139,8 @@ String filterDisplayGenre(WatchlistItem item, List<String> selectedGenres) {
 
 double? parseScoreValue(String? raw) {
   if (raw == null || raw.isEmpty) return null;
-  final num = double.tryParse(raw.replaceAll(',', '.').replaceAll('%', '').trim());
+  final num =
+      double.tryParse(raw.replaceAll(',', '.').replaceAll('%', '').trim());
   return num != null && num.isFinite ? num : null;
 }
 
@@ -354,9 +358,8 @@ List<GenreGroup> buildFilteredGroups({
     final sectionGenre = useFilterGrouping
         ? filterDisplayGenre(item, selectedGenres)
         : item.genre;
-    final key = mergeByGenreOnly
-        ? sectionGenre
-        : '${item.contentType}|||$sectionGenre';
+    final key =
+        mergeByGenreOnly ? sectionGenre : '${item.contentType}|||$sectionGenre';
 
     byKey.putIfAbsent(
       key,
@@ -420,7 +423,8 @@ List<String> availableGenresFromItems(List<WatchlistItem> items) {
   }
 
   final ordered = standardGenres.where(genres.contains).toList();
-  final extras = genres.where((g) => !standardGenres.contains(g)).toList()..sort();
+  final extras = genres.where((g) => !standardGenres.contains(g)).toList()
+    ..sort();
   return [...ordered, ...extras];
 }
 

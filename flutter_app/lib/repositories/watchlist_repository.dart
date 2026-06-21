@@ -6,11 +6,32 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/constants/storage_keys.dart';
 import '../core/storage/hive_boxes.dart';
 import '../core/utils/watchlist_parser.dart';
+import '../features/lists/application/move_title.dart';
 import '../models/watchlist_item.dart';
 import '../models/watchlist_data.dart';
 import 'auth_repository.dart';
 import 'local_storage_repository.dart';
 import 'supabase_sync_repository.dart';
+
+class CopyItemToListResult {
+  const CopyItemToListResult._({
+    required this.ok,
+    this.listName,
+    this.errorKey,
+  });
+
+  final bool ok;
+  final String? listName;
+  final String? errorKey;
+
+  factory CopyItemToListResult.success(String listName) {
+    return CopyItemToListResult._(ok: true, listName: listName);
+  }
+
+  factory CopyItemToListResult.fail(String errorKey) {
+    return CopyItemToListResult._(ok: false, errorKey: errorKey);
+  }
+}
 
 class WatchlistSnapshot {
   const WatchlistSnapshot({
@@ -89,6 +110,56 @@ class WatchlistRepository {
     return const WatchlistSaveResult(syncStatus: SyncDisplayStatus.error);
   }
 
+  Future<CopyItemToListResult> copyItemToTargetList({
+    required WatchlistItem item,
+    required WatchEntry? watchedEntry,
+    required String sourceListId,
+    required String targetListId,
+    required String accountId,
+    required String targetListName,
+    bool cloudConfigured = false,
+  }) async {
+    final targetData = _local.readWatchlist(targetListId);
+    final targetItems =
+        targetData != null ? flattenWatchlist(targetData) : <WatchlistItem>[];
+    final copy = buildListItemCopy(item);
+
+    final validationError = copyItemValidationError(
+      sourceListId: sourceListId,
+      targetListId: targetListId,
+      targetItems: targetItems,
+      copy: copy,
+    );
+    if (validationError != null) {
+      return CopyItemToListResult.fail(validationError);
+    }
+
+    targetItems.add(copy);
+    final targetWatched =
+        Map<String, WatchEntry>.from(_readWatched(targetListId));
+    if (watchedEntry != null) {
+      targetWatched[copy.id] = WatchEntry(
+        rating: watchedEntry.rating,
+        note: watchedEntry.note,
+      );
+    }
+
+    final result = await saveItems(
+      listId: targetListId,
+      accountId: accountId,
+      items: targetItems,
+      watched: targetWatched,
+      cloudConfigured: cloudConfigured,
+      listName: targetListName,
+    );
+
+    if (result.syncStatus == SyncDisplayStatus.error) {
+      return CopyItemToListResult.fail('watchlist.syncFailed');
+    }
+
+    return CopyItemToListResult.success(targetListName);
+  }
+
   WatchlistSnapshot _readSnapshot(
     String listId, {
     required bool cloudConfigured,
@@ -102,9 +173,8 @@ class WatchlistRepository {
         items: const [],
         watched: watched,
         isEmptyList: hasEmptyFlag,
-        syncStatus: cloudConfigured
-            ? SyncDisplayStatus.saved
-            : SyncDisplayStatus.local,
+        syncStatus:
+            cloudConfigured ? SyncDisplayStatus.saved : SyncDisplayStatus.local,
       );
     }
 
@@ -142,8 +212,12 @@ class WatchlistRepository {
       );
       await _writeSyncMeta(
         listId,
-        syncedAt: remoteUpdated > 0 ? remoteUpdated : DateTime.now().millisecondsSinceEpoch,
-        localUpdated: remoteUpdated > 0 ? remoteUpdated : DateTime.now().millisecondsSinceEpoch,
+        syncedAt: remoteUpdated > 0
+            ? remoteUpdated
+            : DateTime.now().millisecondsSinceEpoch,
+        localUpdated: remoteUpdated > 0
+            ? remoteUpdated
+            : DateTime.now().millisecondsSinceEpoch,
       );
     }
   }

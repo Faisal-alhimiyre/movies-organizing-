@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:our_movie_nights/core/utils/watchlist_import.dart';
 import 'package:our_movie_nights/models/share_snapshot_payload.dart';
 import 'package:our_movie_nights/models/watchlist_data.dart';
@@ -101,6 +103,38 @@ void main() {
       expect(payload.stats['titles'], 1);
       expect(payload.stats['watched'], 1);
       expect(payload.stats['rated'], 1);
+    });
+  });
+
+  group('parseImportPayload', () {
+    test('accepts valid export json', () {
+      final item = _item('movies', 'Action', 'Alpha');
+      final export = buildExportPayload(
+        listName: 'Backup',
+        items: [item],
+        watched: const {},
+      );
+
+      final parsed = parseImportPayload(jsonEncode(export.toJson()));
+      expect(parsed, isNotNull);
+      expect(parsed!.listName, 'Backup');
+      expect(parsed.titleCount, 1);
+    });
+
+    test('rejects empty watchlist', () {
+      final parsed = parseImportPayload(
+        '{"listName":"Empty","watchlist":{"movies":{},"tvSeries":{},"anime":{}}}',
+      );
+      expect(parsed, isNull);
+    });
+  });
+
+  group('uniqueImportedListName', () {
+    test('deduplicates against existing names', () {
+      expect(
+        uniqueImportedListName('Shared', ['Shared', 'Other']),
+        'Shared (2)',
+      );
     });
   });
 }

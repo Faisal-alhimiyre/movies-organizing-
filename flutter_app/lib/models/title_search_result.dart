@@ -25,7 +25,9 @@ class TitleSearchResult {
   final String resultKey;
 
   bool get hasLookupId =>
-      imdbId != null || anilistId != null || (tmdbType != null && tmdbId != null);
+      imdbId != null ||
+      anilistId != null ||
+      (tmdbType != null && tmdbId != null);
 
   String dedupeKey() {
     if (resultKey.isNotEmpty) return resultKey;
@@ -33,10 +35,7 @@ class TitleSearchResult {
   }
 
   static String _normalizeTitleKey(String title) {
-    return title
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-        .trim();
+    return title.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
   }
 }
 

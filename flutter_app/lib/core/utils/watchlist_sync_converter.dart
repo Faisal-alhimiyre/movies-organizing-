@@ -97,6 +97,18 @@ WatchlistConvertResult rowsToWatchlist(List<Map<String, dynamic>> rows) {
     final anilistRating = row['anilist_rating']?.toString() ?? '';
     if (anilistRating.isNotEmpty) entry['anilistRating'] = anilistRating;
 
+    final ageRating = row['age_rating']?.toString() ?? '';
+    if (ageRating.isNotEmpty) entry['ageRating'] = ageRating;
+
+    final runtime = row['runtime']?.toString() ?? '';
+    if (runtime.isNotEmpty) entry['runtime'] = runtime;
+
+    final seasonCount = row['season_count']?.toString() ?? '';
+    if (seasonCount.isNotEmpty) entry['seasonCount'] = seasonCount;
+
+    final episodeCount = row['episode_count']?.toString() ?? '';
+    if (episodeCount.isNotEmpty) entry['episodeCount'] = episodeCount;
+
     final year = row['year']?.toString() ?? '';
     if (year.isNotEmpty) entry['year'] = year;
 
@@ -112,7 +124,8 @@ WatchlistConvertResult rowsToWatchlist(List<Map<String, dynamic>> rows) {
       final watchEntry = <String, dynamic>{};
       final ratingRaw = row['watch_rating'];
       if (ratingRaw != null && ratingRaw.toString().isNotEmpty) {
-        final rating = double.tryParse(ratingRaw.toString().replaceAll(',', '.'));
+        final rating =
+            double.tryParse(ratingRaw.toString().replaceAll(',', '.'));
         if (rating != null && rating.isFinite) {
           watchEntry['rating'] = rating;
         }
@@ -184,6 +197,10 @@ List<Map<String, dynamic>> watchlistToRows(
           'poster': map['poster']?.toString() ?? '',
           'imdb_rating': map['imdbRating']?.toString() ?? '',
           'anilist_rating': map['anilistRating']?.toString() ?? '',
+          'age_rating': map['ageRating']?.toString() ?? '',
+          'runtime': map['runtime']?.toString() ?? '',
+          'season_count': map['seasonCount']?.toString() ?? '',
+          'episode_count': map['episodeCount']?.toString() ?? '',
           'year': map['year']?.toString() ?? '',
           'watched': watchMeta.watched,
           'watch_rating': watchMeta.rating,
@@ -201,11 +218,18 @@ List<Map<String, dynamic>> watchlistToRows(
 List<String> _parseLeadsForRow(Map<String, dynamic> map) {
   final leadsRaw = map['leads'];
   if (leadsRaw is List) {
-    return leadsRaw.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+    return leadsRaw
+        .map((e) => e.toString().trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
   }
   final lead = map['lead']?.toString().trim() ?? '';
   if (lead.isEmpty) return [];
-  return lead.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+  return lead
+      .split(',')
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toList();
 }
 
 ({bool watched, Object? rating, String note}) _watchMetaForRow(dynamic raw) {

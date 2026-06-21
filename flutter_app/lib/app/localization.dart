@@ -20,7 +20,8 @@ class LocaleNotifier extends Notifier<Locale> {
   }
 }
 
-final localeProvider = NotifierProvider<LocaleNotifier, Locale>(LocaleNotifier.new);
+final localeProvider =
+    NotifierProvider<LocaleNotifier, Locale>(LocaleNotifier.new);
 
 final textDirectionProvider = Provider<TextDirection>((ref) {
   final lang = ref.watch(localeProvider).languageCode;

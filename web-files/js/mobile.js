@@ -399,11 +399,14 @@
       ? posterImg.src
       : "";
 
-    const genres = [...card.querySelectorAll(".badge--genre-primary")].map(
-      (el) => el.textContent.trim()
-    );
+    const primaryGenreEl =
+      card.querySelector(".card__overlay .badge--genre-primary") ||
+      card.querySelector(".card__head .badge--genre-primary");
+    const genre = primaryGenreEl?.textContent.trim() || "";
     const secondaryGenres = [
-      ...card.querySelectorAll(".badge--genre-secondary"),
+      ...card.querySelectorAll(
+        ".card__overlay .badge--genre-secondary, .card__head .badge--genre-secondary"
+      ),
     ].map((el) => el.textContent.trim());
 
     return {
@@ -413,7 +416,7 @@
       summary,
       leads: lead ? lead.split(",").map((part) => part.trim()).filter(Boolean) : [],
       lead,
-      genre: genres[0] || "",
+      genre,
       secondaryGenres,
       poster,
       link: card.dataset.link || "",

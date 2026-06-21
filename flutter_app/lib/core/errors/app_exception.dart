@@ -19,7 +19,8 @@ void logAppError(Object error, [StackTrace? stackTrace]) {
   }
 }
 
-Future<T> guardAsync<T>(Future<T> Function() run, {String? fallbackMessage}) async {
+Future<T> guardAsync<T>(Future<T> Function() run,
+    {String? fallbackMessage}) async {
   try {
     return await run();
   } catch (error, stackTrace) {

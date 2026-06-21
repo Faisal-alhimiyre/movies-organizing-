@@ -123,6 +123,10 @@
             poster: entry.poster || "",
             imdb_rating: entry.imdbRating || "",
             anilist_rating: entry.anilistRating || "",
+            age_rating: entry.ageRating || "",
+            runtime: entry.runtime || "",
+            season_count: entry.seasonCount ? String(entry.seasonCount) : "",
+            episode_count: entry.episodeCount ? String(entry.episodeCount) : "",
             year: entry.year || "",
             watched: watchMeta.watched,
             watch_rating: watchMeta.rating,
@@ -179,6 +183,10 @@
       if (row.poster) entry.poster = row.poster;
       if (row.imdb_rating) entry.imdbRating = row.imdb_rating;
       if (row.anilist_rating) entry.anilistRating = row.anilist_rating;
+      if (row.age_rating) entry.ageRating = row.age_rating;
+      if (row.runtime) entry.runtime = row.runtime;
+      if (row.season_count) entry.seasonCount = row.season_count;
+      if (row.episode_count) entry.episodeCount = row.episode_count;
       if (row.year) entry.year = row.year;
       const addedMs = parseAddedAtMs(row.added_at);
       if (addedMs != null) entry.addedAt = addedMs;
@@ -249,7 +257,7 @@
 
     const { data, error } = await sb
       .from(LISTS_TABLE)
-      .select("list_id, name, description, updated_at")
+      .select("list_id, name, description, title_count, watched_count, updated_at")
       .eq("account_id", accountId)
       .order("updated_at", { ascending: true });
 
@@ -331,6 +339,8 @@
     const existingAddedAt = await fetchExistingAddedAtMap(sb, listId);
     const rows = watchlistToRows(listId, watchlist, watched, existingAddedAt);
     const now = new Date().toISOString();
+    const titleCount = rows.length;
+    const watchedCount = rows.filter((row) => row.watched === true).length;
 
     const { error: accountError } = await sb.from(ACCOUNTS_TABLE).upsert(
       { account_id: accountId, updated_at: now },
@@ -383,6 +393,22 @@
         dispatchStatus("error");
         return { ok: false, error: insertError };
       }
+    }
+
+    const { error: statsError } = await sb
+      .from(LISTS_TABLE)
+      .update({
+        title_count: titleCount,
+        watched_count: watchedCount,
+        updated_at: now,
+      })
+      .eq("list_id", listId);
+
+    if (statsError) {
+      syncing = false;
+      console.warn("[sync] list stats update failed:", statsError.message);
+      dispatchStatus("error");
+      return { ok: false, error: statsError };
     }
 
     syncing = false;

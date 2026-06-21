@@ -29,6 +29,7 @@ class AppShell extends ConsumerWidget {
     final themeId = ref.watch(themeIdProvider);
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: Text(title),
         actions: [
@@ -36,18 +37,25 @@ class AppShell extends ConsumerWidget {
           if (showLangTheme) ...[
             IconButton(
               tooltip: l10n.languageEn,
-              onPressed: () => ref.read(localeProvider.notifier).setLocale(const Locale('en')),
-              icon: const Text('E', style: TextStyle(fontWeight: FontWeight.w700)),
+              onPressed: () => ref
+                  .read(localeProvider.notifier)
+                  .setLocale(const Locale('en')),
+              icon: const Text('E',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
             ),
             IconButton(
               tooltip: l10n.languageAr,
-              onPressed: () => ref.read(localeProvider.notifier).setLocale(const Locale('ar')),
-              icon: const Text('ع', style: TextStyle(fontWeight: FontWeight.w700)),
+              onPressed: () => ref
+                  .read(localeProvider.notifier)
+                  .setLocale(const Locale('ar')),
+              icon: const Text('ع',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
             ),
             PopupMenuButton<AppThemeId>(
               tooltip: 'Theme',
               initialValue: themeId,
-              onSelected: (value) => ref.read(themeIdProvider.notifier).setTheme(value),
+              onSelected: (value) =>
+                  ref.read(themeIdProvider.notifier).setTheme(value),
               itemBuilder: (context) => AppThemeId.values
                   .map(
                     (id) => PopupMenuItem(

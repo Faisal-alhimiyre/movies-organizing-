@@ -1,5 +1,6 @@
 import '../../models/watchlist_data.dart';
 import '../../models/watchlist_item.dart';
+import 'title_meta_format.dart';
 
 const standardGenres = [
   'Action',
@@ -68,9 +69,14 @@ List<WatchlistItem> flattenWatchlist(WatchlistData data) {
             poster: map['poster']?.toString(),
             imdbRating: map['imdbRating']?.toString(),
             anilistRating: map['anilistRating']?.toString(),
+            ageRating: map['ageRating']?.toString(),
+            runtime: map['runtime']?.toString(),
+            seasonCount: parsePositiveCount(map['seasonCount']),
+            episodeCount: parsePositiveCount(map['episodeCount']),
             year: _parseYear(map['year']),
             addedAt: _parseAddedAtMs(map['addedAt']),
-            secondaryGenres: _parseSecondaryGenres(genre, map['secondaryGenres']),
+            secondaryGenres:
+                _parseSecondaryGenres(genre, map['secondaryGenres']),
           ),
         );
       }
@@ -84,11 +90,18 @@ List<WatchlistItem> flattenWatchlist(WatchlistData data) {
 List<String> _parseLeads(Map<String, dynamic> map) {
   final leadsRaw = map['leads'];
   if (leadsRaw is List) {
-    return leadsRaw.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+    return leadsRaw
+        .map((e) => e.toString().trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
   }
   final lead = map['lead']?.toString().trim() ?? '';
   if (lead.isEmpty) return [];
-  return lead.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+  return lead
+      .split(',')
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toList();
 }
 
 String _parseSummary(Map<String, dynamic> map) {
@@ -140,6 +153,10 @@ void _backfillAddedAt(List<WatchlistItem> items) {
       poster: item.poster,
       imdbRating: item.imdbRating,
       anilistRating: item.anilistRating,
+      ageRating: item.ageRating,
+      runtime: item.runtime,
+      seasonCount: item.seasonCount,
+      episodeCount: item.episodeCount,
       year: item.year,
       addedAt: now - (items.length - i) * 1000,
       secondaryGenres: item.secondaryGenres,
@@ -165,9 +182,8 @@ List<GenreGroup> groupItems(
   final byKey = <String, GenreGroup>{};
 
   for (final item in items) {
-    final key = mergeByGenreOnly
-        ? item.genre
-        : '${item.contentType}|||${item.genre}';
+    final key =
+        mergeByGenreOnly ? item.genre : '${item.contentType}|||${item.genre}';
     byKey.putIfAbsent(
       key,
       () => GenreGroup(
@@ -220,7 +236,8 @@ Map<String, WatchEntry> parseWatchedMap(dynamic raw) {
   final result = <String, WatchEntry>{};
   for (final entry in raw.entries) {
     final watch = WatchEntry.fromJson(entry.value);
-    if (watch.rating != null || (watch.note != null && watch.note!.isNotEmpty)) {
+    if (watch.rating != null ||
+        (watch.note != null && watch.note!.isNotEmpty)) {
       result[entry.key.toString()] = watch;
     } else {
       result[entry.key.toString()] = watch;
@@ -274,6 +291,14 @@ WatchlistData itemsToNested(List<WatchlistItem> items) {
     if (item.anilistRating != null && item.anilistRating!.isNotEmpty) {
       entry['anilistRating'] = item.anilistRating;
     }
+    if (item.ageRating != null && item.ageRating!.isNotEmpty) {
+      entry['ageRating'] = item.ageRating;
+    }
+    if (item.runtime != null && item.runtime!.isNotEmpty) {
+      entry['runtime'] = item.runtime;
+    }
+    if (item.seasonCount != null) entry['seasonCount'] = item.seasonCount;
+    if (item.episodeCount != null) entry['episodeCount'] = item.episodeCount;
     if (item.year != null) entry['year'] = item.year;
     if (item.addedAt != null) entry['addedAt'] = item.addedAt;
     if (item.secondaryGenres.isNotEmpty) {

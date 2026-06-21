@@ -82,7 +82,8 @@ class _ManageListsSheetState extends ConsumerState<_ManageListsSheet> {
 
         if (!result.cloudOk && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(widget.l10n.message('watchlist.syncFailed'))),
+            SnackBar(
+                content: Text(widget.l10n.message('watchlist.syncFailed'))),
           );
         }
         if (mounted) setState(() {});
@@ -91,10 +92,15 @@ class _ManageListsSheetState extends ConsumerState<_ManageListsSheet> {
     );
   }
 
-  Future<void> _switchTo(String listId) async {
-    await ref.read(sessionProvider.notifier).switchList(listId);
-    ref.invalidate(watchlistControllerProvider);
-    if (mounted) Navigator.pop(context);
+  Future<void> _assignDefault(String listId) async {
+    final session = ref.read(sessionProvider);
+    if (session == null) return;
+    final auth = ref.read(authRepositoryProvider);
+    await auth.assignDefaultList(
+      accountId: session.accountId,
+      listId: listId,
+    );
+    if (mounted) setState(() {});
   }
 
   Future<void> _deleteList(ListLibraryEntry entry) async {
@@ -153,8 +159,7 @@ class _ManageListsSheetState extends ConsumerState<_ManageListsSheet> {
       return;
     }
 
-    if (result.session != null &&
-        result.session!.listId != session.listId) {
+    if (result.session != null && result.session!.listId != session.listId) {
       await ref.read(sessionProvider.notifier).setSession(result.session!);
       ref.invalidate(watchlistControllerProvider);
       if (!mounted) return;
@@ -174,6 +179,7 @@ class _ManageListsSheetState extends ConsumerState<_ManageListsSheet> {
 
     final auth = ref.watch(authRepositoryProvider);
     final library = auth.getLibrary(session.accountId);
+    final defaultListId = auth.getDefaultListId(session.accountId);
     final theme = Theme.of(context);
 
     return Padding(
@@ -209,6 +215,7 @@ class _ManageListsSheetState extends ConsumerState<_ManageListsSheet> {
                 itemBuilder: (context, index) {
                   final entry = library[index];
                   final isCurrent = entry.listId == session.listId;
+                  final isDefault = entry.listId == defaultListId;
                   final count = auth.listTitleCount(entry.listId);
 
                   return ListTile(
@@ -222,12 +229,29 @@ class _ManageListsSheetState extends ConsumerState<_ManageListsSheet> {
                               horizontal: 8,
                               vertical: 2,
                             ),
+                            margin: const EdgeInsetsDirectional.only(start: 6),
                             decoration: BoxDecoration(
                               color: theme.colorScheme.primaryContainer,
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
                               widget.l10n.manageSignedInNow,
+                              style: theme.textTheme.labelSmall,
+                            ),
+                          ),
+                        if (isDefault)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            margin: const EdgeInsetsDirectional.only(start: 6),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.secondaryContainer,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              widget.l10n.manageDefaultList,
                               style: theme.textTheme.labelSmall,
                             ),
                           ),
@@ -244,10 +268,10 @@ class _ManageListsSheetState extends ConsumerState<_ManageListsSheet> {
                     trailing: Wrap(
                       spacing: 4,
                       children: [
-                        if (!isCurrent)
+                        if (!isDefault)
                           TextButton(
-                            onPressed: () => _switchTo(entry.listId),
-                            child: Text(widget.l10n.manageSwitchToList),
+                            onPressed: () => _assignDefault(entry.listId),
+                            child: Text(widget.l10n.manageAssignDefault),
                           ),
                         TextButton(
                           onPressed: () => _openEdit(entry),

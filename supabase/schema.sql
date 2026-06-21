@@ -32,7 +32,10 @@ create table if not exists public.lists (
   account_id text not null references public.accounts (account_id) on delete cascade,
   name text not null default 'My list',
   description text not null default '',
-  updated_at timestamptz not null default now()
+  title_count integer not null default 0 check (title_count >= 0),
+  watched_count integer not null default 0 check (watched_count >= 0),
+  updated_at timestamptz not null default now(),
+  check (watched_count <= title_count)
 );
 
 create index if not exists lists_account_id_idx
@@ -54,6 +57,10 @@ create table if not exists public.watchlist_items (
   poster text not null default '',
   imdb_rating text not null default '',
   anilist_rating text not null default '',
+  age_rating text not null default '',
+  runtime text not null default '',
+  season_count text not null default '',
+  episode_count text not null default '',
   year text not null default '',
   watched boolean not null default false,
   watch_rating numeric,          -- user's score 0-10 when watched (null = not rated yet)
@@ -71,6 +78,105 @@ create index if not exists watchlist_items_list_type_genre_idx
 
 create index if not exists watchlist_items_title_idx
   on public.watchlist_items (list_id, title);
+
+-- Keep lists.title_count / lists.watched_count in sync with watchlist_items
+create or replace function public.refresh_list_stats(p_list_id text)
+returns void
+language sql
+as $$
+  update public.lists
+  set
+    title_count = (
+      select count(*)::integer
+      from public.watchlist_items
+      where list_id = p_list_id
+    ),
+    watched_count = (
+      select count(*)::integer
+      from public.watchlist_items
+      where list_id = p_list_id and watched = true
+    )
+  where list_id = p_list_id;
+$$;
+
+create or replace function public.refresh_list_stats_after_item_insert()
+returns trigger
+language plpgsql
+as $$
+declare
+  affected_list_id text;
+begin
+  for affected_list_id in
+    select distinct list_id from new_items
+  loop
+    perform public.refresh_list_stats(affected_list_id);
+  end loop;
+
+  return null;
+end;
+$$;
+
+create or replace function public.refresh_list_stats_after_item_delete()
+returns trigger
+language plpgsql
+as $$
+declare
+  affected_list_id text;
+begin
+  for affected_list_id in
+    select distinct list_id from old_items
+  loop
+    perform public.refresh_list_stats(affected_list_id);
+  end loop;
+
+  return null;
+end;
+$$;
+
+create or replace function public.refresh_list_stats_after_item_update()
+returns trigger
+language plpgsql
+as $$
+declare
+  affected_list_id text;
+begin
+  for affected_list_id in
+    select distinct list_id
+    from (
+      select list_id from new_items
+      union
+      select list_id from old_items
+    ) affected
+  loop
+    perform public.refresh_list_stats(affected_list_id);
+  end loop;
+
+  return null;
+end;
+$$;
+
+drop trigger if exists watchlist_items_refresh_list_stats on public.watchlist_items;
+drop trigger if exists watchlist_items_refresh_list_stats_insert on public.watchlist_items;
+drop trigger if exists watchlist_items_refresh_list_stats_update on public.watchlist_items;
+drop trigger if exists watchlist_items_refresh_list_stats_delete on public.watchlist_items;
+
+create trigger watchlist_items_refresh_list_stats_insert
+  after insert on public.watchlist_items
+  referencing new table as new_items
+  for each statement
+  execute function public.refresh_list_stats_after_item_insert();
+
+create trigger watchlist_items_refresh_list_stats_delete
+  after delete on public.watchlist_items
+  referencing old table as old_items
+  for each statement
+  execute function public.refresh_list_stats_after_item_delete();
+
+create trigger watchlist_items_refresh_list_stats_update
+  after update on public.watchlist_items
+  referencing new table as new_items old table as old_items
+  for each statement
+  execute function public.refresh_list_stats_after_item_update();
 
 alter table public.accounts enable row level security;
 alter table public.lists enable row level security;

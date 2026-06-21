@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants/storage_keys.dart';
@@ -36,4 +35,5 @@ class ThemeNotifier extends Notifier<AppThemeId> {
   }
 }
 
-final themeIdProvider = NotifierProvider<ThemeNotifier, AppThemeId>(ThemeNotifier.new);
+final themeIdProvider =
+    NotifierProvider<ThemeNotifier, AppThemeId>(ThemeNotifier.new);

@@ -37,10 +37,6 @@ class SessionNotifier extends Notifier<Session?> {
       if (!ids.contains(listId)) return;
     }
 
-    await HiveBoxes.preferences.put(
-      StorageKeys.lastList(current.accountId),
-      listId,
-    );
     final next = Session(
       accountId: current.accountId,
       listId: listId,

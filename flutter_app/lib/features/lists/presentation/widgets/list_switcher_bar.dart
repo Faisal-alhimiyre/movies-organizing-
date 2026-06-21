@@ -25,7 +25,7 @@ class ListSwitcherBar extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: DropdownButtonFormField<String>(
-        value: session.listId,
+        initialValue: session.listId,
         decoration: InputDecoration(
           labelText: l10n.menuSwitchList,
           isDense: true,

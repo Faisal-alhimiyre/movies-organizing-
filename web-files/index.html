@@ -71,7 +71,37 @@
       <header class="header">
         <div class="header__main">
           <div class="header__brand">
-            <h1 class="header__title" id="headerTitle"></h1>
+            <div class="header__title-wrap" id="headerTitleWrap">
+              <h1 class="header__title" id="headerTitle"></h1>
+              <div class="list-title-dropdown" id="listTitleDropdown" hidden>
+                <button
+                  type="button"
+                  class="list-title-dropdown__trigger"
+                  id="listTitleDropdownBtn"
+                  aria-haspopup="listbox"
+                  aria-expanded="false"
+                  aria-controls="listTitleDropdownPanel"
+                >
+                  <span class="list-title-dropdown__label" id="listTitleDropdownLabel"></span>
+                  <svg class="list-title-dropdown__chevron" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M6 9l6 6 6-6"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+                <div
+                  class="list-title-dropdown__panel"
+                  id="listTitleDropdownPanel"
+                  role="listbox"
+                  hidden
+                ></div>
+              </div>
+            </div>
             <script>
               (function () {
                 try {
@@ -263,25 +293,31 @@
           </label>
 
           <div class="genre-filter">
+            <label class="panel-filter__label" for="genreSelect" data-i18n="filter.labelGenre">Genre</label>
             <select id="genreSelect" class="genre-filter__select" aria-label="Filter by genre">
               <option value="">All genres</option>
             </select>
             <div class="genre-filter__chips" id="genreFilterChips"></div>
           </div>
 
-          <select id="watchedFilter" class="genre-filter__select watched-filter__select" aria-label="Filter by watched status">
-            <option value="all">All</option>
-            <option value="watched">Watched</option>
-            <option value="unwatched">Not watched</option>
-          </select>
+          <div class="watched-filter">
+            <label class="panel-filter__label" for="watchedFilter" data-i18n="filter.labelWatched">Status</label>
+            <select id="watchedFilter" class="genre-filter__select watched-filter__select" aria-label="Filter by watched status">
+              <option value="all">All</option>
+              <option value="watched">Watched</option>
+              <option value="unwatched">Not watched</option>
+            </select>
+          </div>
 
           <div class="rating-filter">
+            <label class="panel-filter__label" for="ratingFilter" data-i18n="filter.labelSort">Sort</label>
+            <div class="rating-filter__controls">
             <select id="ratingFilter" class="genre-filter__select rating-filter__select" aria-label="Sort by">
               <option value="all">Default order</option>
               <option value="added">Recently added</option>
               <option value="release">Release date</option>
               <option value="imdb">IMDb ratings</option>
-              <option value="anilist">AniList rating</option>
+              <option value="anilist">AniList ratings</option>
               <option value="personal">My ratings</option>
             </select>
             <button
@@ -297,6 +333,7 @@
                 <polyline points="14 7 19 12 14 17" />
               </svg>
             </button>
+            </div>
           </div>
 
           <button

@@ -75,6 +75,8 @@ class AuthRepository {
       );
       await _local.setEmptyListFlag(listId);
 
+      await _local.setDefaultListId(accountId, listId);
+
       if (_supabaseConfigured && _supabase != null) {
         await _supabase!.createListRow(
           accountId: accountId,
@@ -112,15 +114,13 @@ class AuthRepository {
       return AuthResult.fail('gate.noList');
     }
 
-    final lastListId = _local.getLastListId(accountId);
-    final activeListId = (lastListId != null &&
-            library.any((e) => e.listId == lastListId))
-        ? lastListId
-        : library.first.listId;
+    final defaultListId = _local.getDefaultListId(accountId);
+    final activeListId =
+        (defaultListId != null && library.any((e) => e.listId == defaultListId))
+            ? defaultListId
+            : library.first.listId;
 
     final needsUpgrade = isLegacyNumericCode(code);
-
-    await _local.setLastListId(accountId, activeListId);
 
     return AuthResult.ok(
       Session(
@@ -148,6 +148,19 @@ class AuthRepository {
   List<ListLibraryEntry> getLibrary(String accountId) =>
       _local.getLibrary(accountId);
 
+  String? getDefaultListId(String accountId) =>
+      _local.getDefaultListId(accountId);
+
+  Future<bool> assignDefaultList({
+    required String accountId,
+    required String listId,
+  }) async {
+    final library = _local.getLibrary(accountId);
+    if (!library.any((e) => e.listId == listId)) return false;
+    await _local.setDefaultListId(accountId, listId);
+    return true;
+  }
+
   String listDescription(String listId, String accountId) {
     for (final entry in _local.getLibrary(accountId)) {
       if (entry.listId == listId) return entry.description;
@@ -170,9 +183,8 @@ class AuthRepository {
     final listId = generateListId();
     final trimmedName = name.trim();
     final trimmedDesc = description.trim();
-    final desc = trimmedDesc.length > 120
-        ? trimmedDesc.substring(0, 120)
-        : trimmedDesc;
+    final desc =
+        trimmedDesc.length > 120 ? trimmedDesc.substring(0, 120) : trimmedDesc;
 
     await _local.registerList(
       ListLibraryEntry(
@@ -225,9 +237,8 @@ class AuthRepository {
 
     final trimmedName = name.trim();
     final trimmedDesc = description.trim();
-    final desc = trimmedDesc.length > 120
-        ? trimmedDesc.substring(0, 120)
-        : trimmedDesc;
+    final desc =
+        trimmedDesc.length > 120 ? trimmedDesc.substring(0, 120) : trimmedDesc;
 
     library[index] = library[index].copyWith(
       name: trimmedName,
@@ -275,8 +286,11 @@ class AuthRepository {
       return (ok: true, session: null, signedOut: true, cloudOk: cloudOk);
     }
 
-    final nextListId = remaining.first.listId;
-    await _local.setLastListId(session.accountId, nextListId);
+    final defaultId = _local.getDefaultListId(session.accountId);
+    final nextListId =
+        (defaultId != null && remaining.any((e) => e.listId == defaultId))
+            ? defaultId
+            : remaining.first.listId;
     return (
       ok: true,
       session: Session(
@@ -287,6 +301,120 @@ class AuthRepository {
       signedOut: false,
       cloudOk: cloudOk,
     );
+  }
+
+  ({bool ok, String? errorKey, String? oldAccountId, String? newAccountId})
+      prepareChangeCode({
+    required Session session,
+    required String newCode,
+  }) {
+    final errorKey = validateCodeKey(newCode, forCreate: true);
+    if (errorKey != null) {
+      return (
+        ok: false,
+        errorKey: errorKey,
+        oldAccountId: null,
+        newAccountId: null
+      );
+    }
+
+    final oldAccountId = session.accountId;
+    final newAccountId = accountIdFromCode(newCode.trim().toLowerCase());
+    if (newAccountId == oldAccountId) {
+      return (
+        ok: false,
+        errorKey: 'changeCode.sameCode',
+        oldAccountId: null,
+        newAccountId: null,
+      );
+    }
+
+    return (
+      ok: true,
+      errorKey: null,
+      oldAccountId: oldAccountId,
+      newAccountId: newAccountId,
+    );
+  }
+
+  List<AccountListMigrationPayload> _readAccountListPayloads(String accountId) {
+    return getLibrary(accountId).map((entry) {
+      final watchlist =
+          _local.readWatchlist(entry.listId) ?? WatchlistData.empty();
+      return AccountListMigrationPayload(
+        listId: entry.listId,
+        name: entry.name,
+        description: entry.description,
+        watchlist: watchlist,
+        watched: _local.readWatchedJson(entry.listId),
+      );
+    }).toList();
+  }
+
+  Future<({bool ok, String? errorKey, String? newAccountId})>
+      changeAccountCode({
+    required Session session,
+    required String newCode,
+    required String confirmCode,
+  }) async {
+    if (newCode.trim() != confirmCode.trim()) {
+      return (
+        ok: false,
+        errorKey: 'changeCode.codesMismatch',
+        newAccountId: null
+      );
+    }
+
+    final prep = prepareChangeCode(session: session, newCode: newCode);
+    if (!prep.ok) {
+      return (ok: false, errorKey: prep.errorKey, newAccountId: null);
+    }
+
+    if (_local.codeHasLocalList(newCode)) {
+      return (ok: false, errorKey: 'changeCode.codeInUse', newAccountId: null);
+    }
+
+    if (_supabaseConfigured && _supabase != null) {
+      if (await _supabase!.accountExists(prep.newAccountId!)) {
+        return (
+          ok: false,
+          errorKey: 'changeCode.codeInUse',
+          newAccountId: null
+        );
+      }
+
+      final lists = _readAccountListPayloads(prep.oldAccountId!);
+      final migrated = await _supabase!.migrateAccount(
+        oldAccountId: prep.oldAccountId!,
+        newAccountId: prep.newAccountId!,
+        lists: lists,
+      );
+      if (!migrated) {
+        return (
+          ok: false,
+          errorKey: 'changeCode.cloudFailed',
+          newAccountId: null
+        );
+      }
+    }
+
+    await _local.migrateLocalAccount(
+      oldAccountId: prep.oldAccountId!,
+      newAccountId: prep.newAccountId!,
+      currentListId: session.listId,
+    );
+
+    return (ok: true, errorKey: null, newAccountId: prep.newAccountId);
+  }
+
+  Future<({bool ok, bool cloudOk})> deleteAccount(Session session) async {
+    var cloudOk = true;
+    if (_supabaseConfigured && _supabase != null) {
+      cloudOk = await _supabase!.deleteAccount(session.accountId);
+    }
+
+    await _local.purgeAccount(session.accountId);
+    return (ok: true, cloudOk: cloudOk);
   }
 }
 

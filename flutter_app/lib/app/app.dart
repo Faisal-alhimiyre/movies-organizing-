@@ -15,6 +15,7 @@ import 'localization.dart';
 import 'router.dart';
 import 'theme/app_themes.dart';
 import 'theme/theme_controller.dart';
+import 'theme/theme_extensions.dart';
 
 final _routerRefreshProvider = Provider<_RouterRefreshNotifier>((ref) {
   final notifier = _RouterRefreshNotifier();
@@ -37,9 +38,7 @@ String _initialWebLocation() {
 final goRouterProvider = Provider<GoRouter>((ref) {
   final refresh = ref.watch(_routerRefreshProvider);
   return GoRouter(
-    initialLocation: kIsWeb
-        ? _initialWebLocation()
-        : AppRoutes.gate,
+    initialLocation: kIsWeb ? _initialWebLocation() : AppRoutes.gate,
     refreshListenable: refresh,
     debugLogDiagnostics: kDebugMode,
     errorBuilder: (context, state) => Scaffold(
@@ -135,6 +134,18 @@ class OurMovieNightsApp extends ConsumerWidget {
       ],
       theme: AppThemes.forId(themeId),
       builder: (context, child) {
+        final gradient =
+            Theme.of(context).extension<AppThemeBackground>()?.gradient;
+        Widget body = child ??
+            const Center(
+              child: CircularProgressIndicator(color: Color(0xFFE8B84A)),
+            );
+        if (gradient != null) {
+          body = DecoratedBox(
+            decoration: BoxDecoration(gradient: gradient),
+            child: body,
+          );
+        }
         return Directionality(
           textDirection: textDirection,
           child: MediaQuery(
@@ -144,10 +155,7 @@ class OurMovieNightsApp extends ConsumerWidget {
                 maxScaleFactor: 1.3,
               ),
             ),
-            child: child ??
-                const Center(
-                  child: CircularProgressIndicator(color: Color(0xFFD9B96A)),
-                ),
+            child: body,
           ),
         );
       },

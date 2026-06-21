@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const CACHE_KEY = "watchlist-metadata-cache-v3";
+  const CACHE_KEY = "watchlist-metadata-cache-v4";
   const ANILIST_API = "https://graphql.anilist.co";
   const TMDB_IMAGE = "https://image.tmdb.org/t/p/w500";
   const TMDB_IMAGE_SM = "https://image.tmdb.org/t/p/w92";
@@ -300,12 +300,133 @@
       plot: base.plot || "",
       title: base.title || "",
       runtime: base.runtime || "",
+      ageRating: base.ageRating || "",
+      seasonCount: base.seasonCount || null,
+      episodeCount: base.episodeCount || null,
       actors: base.actors || [],
       genres,
       director: base.director || "",
       omdbType: base.omdbType || base.mediaType || "",
       contentType: inferContentType(base.mediaType || base.omdbType, genres),
     };
+  }
+
+  function parsePositiveInt(value) {
+    const parsed = parseInt(String(value || "").trim(), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  function formatRuntimeMinutes(minutes) {
+    const value = parsePositiveInt(minutes);
+    return value ? `${value} min` : "";
+  }
+
+  function pickTmdbAgeRating(item, mediaType) {
+    if (!item) return "";
+    if (mediaType === "tv") {
+      const us = (item.content_ratings?.results || []).find(
+        (entry) => entry.iso_3166_1 === "US"
+      );
+      const rating = us?.rating;
+      return rating && rating !== "N/A" ? String(rating) : "";
+    }
+
+    const us = (item.release_dates?.results || []).find(
+      (entry) => entry.iso_3166_1 === "US"
+    );
+    const certification = (us?.release_dates || [])
+      .map((entry) => entry.certification)
+      .find((value) => value && value !== "N/A");
+    return certification ? String(certification) : "";
+  }
+
+  function pickTmdbRuntime(item, mediaType) {
+    if (!item) return "";
+    if (mediaType === "tv") {
+      const times = (item.episode_run_time || [])
+        .map((value) => parsePositiveInt(value))
+        .filter(Boolean);
+      if (!times.length) return "";
+      const avg = Math.round(times.reduce((sum, value) => sum + value, 0) / times.length);
+      return formatRuntimeMinutes(avg);
+    }
+    return item.runtime ? formatRuntimeMinutes(item.runtime) : "";
+  }
+
+  function formatEpisodeDurationLabel(runtime) {
+    const trimmed = String(runtime || "").trim();
+    if (!trimmed) return "";
+    if (/\/ep/i.test(trimmed)) {
+      return trimmed.startsWith("~") ? trimmed : `~${trimmed}`;
+    }
+    const match = trimmed.match(/(\d+)/);
+    const minutes = match ? parsePositiveInt(match[1]) : null;
+    if (minutes) return `~${minutes} min/ep`;
+    return `~${trimmed}/ep`;
+  }
+
+  function buildTitleMetaBadges(meta = {}, contentType = "") {
+    const badges = [];
+    const type = meta.contentType || contentType || "";
+    const ageRating = meta.ageRating || "";
+    const runtime = meta.runtime || "";
+    const seasonCount = parsePositiveInt(meta.seasonCount);
+    const episodeCount = parsePositiveInt(meta.episodeCount);
+    const episodeDuration = formatEpisodeDurationLabel(runtime);
+
+    if (ageRating) badges.push({ kind: "age", label: ageRating });
+
+    if (type === "movies") {
+      if (runtime) badges.push({ kind: "duration", label: runtime });
+    } else if (type === "tvSeries") {
+      if (seasonCount) {
+        badges.push({
+          kind: "seasons",
+          label: `${seasonCount} ${seasonCount === 1 ? "season" : "seasons"}`,
+        });
+      }
+      if (episodeDuration) {
+        badges.push({ kind: "duration", label: episodeDuration });
+      }
+    } else if (type === "anime") {
+      if (seasonCount) {
+        badges.push({
+          kind: "seasons",
+          label: `${seasonCount} ${seasonCount === 1 ? "season" : "seasons"}`,
+        });
+      } else if (episodeCount) {
+        badges.push({
+          kind: "seasons",
+          label: `${episodeCount} ${episodeCount === 1 ? "episode" : "episodes"}`,
+        });
+      }
+      if (episodeDuration) {
+        badges.push({ kind: "duration", label: episodeDuration });
+      }
+    }
+
+    return badges;
+  }
+
+  function formatTitleMetaParts(meta = {}, contentType = "") {
+    return buildTitleMetaBadges(meta, contentType).map((badge) => badge.label);
+  }
+
+  function applyTitleMetaFromDetails(details, target) {
+    if (!details || !target) return;
+    if (details.ageRating) target.ageRating = details.ageRating;
+    if (details.runtime) target.runtime = details.runtime;
+    if (details.seasonCount) target.seasonCount = details.seasonCount;
+    if (details.episodeCount) target.episodeCount = details.episodeCount;
+  }
+
+  function cachedHasTitleMeta(payload) {
+    if (!payload) return false;
+    if (payload.ageRating) return true;
+    if (payload.runtime) return true;
+    if (parsePositiveInt(payload.seasonCount)) return true;
+    if (parsePositiveInt(payload.episodeCount)) return true;
+    return false;
   }
 
   function pickBestSearchMatch(results, query) {
@@ -408,6 +529,9 @@
       genres: media.genres || [],
       mediaType,
       omdbType: mediaType,
+      ageRating: media.isAdult ? "18+" : "",
+      runtime: media.duration ? formatRuntimeMinutes(media.duration) : "",
+      episodeCount: parsePositiveInt(media.episodes),
     });
   }
 
@@ -427,6 +551,9 @@
           averageScore
           startDate { year }
           coverImage { large }
+          episodes
+          duration
+          isAdult
           characters(perPage: 6, role: MAIN) {
             nodes {
               name { full }
@@ -458,6 +585,9 @@
           averageScore
           startDate { year }
           coverImage { large }
+          episodes
+          duration
+          isAdult
           characters(perPage: 6, role: MAIN) {
             nodes {
               name { full }
@@ -606,6 +736,12 @@
       genres,
       mediaType: mediaType === "tv" ? "series" : "movie",
       omdbType: mediaType === "tv" ? "series" : "movie",
+      ageRating: pickTmdbAgeRating(item, mediaType),
+      runtime: pickTmdbRuntime(item, mediaType),
+      seasonCount:
+        mediaType === "tv" ? parsePositiveInt(item.number_of_seasons) : null,
+      episodeCount:
+        mediaType === "tv" ? parsePositiveInt(item.number_of_episodes) : null,
     });
   }
 
@@ -615,7 +751,8 @@
     if (cached) return cached;
 
     const json = await fetchTmdb(`${mediaType}/${tmdbId}`, {
-      append_to_response: "credits",
+      append_to_response:
+        mediaType === "tv" ? "credits,content_ratings" : "credits,release_dates",
     });
     const payload = normalizeTmdbDetail(json, mediaType);
     if (payload) writeCacheEntry(cacheKey, payload);
@@ -724,6 +861,9 @@
       poster: json.Poster && json.Poster !== "N/A" ? json.Poster : "",
       rating: json.imdbRating && json.imdbRating !== "N/A" ? json.imdbRating : "",
       runtime: json.Runtime && json.Runtime !== "N/A" ? json.Runtime : "",
+      ageRating: json.Rated && json.Rated !== "N/A" ? json.Rated : "",
+      seasonCount:
+        json.Type === "series" ? parsePositiveInt(json.totalSeasons) : null,
       actors,
       genres,
       director,
@@ -754,7 +894,7 @@
     const cacheKey = `omdb:${imdbId}`;
     if (!options.refresh) {
       const cached = readCached(cacheKey);
-      if (cached) return cached;
+      if (cached && cachedHasTitleMeta(cached)) return cached;
     }
 
     let data = await fetchFromOmdb(imdbId);
@@ -891,6 +1031,9 @@
     inferContentType,
     resolveMetadataFromLink,
     defaultLinkForDetails,
+    formatTitleMetaParts,
+    buildTitleMetaBadges,
+    applyTitleMetaFromDetails,
     isAnilistLink,
     isMalLink,
     isSupportedLink,

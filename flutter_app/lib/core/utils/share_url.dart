@@ -38,7 +38,8 @@ String buildShareUrl(
     try {
       final configured = Uri.parse(config.publicAppUrl.trim());
       if (configured.host.isNotEmpty && !isLocalDevHost(origin.host)) {
-        final publicOrigin = configured.replace(path: '', query: '', fragment: '');
+        final publicOrigin =
+            configured.replace(path: '', query: '', fragment: '');
         return publicOrigin.replace(
           path: '/gate',
           queryParameters: {'share': shareId},
@@ -61,9 +62,7 @@ bool _isPrivateLanHost(String host) =>
     host.startsWith('172.');
 
 bool isLocalDevHost(String host) =>
-    host == 'localhost' ||
-    host == '127.0.0.1' ||
-    _isPrivateLanHost(host);
+    host == 'localhost' || host == '127.0.0.1' || _isPrivateLanHost(host);
 
 String shareLinkMessage(String listName, int titleCount) =>
     '$listName — $titleCount ${titleCount == 1 ? 'title' : 'titles'} on Our Movie Nights';
