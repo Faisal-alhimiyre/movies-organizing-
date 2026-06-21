@@ -53,6 +53,19 @@ Replace the example with one object per title the user gives you. Output the ful
 ]`;
   }
 
+  function normalizeBulkJsonInput(raw) {
+    return String(raw || "")
+      .replace(/\u201C/g, '"')
+      .replace(/\u201D/g, '"')
+      .replace(/\u201E/g, '"')
+      .replace(/\u00AB/g, '"')
+      .replace(/\u00BB/g, '"');
+  }
+
+  function bulkJsonHasCurlyQuotes(raw) {
+    return /[\u201C\u201D\u201E\u00AB\u00BB]/.test(String(raw || ""));
+  }
+
   function extractJsonArray(raw) {
     const trimmed = String(raw || "").trim();
     if (!trimmed) return null;
@@ -185,10 +198,11 @@ Replace the example with one object per title the user gives you. Output the ful
   }
 
   function extractJsonArrayWithFallback(raw) {
-    const rows = extractJsonArray(raw);
+    const normalized = normalizeBulkJsonInput(raw);
+    const rows = extractJsonArray(normalized);
     if (rows) return { rows, syntaxErrors: [] };
 
-    const inner = extractJsonArrayInner(raw);
+    const inner = extractJsonArrayInner(normalized);
     if (!inner) return { rows: [], syntaxErrors: [] };
 
     return extractJsonObjectsLenient(inner);
@@ -265,8 +279,9 @@ Replace the example with one object per title the user gives you. Output the ful
       if (trimmed && !trimmed.includes("[")) {
         hint = "Expected a JSON array starting with [. Remove any text before the opening [.";
       } else if (trimmed.includes("[")) {
-        hint =
-          "Could not parse that JSON. Check for missing commas, extra commas, or unquoted text.";
+        hint = bulkJsonHasCurlyQuotes(raw)
+          ? 'Could not parse that JSON. Curly “smart quotes” were detected — try re-copying from the AI as plain text.'
+          : "Could not parse that JSON. Check for missing commas, extra commas, or unquoted text.";
       }
       return {
         ok: false,

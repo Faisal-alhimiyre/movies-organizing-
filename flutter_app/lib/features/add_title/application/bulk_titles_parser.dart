@@ -106,6 +106,24 @@ Replace the example with one object per title the user gives you. Output the ful
 ]''';
 }
 
+/// ChatGPT and Word often emit curly “smart quotes” — JSON requires straight `"`.
+String normalizeBulkJsonInput(String raw) {
+  return raw
+      .replaceAll('\u201C', '"')
+      .replaceAll('\u201D', '"')
+      .replaceAll('\u201E', '"')
+      .replaceAll('\u00AB', '"')
+      .replaceAll('\u00BB', '"');
+}
+
+bool bulkJsonHasCurlyQuotes(String raw) {
+  return raw.contains('\u201C') ||
+      raw.contains('\u201D') ||
+      raw.contains('\u201E') ||
+      raw.contains('\u00AB') ||
+      raw.contains('\u00BB');
+}
+
 List<dynamic>? extractJsonArray(String raw) {
   final trimmed = raw.trim();
   if (trimmed.isEmpty) return null;
@@ -259,12 +277,13 @@ JsonArrayExtractResult _extractJsonObjectsLenient(String inner) {
 }
 
 JsonArrayExtractResult extractJsonArrayWithFallback(String raw) {
-  final rows = extractJsonArray(raw);
+  final normalized = normalizeBulkJsonInput(raw);
+  final rows = extractJsonArray(normalized);
   if (rows != null) {
     return JsonArrayExtractResult(rows: rows);
   }
 
-  final inner = _extractJsonArrayInner(raw);
+  final inner = _extractJsonArrayInner(normalized);
   if (inner == null) {
     return const JsonArrayExtractResult(rows: []);
   }
@@ -369,8 +388,9 @@ BulkParseResult parseBulkPaste(String raw) {
       hint =
           'Expected a JSON array starting with [. Remove any text before the opening [.';
     } else if (trimmed.contains('[')) {
-      hint =
-          'Could not parse that JSON. Check for missing commas, extra commas, or unquoted text.';
+      hint = bulkJsonHasCurlyQuotes(raw)
+          ? 'Could not parse that JSON. Curly “smart quotes” were detected — try re-copying from the AI as plain text.'
+          : 'Could not parse that JSON. Check for missing commas, extra commas, or unquoted text.';
     }
     return BulkParseResult(ok: false, error: hint);
   }

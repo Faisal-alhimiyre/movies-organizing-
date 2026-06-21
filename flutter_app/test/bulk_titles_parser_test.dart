@@ -140,6 +140,27 @@ Here you go:
     expect(result.items.length, 1);
     expect(result.items.first.title, 'Trailing Comma');
   });
+  test('parseBulkPaste accepts curly smart quotes from AI output', () {
+    const raw = '''
+[
+{
+“type”: “tvSeries”,
+“genre”: “Animation”,
+“title”: “Arcane”,
+“kind”: “series”,
+“lead”: “Hailee Steinfeld”,
+“secondaryGenres”: [“Fantasy”, “Action”],
+“summary”: “Two sisters are torn apart by class conflict.”,
+“link”: “https://www.imdb.com/title/tt11126994/”
+}
+]
+''';
+    final result = parseBulkPaste(raw);
+    expect(result.ok, isTrue);
+    expect(result.items.length, 1);
+    expect(result.items.first.title, 'Arcane');
+  });
+
   test('buildBulkTemplate includes genre list', () {
     final template = buildBulkTemplate(['Action', 'Drama']);
     expect(template, contains('Action, Drama'));
