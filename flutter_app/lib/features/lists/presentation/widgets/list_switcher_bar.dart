@@ -39,8 +39,9 @@ class ListSwitcherBar extends ConsumerWidget {
         ],
         onChanged: (listId) async {
           if (listId == null || listId == session.listId) return;
-          await ref.read(sessionProvider.notifier).switchList(listId);
-          ref.invalidate(watchlistControllerProvider);
+          await ref
+              .read(watchlistControllerProvider.notifier)
+              .switchToList(listId);
         },
       ),
     );

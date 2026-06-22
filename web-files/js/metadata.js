@@ -365,6 +365,104 @@
     return `~${trimmed}/ep`;
   }
 
+  function normalizeAgeRatingKey(raw) {
+    return String(raw || "")
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, " ");
+  }
+
+  const AGE_RATING_I18N_KEYS = {
+    G: "ageRating.allAges",
+    "TV-G": "ageRating.allAges",
+    TVG: "ageRating.allAges",
+    "TV-Y": "ageRating.kids",
+    TVY: "ageRating.kids",
+    "TV-Y7": "ageRating.ages7",
+    "TV-Y7-FV": "ageRating.ages7",
+    TVY7: "ageRating.ages7",
+    TVY7FV: "ageRating.ages7",
+    PG: "ageRating.parentalGuidance",
+    "TV-PG": "ageRating.parentalGuidance",
+    TVPG: "ageRating.parentalGuidance",
+    "PG-13": "ageRating.ages13",
+    PG13: "ageRating.ages13",
+    "TV-14": "ageRating.ages14",
+    TV14: "ageRating.ages14",
+    R: "ageRating.ages17",
+    "TV-MA": "ageRating.ages17",
+    TVMA: "ageRating.ages17",
+    "NC-17": "ageRating.adultsOnly",
+    NC17: "ageRating.adultsOnly",
+    "18+": "ageRating.adultsOnly",
+    18: "ageRating.adultsOnly",
+    NR: "ageRating.unrated",
+    UNRATED: "ageRating.unrated",
+    "NOT RATED": "ageRating.unrated",
+    NOTRATED: "ageRating.unrated",
+  };
+
+  const AGE_RATING_FALLBACK_EN = {
+    "ageRating.allAges": "All ages",
+    "ageRating.kids": "Kids",
+    "ageRating.ages7": "Ages 7+",
+    "ageRating.parentalGuidance": "Parental guidance",
+    "ageRating.ages13": "Ages 13+",
+    "ageRating.ages14": "Ages 14+",
+    "ageRating.ages17": "Ages 17+",
+    "ageRating.adultsOnly": "Adults only",
+    "ageRating.unrated": "Unrated",
+  };
+
+  const AGE_RATING_SORT_RANK = {
+    allAges: 10,
+    kids: 20,
+    ages7: 30,
+    unrated: 35,
+    parentalGuidance: 40,
+    ages13: 50,
+    ages14: 60,
+    ages17: 70,
+    adultsOnly: 80,
+  };
+
+  function ageRatingCategory(raw) {
+    const trimmed = String(raw || "").trim();
+    if (!trimmed) return null;
+
+    const key = normalizeAgeRatingKey(trimmed);
+    const compact = key.replace(/[-\s]/g, "");
+    const i18nKey = AGE_RATING_I18N_KEYS[key] || AGE_RATING_I18N_KEYS[compact];
+    if (!i18nKey) return null;
+    return i18nKey.replace("ageRating.", "");
+  }
+
+  function ageRatingSortRank(raw) {
+    const trimmed = String(raw || "").trim();
+    if (!trimmed) return null;
+
+    const category = ageRatingCategory(trimmed);
+    if (category && AGE_RATING_SORT_RANK[category] != null) {
+      return AGE_RATING_SORT_RANK[category];
+    }
+    return 55;
+  }
+
+  function formatAgeRatingDisplay(raw) {
+    const trimmed = String(raw || "").trim();
+    if (!trimmed) return "";
+
+    const key = normalizeAgeRatingKey(trimmed);
+    const compact = key.replace(/[-\s]/g, "");
+    const i18nKey = AGE_RATING_I18N_KEYS[key] || AGE_RATING_I18N_KEYS[compact];
+    if (i18nKey) {
+      const translated = window.WatchlistI18n?.t?.(i18nKey);
+      if (translated && translated !== i18nKey) return translated;
+      return AGE_RATING_FALLBACK_EN[i18nKey] || trimmed;
+    }
+    return trimmed;
+  }
+
   function buildTitleMetaBadges(meta = {}, contentType = "") {
     const badges = [];
     const type = meta.contentType || contentType || "";
@@ -374,7 +472,13 @@
     const episodeCount = parsePositiveInt(meta.episodeCount);
     const episodeDuration = formatEpisodeDurationLabel(runtime);
 
-    if (ageRating) badges.push({ kind: "age", label: ageRating });
+    if (ageRating) {
+      badges.push({
+        kind: "age",
+        label: formatAgeRatingDisplay(ageRating),
+        title: ageRating,
+      });
+    }
 
     if (type === "movies") {
       if (runtime) badges.push({ kind: "duration", label: runtime });
@@ -1032,6 +1136,8 @@
     resolveMetadataFromLink,
     defaultLinkForDetails,
     formatTitleMetaParts,
+    formatAgeRatingDisplay,
+    ageRatingSortRank,
     buildTitleMetaBadges,
     applyTitleMetaFromDetails,
     isAnilistLink,

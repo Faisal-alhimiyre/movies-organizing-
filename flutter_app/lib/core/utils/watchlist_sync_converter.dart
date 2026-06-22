@@ -117,22 +117,35 @@ WatchlistConvertResult rowsToWatchlist(List<Map<String, dynamic>> rows) {
 
     section[genre]!.add(entry);
 
-    if (row['watched'] == true) {
-      final itemId = row['item_id']?.toString() ?? '';
-      if (itemId.isEmpty) continue;
+    final itemId = row['item_id']?.toString() ?? '';
+    if (itemId.isEmpty) continue;
 
+    // Rows with granular progress but !watched are still tracked (in-progress).
+    final isWatched = row['watched'] == true;
+    final rawProgress = row['watch_progress'];
+    final hasProgress = rawProgress is Map && rawProgress.isNotEmpty;
+
+    if (isWatched || hasProgress) {
       final watchEntry = <String, dynamic>{};
-      final ratingRaw = row['watch_rating'];
-      if (ratingRaw != null && ratingRaw.toString().isNotEmpty) {
-        final rating =
-            double.tryParse(ratingRaw.toString().replaceAll(',', '.'));
-        if (rating != null && rating.isFinite) {
-          watchEntry['rating'] = rating;
+
+      if (isWatched) {
+        final ratingRaw = row['watch_rating'];
+        if (ratingRaw != null && ratingRaw.toString().isNotEmpty) {
+          final rating =
+              double.tryParse(ratingRaw.toString().replaceAll(',', '.'));
+          if (rating != null && rating.isFinite) {
+            watchEntry['rating'] = rating;
+          }
         }
+
+        final note = row['watch_note']?.toString().trim() ?? '';
+        if (note.isNotEmpty) watchEntry['note'] = note;
       }
 
-      final note = row['watch_note']?.toString().trim() ?? '';
-      if (note.isNotEmpty) watchEntry['note'] = note;
+      // Attach granular progress when present.
+      if (hasProgress) {
+        watchEntry['progress'] = Map<String, dynamic>.from(rawProgress as Map);
+      }
 
       watched[itemId] = watchEntry;
     }
@@ -205,6 +218,8 @@ List<Map<String, dynamic>> watchlistToRows(
           'watched': watchMeta.watched,
           'watch_rating': watchMeta.rating,
           'watch_note': watchMeta.note,
+          'watch_progress': watchMeta.progress ??
+              <String, dynamic>{'version': 1, 'episodes': <String>[]},
           'added_at': resolveAddedAtIso(map, itemId, existingAddedAt),
           'updated_at': now,
         });
@@ -232,10 +247,11 @@ List<String> _parseLeadsForRow(Map<String, dynamic> map) {
       .toList();
 }
 
-({bool watched, Object? rating, String note}) _watchMetaForRow(dynamic raw) {
-  if (raw == null) return (watched: false, rating: null, note: '');
-  if (raw == true) return (watched: true, rating: null, note: '');
-  if (raw is! Map) return (watched: false, rating: null, note: '');
+({bool watched, Object? rating, String note, Map<String, dynamic>? progress})
+    _watchMetaForRow(dynamic raw) {
+  if (raw == null) return (watched: false, rating: null, note: '', progress: null);
+  if (raw == true) return (watched: true, rating: null, note: '', progress: null);
+  if (raw is! Map) return (watched: false, rating: null, note: '', progress: null);
 
   final map = Map<String, dynamic>.from(raw);
   final ratingRaw = map['rating'];
@@ -245,9 +261,16 @@ List<String> _parseLeadsForRow(Map<String, dynamic> map) {
     if (parsed != null && parsed.isFinite) rating = parsed;
   }
 
+  Map<String, dynamic>? progress;
+  final rawProg = map['progress'];
+  if (rawProg is Map && rawProg.isNotEmpty) {
+    progress = Map<String, dynamic>.from(rawProg);
+  }
+
   return (
     watched: true,
     rating: rating,
     note: map['note']?.toString().trim() ?? '',
+    progress: progress,
   );
 }

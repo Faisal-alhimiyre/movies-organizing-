@@ -1,4 +1,5 @@
 import '../../../core/utils/watchlist_parser.dart';
+import '../../../core/utils/title_meta_format.dart';
 import '../../../models/watchlist_item.dart';
 
 enum WatchedFilter { all, watched, unwatched }
@@ -66,7 +67,10 @@ bool isDateSortSource(String source) =>
     source == 'added' || source == 'release';
 
 bool isRatingSortSource(String source) =>
-    source == 'imdb' || source == 'anilist' || source == 'personal';
+    source == 'imdb' ||
+    source == 'anilist' ||
+    source == 'personal' ||
+    source == 'age';
 
 bool isToggleSortActive(WatchlistFilterState filters) =>
     filters.sortSource != 'all';
@@ -170,6 +174,8 @@ double? ratingSortScore(
       return itemAnilistSortScore(item);
     case 'personal':
       return itemPersonalScore(item, watched);
+    case 'age':
+      return ageRatingSortRank(item.ageRating)?.toDouble();
     default:
       return null;
   }
@@ -432,6 +438,7 @@ const sortFilterOptions = [
   'all',
   'added',
   'release',
+  'age',
   'imdb',
   'anilist',
   'personal',

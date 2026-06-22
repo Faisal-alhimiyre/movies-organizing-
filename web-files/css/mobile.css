@@ -35,8 +35,21 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: start;
-    gap: 0.35rem;
-    padding: 0.4rem;
+    gap: clamp(0.28rem, 1.1vw, 0.35rem);
+    padding: clamp(0.32rem, 1.1vw, 0.4rem);
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .panel__filters > .genre-filter,
+  .panel__filters > .watched-filter,
+  .panel__filters > .rating-filter {
+    flex: unset;
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    overflow: hidden;
   }
 
   .panel__filters > .search {
@@ -69,7 +82,7 @@
   }
 
   .panel-filter__label {
-    font-size: 0.68rem;
+    font-size: clamp(0.62rem, 2.6vw, 0.68rem);
     margin-bottom: 0.12rem;
   }
 
@@ -85,6 +98,7 @@
     grid-row: 2;
     width: 100%;
     min-width: 0;
+    max-width: 100%;
     align-self: start;
   }
 
@@ -93,12 +107,14 @@
     grid-row: 2;
     width: 100%;
     min-width: 0;
+    max-width: 100%;
     align-self: start;
   }
 
   .watched-filter__select {
     width: 100%;
     min-width: 0;
+    max-width: 100%;
   }
 
   .rating-filter {
@@ -106,13 +122,38 @@
     grid-row: 2;
     width: 100%;
     min-width: 0;
+    max-width: 100%;
     align-self: start;
     align-items: stretch;
   }
 
   .rating-filter__controls {
+    display: flex;
+    align-items: stretch;
     width: 100%;
     min-width: 0;
+    max-width: 100%;
+    gap: clamp(0.18rem, 1vw, 0.35rem);
+  }
+
+  .rating-filter__select {
+    flex: 1 1 auto;
+    width: 0;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .sort-direction-btn {
+    flex: 0 0 auto;
+    width: clamp(1.45rem, 6.2vw, 2.25rem);
+    height: clamp(2rem, 9vw, 2.35rem);
+    min-width: clamp(1.45rem, 6.2vw, 2.25rem);
+    border-radius: clamp(6px, 1.8vw, 8px);
+  }
+
+  .sort-direction-btn__icon {
+    width: clamp(0.85rem, 3.6vw, 1.1rem);
+    height: clamp(0.85rem, 3.6vw, 1.1rem);
   }
 
   .search__input {
@@ -135,14 +176,33 @@
   .genre-filter__select,
   .watched-filter__select,
   .rating-filter__select {
-    height: 2.35rem;
-    min-height: 2.35rem;
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    height: clamp(2rem, 9vw, 2.35rem);
+    min-height: clamp(2rem, 9vw, 2.35rem);
     max-height: none;
-    padding-inline-end: 1.85rem;
-    font-size: 0.78rem;
+    box-sizing: border-box;
+    padding-inline-start: clamp(0.28rem, 1.2vw, 0.5rem);
+    padding-inline-end: clamp(1.35rem, 4.8vw, 1.85rem);
+    font-size: clamp(0.62rem, 2.9vw, 0.78rem);
+    line-height: 1.2;
     background-image: var(--select-chevron);
     background-repeat: no-repeat;
-    background-position: right 0.45rem center;
+    background-position: right clamp(0.32rem, 1.2vw, 0.45rem) center;
+    background-size: 0.55rem auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  html[dir="rtl"] .genre-filter__select,
+  html[dir="rtl"] .watched-filter__select,
+  html[dir="rtl"] .rating-filter__select {
+    background-position: left clamp(0.32rem, 1.2vw, 0.45rem) center;
+    padding-inline-start: clamp(1.35rem, 4.8vw, 1.85rem);
+    padding-inline-end: clamp(0.28rem, 1.2vw, 0.5rem);
   }
 
   .type-tabs {
@@ -155,9 +215,9 @@
     flex: 1 1 0;
     min-width: 0;
     justify-content: center;
-    min-height: 2.35rem;
-    padding: 0.35rem 0.25rem;
-    font-size: 0.72rem;
+    min-height: clamp(28px, 8vw, 2.35rem);
+    padding: clamp(0.28rem, 1vw, 0.35rem) clamp(0.18rem, 0.9vw, 0.25rem);
+    font-size: clamp(0.66rem, 2.8vw, 0.72rem);
     gap: 0.18rem;
   }
 
@@ -227,7 +287,8 @@
     overflow: hidden;
     min-width: 0;
     min-height: 0;
-    padding: 0.22rem 0.32rem 0.28rem;
+    padding: clamp(0.18rem, 0.8vw, 0.22rem) clamp(0.24rem, 1.1vw, 0.32rem)
+      clamp(0.22rem, 0.9vw, 0.28rem);
   }
 
   .card:has(.card-menu__panel:not([hidden])) .card__body {
@@ -266,6 +327,12 @@
     color: var(--watched, #4ade80);
     border-color: rgba(74, 222, 128, 0.28);
     background: rgba(74, 222, 128, 0.08);
+  }
+
+  .card__watch-status--in-progress {
+    color: var(--in-progress, #fb923c);
+    border-color: rgba(251, 146, 60, 0.28);
+    background: rgba(251, 146, 60, 0.08);
   }
 
   .card__watch-rating {
@@ -381,7 +448,7 @@
   .app[data-layout="poster"] .cards,
   .app[data-layout="hover"] .cards {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.4rem;
+    gap: clamp(0.28rem, 1.1vw, 0.4rem);
   }
 
   .card__summary {
@@ -583,14 +650,14 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.28rem;
+    gap: 0.18rem;
     max-width: 100%;
     margin: 0;
-    padding: 0.28rem 0.3rem 0.42rem;
+    padding: 0.2rem 0.28rem 0.26rem;
     background: linear-gradient(
       180deg,
-      rgba(0, 0, 0, 0.88) 0%,
-      rgba(0, 0, 0, 0.72) 72%,
+      rgba(0, 0, 0, 0.62) 0%,
+      rgba(0, 0, 0, 0.38) 48%,
       rgba(0, 0, 0, 0) 100%
     );
     border-radius: 0;
@@ -624,14 +691,24 @@
 
   .card__overlay .card__section--genres {
     width: 100%;
-    margin-top: 0.04rem;
-    padding-top: 0.22rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .card__overlay .card__genre-row--single-line {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .card__overlay .card__genre-row--single-line::-webkit-scrollbar {
+    display: none;
   }
 
   .card__overlay .badge {
-    padding: 0.1rem 0.3rem;
-    font-size: 0.46rem;
+    padding: clamp(0.08rem, 0.28vw, 0.1rem) clamp(0.22rem, 0.8vw, 0.3rem);
+    font-size: clamp(0.4rem, 1.15vw, 0.46rem);
     border-radius: 999px;
     line-height: 1.2;
   }
@@ -1196,50 +1273,40 @@
     font-size: 0.72rem;
   }
 
+  /* Narrow phones only: give Sort its own row so Genre/Status don't overlap */
   .panel__filters {
-    gap: 0.35rem;
-    padding: 0.35rem;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
-  .search__input {
-    height: 3rem;
-    min-height: 3rem;
+  .genre-filter {
+    grid-column: 1;
+    grid-row: 2;
   }
 
-  .type-tab {
-    min-height: 30px;
-    padding: 0.3rem 0.42rem;
-    font-size: 0.7rem;
+  .watched-filter {
+    grid-column: 2;
+    grid-row: 2;
   }
 
-  .cards,
-  .app[data-layout="poster"] .cards,
-  .app[data-layout="hover"] .cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.35rem;
+  .rating-filter {
+    grid-column: 1 / -1;
+    grid-row: 3;
   }
 
-  .app[data-layout="hover"] .cards {
-    grid-template-columns: 1fr;
-    gap: 0.4rem;
-  }
-
-  .app[data-layout="poster"] .card__body {
-    padding: 0.22rem 0.32rem 0.28rem;
-  }
-
-  .app[data-layout="hover"] .card {
-    padding: 0.42rem 0.38rem;
-  }
-
-  .app[data-layout="hover"] .card__head .card__title {
-    font-size: 0.76rem;
+  .panel__clear-filters {
+    grid-row: 4;
   }
 }
 
 /* --------------------------------------------------------------------------
    Expanded card focus (tap a grid card on phone)
    -------------------------------------------------------------------------- */
+
+/* ── DEPRECATED (Stage C) ─────────────────────────────────────────────────
+   .mobile-card-focus* styles are superseded by title-detail.css.
+   These rules are kept as a safety fallback while the new module is verified.
+   Remove after verifying title-detail works on mobile, tablet, and desktop.
+   ─────────────────────────────────────────────────────────────────────────── */
 
 .mobile-card-focus {
   position: fixed;
@@ -1378,6 +1445,27 @@
 .mobile-card-focus__badge-row .badge {
   font-size: 0.58rem;
   padding: 0.14rem 0.38rem;
+}
+
+.mobile-card-focus__section-label {
+  display: block;
+  margin-top: 0.35rem;
+  margin-bottom: 0.12rem;
+  font-size: 0.52rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9ca3af);
+}
+
+.mobile-card-focus__badge-row--genres {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.mobile-card-focus__badge-row--genres::-webkit-scrollbar {
+  display: none;
 }
 
 .mobile-card-focus__title {

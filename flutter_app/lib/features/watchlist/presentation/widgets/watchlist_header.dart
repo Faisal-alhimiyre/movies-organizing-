@@ -117,10 +117,8 @@ class WatchlistHeader extends ConsumerWidget {
                           theme: theme,
                           onSwitchList: (listId) {
                             ref
-                                .read(sessionProvider.notifier)
-                                .switchList(listId)
-                                .then((_) => ref
-                                    .invalidate(watchlistControllerProvider));
+                                .read(watchlistControllerProvider.notifier)
+                                .switchToList(listId);
                           },
                         )
                       : Text(

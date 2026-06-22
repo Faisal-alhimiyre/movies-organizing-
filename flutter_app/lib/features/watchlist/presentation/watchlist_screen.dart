@@ -27,6 +27,7 @@ import '../../lists/presentation/widgets/move_list_sheet.dart';
 import '../application/watchlist_controller.dart';
 import '../application/watchlist_filters.dart';
 import '../application/link_preview_controller.dart';
+import '../application/title_meta_backfill.dart';
 import '../application/title_meta_backfill_controller.dart';
 import '../application/poster_backfill_controller.dart';
 import '../application/ratings_backfill.dart';
@@ -886,6 +887,7 @@ class _WatchlistBody extends ConsumerWidget {
     final filters = ref.watch(watchlistFilterProvider);
     final yearProgress = ref.watch(yearBackfillControllerProvider);
     final ratingsProgress = ref.watch(ratingsBackfillControllerProvider);
+    final titleMetaProgress = ref.watch(titleMetaBackfillControllerProvider);
     final config = ref.watch(appConfigProvider);
     final filtered = filterWatchlistItems(
       items: snapshot.items,
@@ -908,11 +910,19 @@ class _WatchlistBody extends ConsumerWidget {
       typeFilter: typeFilter,
       filters: filters,
     );
-    final backfillRunning = yearProgress.running || ratingsProgress.running;
+    final backfillRunning =
+        yearProgress.running || ratingsProgress.running || titleMetaProgress.running;
     final releaseHintKey = isReleaseSortActive(filters)
         ? releaseSortEmptyHintKey(
             items: snapshot.items,
             backfillRunning: backfillRunning,
+            config: config,
+          )
+        : null;
+    final ageHintKey = isAgeSortActive(filters)
+        ? ageSortEmptyHintKey(
+            items: snapshot.items,
+            backfillRunning: titleMetaProgress.running,
             config: config,
           )
         : null;
@@ -972,6 +982,7 @@ class _WatchlistBody extends ConsumerWidget {
                         l10n: l10n,
                         filters: filters,
                         releaseHintKey: releaseHintKey,
+                        ageHintKey: ageHintKey,
                         ratingHintKey: ratingHintKey,
                       ),
                       textAlign: TextAlign.center,
@@ -1007,6 +1018,7 @@ String _emptyFilterMessage({
   required L10n l10n,
   required WatchlistFilterState filters,
   required String? releaseHintKey,
+  required String? ageHintKey,
   required String? ratingHintKey,
 }) {
   if (ratingHintKey != null && !_hasPanelFilters(filters)) {
@@ -1017,6 +1029,14 @@ String _emptyFilterMessage({
       'empty.anilistRatingLoading' => l10n.emptyAnilistRatingLoading,
       'empty.anilistRatingMissing' => l10n.emptyAnilistRatingMissing,
       _ => l10n.message(ratingHintKey),
+    };
+  }
+  if (ageHintKey != null && !_hasPanelFilters(filters)) {
+    return switch (ageHintKey) {
+      'empty.ageRatingLoading' => l10n.emptyAgeRatingLoading,
+      'empty.ageRatingMissing' => l10n.emptyAgeRatingMissing,
+      'empty.yearsNeedConfig' => l10n.emptyYearsNeedConfig,
+      _ => l10n.message(ageHintKey),
     };
   }
   if (releaseHintKey != null && !_hasPanelFilters(filters)) {

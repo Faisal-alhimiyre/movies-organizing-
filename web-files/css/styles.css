@@ -3813,8 +3813,21 @@ html[data-theme] .header__toolbar .btn--primary:hover {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: start;
-    gap: 0.35rem;
-    padding: 0.4rem;
+    gap: clamp(0.28rem, 1.1vw, 0.35rem);
+    padding: clamp(0.32rem, 1.1vw, 0.4rem);
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .panel__filters > .genre-filter,
+  .panel__filters > .watched-filter,
+  .panel__filters > .rating-filter {
+    flex: unset;
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    overflow: hidden;
   }
 
   .panel__filters > .search {
@@ -3845,6 +3858,7 @@ html[data-theme] .header__toolbar .btn--primary:hover {
     grid-row: 2;
     width: 100%;
     min-width: 0;
+    max-width: 100%;
     align-self: start;
   }
 
@@ -3853,6 +3867,7 @@ html[data-theme] .header__toolbar .btn--primary:hover {
     grid-row: 2;
     width: 100%;
     min-width: 0;
+    max-width: 100%;
     align-self: start;
   }
 
@@ -3861,6 +3876,7 @@ html[data-theme] .header__toolbar .btn--primary:hover {
     grid-row: 2;
     width: 100%;
     min-width: 0;
+    max-width: 100%;
     align-self: start;
   }
 
@@ -3913,7 +3929,7 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   .cards,
   .app[data-layout="poster"] .cards {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.4rem;
+    gap: clamp(0.28rem, 1.1vw, 0.4rem);
   }
 
   .app[data-layout="hover"] .cards {
@@ -4053,7 +4069,7 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   }
 
   .card__overlay .card__title {
-    font-size: 0.68rem;
+    font-size: clamp(0.62rem, 2.75vw, 0.68rem);
     line-height: 1.2;
     color: #fff;
   }
@@ -4073,14 +4089,14 @@ html[data-theme] .header__toolbar .btn--primary:hover {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.28rem;
+    gap: 0.18rem;
     max-width: 100%;
     margin: 0;
-    padding: 0.28rem 0.3rem 0.42rem;
+    padding: 0.2rem 0.28rem 0.26rem;
     background: linear-gradient(
       180deg,
-      rgba(0, 0, 0, 0.88) 0%,
-      rgba(0, 0, 0, 0.72) 72%,
+      rgba(0, 0, 0, 0.62) 0%,
+      rgba(0, 0, 0, 0.38) 48%,
       rgba(0, 0, 0, 0) 100%
     );
     pointer-events: none;
@@ -4113,9 +4129,19 @@ html[data-theme] .header__toolbar .btn--primary:hover {
 
   .card__overlay .card__section--genres {
     width: 100%;
-    margin-top: 0.04rem;
-    padding-top: 0.22rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .card__overlay .card__genre-row--single-line {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .card__overlay .card__genre-row--single-line::-webkit-scrollbar {
+    display: none;
   }
 
   .card__overlay .card__info-row,

@@ -57,9 +57,9 @@
   }
 
   function watchEntryMeta(entry) {
-    if (!entry) return { watched: false, rating: null, note: "" };
-    if (entry === true) return { watched: true, rating: null, note: "" };
-    if (typeof entry !== "object") return { watched: false, rating: null, note: "" };
+    if (!entry) return { watched: false, rating: null, note: "", progress: null };
+    if (entry === true) return { watched: true, rating: null, note: "", progress: null };
+    if (typeof entry !== "object") return { watched: false, rating: null, note: "", progress: null };
 
     const ratingRaw = entry.rating;
     const rating =
@@ -67,10 +67,30 @@
         ? null
         : Number(String(ratingRaw).replace(",", "."));
 
+    let progress = null;
+    if (entry.progress && typeof entry.progress === "object" &&
+        Array.isArray(entry.progress.episodes)) {
+      // Preserve the completed flag so the DB row accurately reflects state
+      // and the client can restore it on next load without needing episode data.
+      progress = {
+        version: 1,
+        episodes: entry.progress.episodes,
+        ...(entry.progress.completed === true ? { completed: true } : {}),
+      };
+    }
+
+    // `watched` in the DB means "legacy-complete or fully-granular-complete".
+    // In-progress entries (granular progress without completed=true) store
+    // watched=false so that watched_count stays accurate.
+    const isLegacyComplete = progress === null; // no granular progress object
+    const isGranularComplete = progress !== null && entry.progress?.completed === true;
+    const watched = isLegacyComplete || isGranularComplete;
+
     return {
-      watched: true,
+      watched,
       rating: Number.isFinite(rating) ? rating : null,
       note: entry.note ? String(entry.note).trim() : "",
+      progress,
     };
   }
 
@@ -131,6 +151,7 @@
             watched: watchMeta.watched,
             watch_rating: watchMeta.rating,
             watch_note: watchMeta.note,
+            watch_progress: watchMeta.progress || { version: 1, episodes: [] },
             added_at: resolveAddedAtIso(entry, itemId, existingAddedAt),
             updated_at: now,
           });
@@ -193,13 +214,30 @@
 
       watchlist[contentType][genre].push(entry);
 
-      if (row.watched) {
+      // Rows with granular progress but !watched are also tracked (in-progress state).
+      const rawProgress = row.watch_progress;
+      const hasProgress =
+        rawProgress &&
+        typeof rawProgress === "object" &&
+        Array.isArray(rawProgress.episodes) &&
+        rawProgress.episodes.length > 0;
+
+      if (row.watched || hasProgress) {
         const watchEntry = {};
-        if (row.watch_rating != null && row.watch_rating !== "") {
-          const rating = Number(row.watch_rating);
-          if (Number.isFinite(rating)) watchEntry.rating = rating;
+        if (row.watched) {
+          if (row.watch_rating != null && row.watch_rating !== "") {
+            const rating = Number(row.watch_rating);
+            if (Number.isFinite(rating)) watchEntry.rating = rating;
+          }
+          if (row.watch_note) watchEntry.note = row.watch_note;
         }
-        if (row.watch_note) watchEntry.note = row.watch_note;
+        if (hasProgress) {
+          watchEntry.progress = {
+            version: 1,
+            episodes: rawProgress.episodes,
+            ...(rawProgress.completed === true ? { completed: true } : {}),
+          };
+        }
         watched[row.item_id] = watchEntry;
       }
     }
@@ -464,7 +502,15 @@
     dispatchStatus("pending");
 
     syncTimer = setTimeout(async () => {
+      if (window.WatchlistAuth?.getProfile() !== listId) {
+        onComplete?.({ ok: false, skipped: true });
+        return;
+      }
       const payload = getPayload();
+      if (window.WatchlistAuth?.getProfile() !== listId) {
+        onComplete?.({ ok: false, skipped: true });
+        return;
+      }
       const result = await pushSnapshot(
         listId,
         payload.watchlist,

@@ -127,7 +127,101 @@
     ratingPickerValue: null,
     ratingPickerChosen: false,
     shareArrival: null,
+    activeListId: null,
   };
+
+  function canPersistActiveList(listId = state.activeListId) {
+    return Boolean(
+      listId &&
+        listId === state.activeListId &&
+        listId === window.WatchlistAuth?.getProfile(),
+    );
+  }
+
+  function stopBackgroundListWrites() {
+    ratingsBackfillRunning = false;
+    titleMetaBackfillRunning = false;
+    yearsBackfillRunning = false;
+    window.WatchlistSync?.cancelScheduledPush();
+  }
+
+  function switchToList(nextListId) {
+    activateList(nextListId);
+  }
+
+  function activateList(nextListId) {
+    const currentId = state.activeListId || window.WatchlistAuth?.getProfile();
+    if (!nextListId || !currentId || nextListId === currentId) return;
+
+    stopBackgroundListWrites();
+
+    if (state.data) {
+      state.data = itemsToNested(state.items);
+      window.WatchlistAuth.writeListData(currentId, state.data, state.watched);
+      writeSyncMeta(currentId, { localUpdated: Date.now() });
+    }
+
+    window.WatchlistAuth.switchList(nextListId);
+    state.activeListId = nextListId;
+
+    state.watched = loadWatchedState();
+    state.data = loadWatchlist();
+    state.items = flattenWatchlist(state.data);
+    state.data = itemsToNested(state.items);
+
+    state.syncStatus = window.WatchlistSync?.isConfigured() ? "pending" : "local";
+
+    updateHeaderTitle();
+    renderListSwitcher();
+    updateGenreOptions();
+    if (els.ratingFilter?.value === "rt-best" || els.ratingFilter?.value === "rt-worst") {
+      els.ratingFilter.value = "all";
+      applyRatingFilter("all");
+    }
+    updateRatingFilterOptions();
+    updateStats();
+    updateAppBanners();
+    render();
+
+    void runBackgroundCloudSync();
+  }
+
+  async function runBackgroundCloudSync() {
+    if (!window.WatchlistSync?.isConfigured()) return;
+    const listId = state.activeListId;
+    if (!listId) return;
+
+    state.syncStatus = "pending";
+    updateStats();
+
+    try {
+      await syncAccountLists();
+      if (state.activeListId !== listId) return;
+      await reconcileWithCloud();
+      if (state.activeListId !== listId) return;
+
+      const { data, watched } = storageKeys();
+      localStorage.setItem(data, JSON.stringify(state.data));
+      localStorage.setItem(watched, JSON.stringify(state.watched));
+
+      if (state.syncStatus === "pending") {
+        state.syncStatus = "saved";
+      }
+
+      updateHeaderTitle();
+      renderListSwitcher();
+      updateGenreOptions();
+      updateStats();
+      render();
+      void runMetadataBackfill();
+    } catch (error) {
+      console.warn("[sync] background sync failed:", error);
+      if (state.activeListId === listId) {
+        state.syncStatus = resolveSyncFailureStatus();
+        updateStats();
+      }
+    }
+  }
 
   const els = {
     main: document.getElementById("mainContent"),
@@ -420,8 +514,9 @@
   }
 
   function queueCloudSync() {
-    const listId = window.WatchlistAuth?.getProfile();
-    if (!listId || !window.WatchlistSync?.isConfigured()) return;
+    const listId = state.activeListId;
+    if (!listId || !canPersistActiveList(listId)) return;
+    if (!window.WatchlistSync?.isConfigured()) return;
 
     touchLocalUpdated();
     state.syncStatus = "pending";
@@ -555,6 +650,7 @@
       : null;
     const meta = readSyncMeta(listId);
     const remote = await window.WatchlistSync.fetchSnapshot(listId);
+    if (window.WatchlistAuth?.getProfile() !== listId) return;
     const syncMeta = listSyncMeta();
 
     if (!remote) {
@@ -584,6 +680,7 @@
       remoteHasData &&
       (!localHasData || remoteUpdated > localStamp)
     ) {
+      if (window.WatchlistAuth?.getProfile() !== listId) return;
       const localAddedById = new Map();
       if (localHasData) {
         for (const item of flattenWatchlist(state.data)) {
@@ -616,6 +713,7 @@
     }
 
     if (localHasData && (!remoteHasData || localStamp > remoteUpdated)) {
+      if (window.WatchlistAuth?.getProfile() !== listId) return;
       const result = await window.WatchlistSync.pushSnapshot(
         listId,
         state.data,
@@ -632,12 +730,14 @@
   }
 
   function saveWatched() {
+    if (!canPersistActiveList()) return;
     const { watched } = storageKeys();
     localStorage.setItem(watched, JSON.stringify(state.watched));
     queueCloudSync();
   }
 
   function saveData() {
+    if (!canPersistActiveList()) return;
     const { data } = storageKeys();
     state.data = itemsToNested(state.items);
     localStorage.setItem(data, JSON.stringify(state.data));
@@ -1064,6 +1164,12 @@
     if (rating != null) entry.rating = rating;
     if (value.note) entry.note = String(value.note).trim();
 
+    // Preserve granular progress when present.
+    if (value.progress && typeof value.progress === "object" &&
+        Array.isArray(value.progress.episodes)) {
+      entry.progress = { version: 1, episodes: value.progress.episodes };
+    }
+
     return entry;
   }
 
@@ -1456,9 +1562,33 @@
     return matching[0];
   }
 
+  /**
+   * Returns the three-state derived progress for a title using only its watch
+   * entry (no episode-count lookups required — suitable for list filtering).
+   *
+   * "watched"    — legacy-complete entry (bulk "Mark watched") or entry with no
+   *                granular progress object (e.g. entry = {} or {rating, note})
+   * "inProgress" — entry has a granular episodes array with ≥1 watched key
+   * "unwatched"  — no entry, or entry has granular progress but 0 watched keys
+   */
+  function itemProgressState(id) {
+    const raw = state.watched[id];
+    if (!raw) return "unwatched";
+    const entry = normalizeWatchEntry(raw);
+    if (!entry) return "unwatched";
+    const P = window.WatchlistProgress;
+    if (!P || P.isLegacyComplete(entry)) return "watched";
+    const prog = P.getProgress(entry);
+    if (!prog || !Array.isArray(prog.episodes)) return "unwatched";
+    if (prog.completed === true) return "watched";      // all episodes annotated complete
+    if (prog.episodes.length > 0) return "inProgress"; // some episodes watched
+    return "unwatched";
+  }
+
   function itemMatchesWatchedFilter(item) {
-    if (state.watchedFilter === "watched") return isItemWatched(item.id);
-    if (state.watchedFilter === "unwatched") return !isItemWatched(item.id);
+    if (state.watchedFilter === "watched") return itemProgressState(item.id) === "watched";
+    if (state.watchedFilter === "inProgress") return itemProgressState(item.id) === "inProgress";
+    if (state.watchedFilter === "unwatched") return itemProgressState(item.id) === "unwatched";
     return true;
   }
 
@@ -1496,6 +1626,7 @@
     if (source === "imdb") return getItemImdbScore(item);
     if (source === "anilist") return getItemAnilistSortScore(item);
     if (source === "personal") return getItemPersonalScore(item);
+    if (source === "age") return window.WatchlistMetadata?.ageRatingSortRank?.(item.ageRating) ?? null;
     return null;
   }
 
@@ -1571,7 +1702,7 @@
   }
 
   function isRatingSortSource(source) {
-    return source === "imdb" || source === "anilist" || source === "personal";
+    return source === "imdb" || source === "anilist" || source === "personal" || source === "age";
   }
 
   function isReleaseSortActive() {
@@ -1700,6 +1831,7 @@
       { value: "all", labelKey: "filter.ratingOptionAll" },
       { value: "added", labelKey: "filter.ratingOptionAdded" },
       { value: "release", labelKey: "filter.ratingOptionRelease" },
+      { value: "age", labelKey: "filter.ratingOptionAge" },
       { value: "imdb", labelKey: "filter.ratingOptionImdb" },
       { value: "anilist", labelKey: "filter.ratingOptionAnilist" },
       { value: "personal", labelKey: "filter.ratingOptionPersonal" },
@@ -1719,7 +1851,7 @@
     if (value === "release") {
       return { source: "release", sort: "newest" };
     }
-    if (value === "imdb" || value === "anilist" || value === "personal") {
+    if (value === "imdb" || value === "anilist" || value === "personal" || value === "age") {
       return { source: value, sort: "best" };
     }
     const [source, sort] = String(value).split("-");
@@ -2455,6 +2587,14 @@
       return null;
     }
 
+    if (source === "age") {
+      if (titleMetaBackfillRunning) return t("empty.ageRatingLoading");
+      if (yearBackfillNeedsMovieApiKeys()) return t("empty.yearsNeedConfig");
+      const withAge = state.items.some((item) => String(item.ageRating || "").trim());
+      if (!withAge) return t("empty.ageRatingMissing");
+      return null;
+    }
+
     if (ratingsBackfillRunning) {
       return source === "anilist" ? t("empty.anilistRatingLoading") : t("empty.ratingLoading");
     }
@@ -2569,6 +2709,9 @@
     const queue = state.items.filter(itemNeedsYearBackfill);
     if (!queue.length) return;
 
+    const listId = state.activeListId;
+    if (!listId) return;
+
     if (yearBackfillNeedsMovieApiKeys()) {
       if (isReleaseSortActive()) render();
       return;
@@ -2582,6 +2725,7 @@
     if (isReleaseSortActive()) render();
 
     for (const item of queue) {
+      if (!yearsBackfillRunning || !canPersistActiveList(listId)) break;
       try {
         const meta = await fetchYearForItem(item);
         const year = formatReleaseYearDisplay(meta?.year);
@@ -2627,6 +2771,9 @@
       return;
     }
 
+    const listId = state.activeListId;
+    if (!listId) return;
+
     ratingsBackfillRunning = true;
     const total = anilistQueue.length + imdbQueue.length;
     let done = 0;
@@ -2658,6 +2805,7 @@
     };
 
     for (const item of anilistQueue) {
+      if (!ratingsBackfillRunning || !canPersistActiveList(listId)) break;
       try {
         await applyAnilistBackfill(item);
       } catch (error) {
@@ -2673,6 +2821,7 @@
     }
 
     for (const item of imdbQueue) {
+      if (!ratingsBackfillRunning || !canPersistActiveList(listId)) break;
       try {
         if (!window.WatchlistMetadata?.hasOmdbKey?.()) break;
 
@@ -2748,10 +2897,14 @@
     const queue = state.items.filter(itemNeedsTitleMetaBackfill);
     if (!queue.length) return;
 
+    const listId = state.activeListId;
+    if (!listId) return;
+
     titleMetaBackfillRunning = true;
     let updated = 0;
 
     for (const item of queue) {
+      if (!titleMetaBackfillRunning || !canPersistActiveList(listId)) break;
       try {
         let meta = null;
         const imdbId = getImdbId(item);
@@ -3087,8 +3240,13 @@
     if (!badges.length) return "";
     return badges
       .map(
-        (badge) =>
-          `<span class="badge badge--${badge.kind}">${escapeHtml(badge.label)}</span>`
+        (badge) => {
+          const titleAttr =
+            badge.kind === "age" && badge.title
+              ? ` title="${escapeHtml(badge.title)}"`
+              : "";
+          return `<span class="badge badge--${badge.kind}"${titleAttr}>${escapeHtml(badge.label)}</span>`;
+        }
       )
       .join("");
   }
@@ -3109,6 +3267,7 @@
     const isWatched = isItemWatched(item.id);
     const watchEntry = getWatchEntry(item.id);
     const rated = isWatched && hasWatchRating(watchEntry);
+    const progressState = itemProgressState(item.id);
     const altTitle = item.altTitle
       ? `<span class="card__alt text-ltr">${escapeHtml(ltr(item.altTitle))}</span>`
       : "";
@@ -3135,7 +3294,7 @@
     const genreBadges = `${mainGenreBadge}${secondaryBadges}`;
     const titleBlock = `
       <div class="card__top">
-        ${isWatched ? renderWatchedCheck() : ""}
+        ${progressState === "watched" ? renderWatchedCheck() : ""}
         <h3 class="card__title">
           <span class="text-ltr">${escapeHtml(ltr(item.title))}</span>
           ${altTitle}
@@ -3151,7 +3310,7 @@
     `;
     const cardSections = `
       <div class="card__sections">
-        ${renderCardSection("card.sectionDetails", detailsContent, "card__section--details")}
+        ${detailsContent}
         ${
           genreBadges
             ? renderCardSection(
@@ -3165,12 +3324,12 @@
     `;
     const overlaySections = `
       <div class="card__sections card__sections--overlay">
-        ${renderCardSection("card.sectionDetails", detailsContent, "card__section--details")}
+        ${detailsContent}
         ${
           genreBadges
             ? renderCardSection(
                 "card.sectionGenres",
-                `<div class="card__genre-row">${genreBadges}</div>`,
+                `<div class="card__genre-row card__genre-row--single-line">${genreBadges}</div>`,
                 "card__section--genres"
               )
             : ""
@@ -3243,7 +3402,9 @@
                 : ""
             }
           </div>`
-        : `<span class="card__watch-status card__watch-status--watched">${escapeHtml(t("card.watched"))}</span>`;
+        : progressState === "inProgress"
+          ? `<span class="card__watch-status card__watch-status--in-progress">${escapeHtml(t("card.inProgress"))}</span>`
+          : `<span class="card__watch-status card__watch-status--watched">${escapeHtml(t("card.watched"))}</span>`;
     const moveToListItem = canMoveToList
       ? `<button
           type="button"
@@ -3270,9 +3431,10 @@
       : "";
 
     const watchedLabel = isWatched ? t("card.markUnwatched") : t("card.markWatched");
+    const cardProgressClass = progressState === "inProgress" ? " card--in-progress" : "";
 
     return `
-      <article class="card${linkedClass}${isWatched ? " card--watched" : ""}" data-id="${escapeHtml(item.id)}"${linkAttr}${imdbAttr}>
+      <article class="card${linkedClass}${progressState === "watched" ? " card--watched" : ""}${cardProgressClass}" data-id="${escapeHtml(item.id)}"${linkAttr}${imdbAttr}>
         ${posterBlock}
         ${bodyStart}
         ${bodyHeader}
@@ -4875,7 +5037,7 @@
     if (!confirmed) return;
 
     if (isCurrent) {
-      window.WatchlistSync?.cancelScheduledPush();
+      stopBackgroundListWrites();
     }
 
     let cloudOk = true;
@@ -5946,8 +6108,7 @@
         return;
       }
       closeListTitleDropdown();
-      window.WatchlistAuth.switchList(listId);
-      window.location.reload();
+      switchToList(listId);
     });
 
     els.accountMenuPanel?.addEventListener("click", async (event) => {
@@ -6070,8 +6231,7 @@
       if (action === "switch-list") {
         const listId = event.target.closest("[data-list-id]")?.dataset.listId;
         if (listId && listId !== window.WatchlistAuth?.getProfile()) {
-          window.WatchlistAuth.switchList(listId);
-          window.location.reload();
+          switchToList(listId);
         }
         return;
       }
@@ -6199,8 +6359,7 @@
       const listId = els.listSwitcher.value;
       if (!listId || listId === window.WatchlistAuth?.getProfile()) return;
       closeAccountMenu();
-      window.WatchlistAuth.switchList(listId);
-      window.location.reload();
+      switchToList(listId);
     });
 
     els.layoutToggles?.addEventListener("click", (event) => {
@@ -6509,16 +6668,9 @@
     });
 
     els.main.addEventListener("click", async (event) => {
-      const card = event.target.closest(".card--linked");
-      if (
-        card &&
-        !event.target.closest("button") &&
-        !event.target.closest(".card-menu__panel") &&
-        card.dataset.link
-      ) {
-        window.open(card.dataset.link, "_blank", "noopener,noreferrer");
-        return;
-      }
+      // Card-body click → title-detail.js handles it in capture phase.
+      // The old "linked card click → open link" shortcut is intentionally
+      // removed; the link is now opened via the detail's "Open link" button.
 
       const target = event.target.closest("[data-action]");
       if (!target) return;
@@ -6661,20 +6813,27 @@
     state.cardLayout = loadCardLayout();
     applyCardLayout();
     syncLayoutToggles();
+    state.activeListId = window.WatchlistAuth.getProfile();
     state.data = loadWatchlist();
     state.items = flattenWatchlist(state.data);
     state.data = itemsToNested(state.items);
 
-    if (window.WatchlistSync?.isConfigured()) {
-      showLoadingSkeleton();
+    const cloudConfigured = window.WatchlistSync?.isConfigured();
+    const hasLocal =
+      state.data && !window.WatchlistAuth.isWatchlistEmpty(state.data);
+
+    if (cloudConfigured) {
       state.syncStatus = "pending";
-      updateStats();
-      try {
-        await syncAccountLists();
-        await reconcileWithCloud();
-      } catch (error) {
-        console.warn("[sync] reconcile failed:", error);
-        state.syncStatus = resolveSyncFailureStatus();
+      if (!hasLocal) {
+        showLoadingSkeleton();
+        updateStats();
+        try {
+          await syncAccountLists();
+          await reconcileWithCloud();
+        } catch (error) {
+          console.warn("[sync] reconcile failed:", error);
+          state.syncStatus = resolveSyncFailureStatus();
+        }
       }
     }
 
@@ -6682,8 +6841,10 @@
     localStorage.setItem(data, JSON.stringify(state.data));
     localStorage.setItem(watched, JSON.stringify(state.watched));
 
-    if (state.syncStatus === "pending") {
-      state.syncStatus = window.WatchlistSync?.isConfigured() ? "saved" : "local";
+    if (state.syncStatus === "pending" && !cloudConfigured) {
+      state.syncStatus = "local";
+    } else if (state.syncStatus === "pending" && !hasLocal) {
+      state.syncStatus = cloudConfigured ? "saved" : "local";
     }
 
     if (!state.data) {
@@ -6717,7 +6878,11 @@
     updateStats();
     updateAppBanners();
     render();
-    void runMetadataBackfill();
+    if (cloudConfigured && hasLocal) {
+      void runBackgroundCloudSync();
+    } else {
+      void runMetadataBackfill();
+    }
     await consumePendingShare();
 
     window.WatchlistI18n?.onChange(() => {
@@ -6764,7 +6929,40 @@
     });
   }
 
-  window.WatchlistApp = { init, renderExternalRatings, updateRatingModalActions };
+  window.WatchlistApp = {
+    init,
+    renderExternalRatings,
+    updateRatingModalActions,
+    // Exposed for title-detail.js
+    findItem: (id) => state.items.find((i) => i.id === id) ?? null,
+    isWatched: isItemWatched,
+    getWatchEntry,
+    progressState: itemProgressState,
+    closeAllMenus: closeAllCardMenus,
+    deleteAndRender: (id) => { deleteItem(id); updateGenreOptions(); render(); },
+    // Exposed for title-seasons.js — save watch entry locally without full render
+    saveWatchedEntry: (id, entry) => {
+      if (!id) return;
+      if (entry === null || entry === undefined) {
+        delete state.watched[id];
+      } else {
+        state.watched[id] = entry;
+      }
+      saveWatched();
+    },
+    // Re-render a single card in-place (no full list rebuild)
+    updateCardInPlace: (id) => {
+      if (!id) return;
+      const item = state.items.find((i) => i.id === id);
+      if (!item) return;
+      const card = document.querySelector(`.card[data-id="${CSS.escape(id)}"]`);
+      if (!card) return;
+      const tmp = document.createElement("div");
+      tmp.innerHTML = renderCard(item);
+      const newCard = tmp.firstElementChild;
+      if (newCard) card.replaceWith(newCard);
+    },
+  };
 
   if (document.getElementById("mainContent")) {
     init();

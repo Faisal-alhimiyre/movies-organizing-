@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../core/config/environment.dart';
+import '../../../core/services/session_service.dart';
 import '../../../models/metadata_detail.dart';
 import '../../../models/watchlist_item.dart';
 import '../../../repositories/metadata/metadata_service.dart';
@@ -89,6 +90,12 @@ class TitleMetaBackfillController extends Notifier<TitleMetaBackfillProgress> {
     List<WatchlistItem> queue,
     List<WatchlistItem> allItems,
   ) async {
+    final session = ref.read(sessionProvider);
+    if (session == null) return;
+    final listId = session.listId;
+    final watched = ref.read(watchlistControllerProvider).value?.watched ??
+        const <String, WatchEntry>{};
+
     state = TitleMetaBackfillProgress(running: true, total: queue.length);
 
     final metadata = ref.read(metadataServiceProvider);
@@ -98,6 +105,7 @@ class TitleMetaBackfillController extends Notifier<TitleMetaBackfillProgress> {
     var updated = 0;
 
     for (final item in queue) {
+      if (ref.read(sessionProvider)?.listId != listId) break;
       try {
         MetadataDetail? meta;
         final imdbId = getImdbIdFromItem(item);
@@ -121,7 +129,11 @@ class TitleMetaBackfillController extends Notifier<TitleMetaBackfillProgress> {
               items[index] = merged;
               updated += 1;
               if (updated % 3 == 0) {
-                await controller.replaceItems(items);
+                await controller.replaceItems(
+                  items,
+                  expectedListId: listId,
+                  watched: watched,
+                );
               }
             }
           }
@@ -141,8 +153,13 @@ class TitleMetaBackfillController extends Notifier<TitleMetaBackfillProgress> {
 
     state = const TitleMetaBackfillProgress();
 
-    if (updated > 0) {
-      await controller.replaceItems(items, refresh: false);
+    if (updated > 0 && ref.read(sessionProvider)?.listId == listId) {
+      await controller.replaceItems(
+        items,
+        expectedListId: listId,
+        watched: watched,
+        refresh: false,
+      );
     }
   }
 }

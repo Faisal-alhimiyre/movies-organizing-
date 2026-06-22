@@ -1,0 +1,1471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stage D Tests — Seasons, Episodes, Progress</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; background: #111; color: #e8e8e8; }
+    h1 { font-size: 1.3rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; color: #bbb; }
+    .suite { border: 1px solid #333; border-radius: 8px; margin-bottom: 1.25rem; padding: 0.75rem 1rem; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; }
+    .result { font-family: monospace; font-size: 0.82rem; margin: 0.2rem 0; padding: 0.2rem 0; }
+    .summary { font-weight: bold; margin-top: 1.5rem; font-size: 1rem; }
+    #run-btn { padding: 0.5rem 1.2rem; background: #7c6aff; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
+    #run-btn:hover { background: #6b5ae0; }
+    pre { background: #1e1e1e; padding: 0.5rem; border-radius: 4px; font-size: 0.75rem; overflow-x: auto; margin: 0.3rem 0; color: #ccc; }
+  </style>
+</head>
+<body>
+<h1>Stage D: Seasons, Episodes &amp; Progress Tests</h1>
+<button id="run-btn" onclick="runAll()">Run All Tests</button>
+<div id="results"></div>
+
+<script>
+// ─── Minimal test harness ────────────────────────────────────────────────────
+const _suites = [];
+let _current = null;
+
+function describe(name, fn) {
+  _current = { name, tests: [] };
+  _suites.push(_current);
+  try { fn(); } catch(e) {}
+}
+
+function test(name, fn) {
+  if (!_current) return;
+  _current.tests.push({ name, fn });
+}
+
+function expect(val) {
+  return {
+    toBe(expected) {
+      if (val !== expected) throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(val)}`);
+    },
+    toEqual(expected) {
+      if (JSON.stringify(val) !== JSON.stringify(expected))
+        throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(val)}`);
+    },
+    toBeTruthy() {
+      if (!val) throw new Error(`Expected truthy, got ${JSON.stringify(val)}`);
+    },
+    toBeFalsy() {
+      if (val) throw new Error(`Expected falsy, got ${JSON.stringify(val)}`);
+    },
+    toContain(item) {
+      if (!(Array.isArray(val) ? val.includes(item) : String(val).includes(item)))
+        throw new Error(`Expected ${JSON.stringify(val)} to contain ${JSON.stringify(item)}`);
+    },
+    toBeNull() {
+      if (val !== null) throw new Error(`Expected null, got ${JSON.stringify(val)}`);
+    },
+    toBeGreaterThan(n) {
+      if (!(val > n)) throw new Error(`Expected ${val} > ${n}`);
+    },
+    not: {
+      toBe(expected) {
+        if (val === expected) throw new Error(`Expected not ${JSON.stringify(expected)}`);
+      },
+      toContain(item) {
+        if (Array.isArray(val) ? val.includes(item) : String(val).includes(item))
+          throw new Error(`Expected not to contain ${JSON.stringify(item)}`);
+      },
+    },
+  };
+}
+
+async function runAll() {
+  const resultsEl = document.getElementById('results');
+  resultsEl.innerHTML = '<p style="color:#aaa">Running…</p>';
+
+  let totalPass = 0, totalFail = 0;
+  const html = [];
+
+  for (const suite of _suites) {
+    const rows = [];
+    for (const test of suite.tests) {
+      let passed = false, err = '';
+      try {
+        const result = test.fn();
+        if (result && typeof result.then === 'function') await result;
+        passed = true;
+        totalPass++;
+      } catch(e) {
+        err = e.message;
+        totalFail++;
+      }
+      rows.push(`<div class="result ${passed ? 'pass' : 'fail'}">${passed ? '✓' : '✗'} ${test.name}${err ? '<pre>' + err + '</pre>' : ''}</div>`);
+    }
+    html.push(`<div class="suite"><h2>${suite.name}</h2>${rows.join('')}</div>`);
+  }
+
+  const total = totalPass + totalFail;
+  const summaryClass = totalFail === 0 ? 'pass' : 'fail';
+  html.unshift(`<div class="summary ${summaryClass}">${totalPass}/${total} passed${totalFail ? ` — ${totalFail} failed` : ' ✓'}</div>`);
+  resultsEl.innerHTML = html.join('');
+}
+</script>
+
+<!-- Load dependencies -->
+<script>
+// Minimal WatchlistI18n stub
+window.WatchlistI18n = {
+  t(key, vars) {
+    const map = {
+      'seasons.sectionTitle': 'Seasons',
+      'seasons.episodesTitle': 'Episodes',
+      'seasons.loading': 'Loading seasons…',
+      'seasons.specials': 'Specials',
+      'seasons.seasonNum': 'Season {n}',
+      'seasons.episodeCount': '{n} episodes',
+      'seasons.episodeCountOne': '1 episode',
+      'seasons.watchedProgress': '{watched} / {total} watched',
+      'seasons.markSeasonWatched': 'Mark {name} watched',
+      'seasons.unmarkSeason': 'Unmark {name}',
+      'seasons.episodeNum': 'Episode {n}',
+      'seasons.episodeWatched': 'Mark "{title}" as watched',
+      'seasons.episodeUnwatch': 'Mark "{title}" as unwatched',
+      'seasons.epRuntime': '{n} min',
+      'seasons.epAiredOn': 'Aired {date}',
+      'seasons.retry': 'Retry',
+      'seasons.error': 'Could not load season data.',
+      'seasons.noSeasons': 'No seasons available.',
+      'seasons.offline': 'Offline.',
+      'seasons.offlineNoCache': 'Offline, no cache.',
+      'seasons.rateLimited': 'Rate limited.',
+      'seasons.invalidId': 'No ID.',
+      'seasons.prevSeason': 'Previous season',
+      'seasons.nextSeason': 'Next season',
+      'seasons.episodesLoading': 'Loading episodes…',
+      'seasons.episodesError': 'Episodes error.',
+      'seasons.episodesUnavailable': 'Unavailable.',
+      'seasons.emptySeason': 'Empty season.',
+      'seasons.staleWarning': 'Stale.',
+      'seasons.emptyStill': 'Image unavailable',
+      'seasons.seasonComplete': 'Complete',
+      'seasons.seasonPartial': 'Partial',
+    };
+    let s = map[key] || key;
+    if (vars) Object.entries(vars).forEach(([k,v]) => { s = s.replace(`{${k}}`, v); });
+    return s;
+  },
+  getLang() { return 'en'; },
+  isRtl() { return false; },
+  onChange() {},
+};
+</script>
+<script src="js/watch-progress.js"></script>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+// SUITE 1: WatchlistProgress — pure helpers
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('WatchlistProgress — episode key helpers', () => {
+  test('episodeKey formats correctly', () => {
+    expect(WatchlistProgress.episodeKey(1, 5)).toBe('1:5');
+    expect(WatchlistProgress.episodeKey(0, 2)).toBe('0:2');
+  });
+});
+
+describe('WatchlistProgress — isEpisodeWatched', () => {
+  test('null entry returns false', () => {
+    expect(WatchlistProgress.isEpisodeWatched(null, 1, 1)).toBe(false);
+  });
+  test('legacy-complete (true) treats all episodes as watched', () => {
+    expect(WatchlistProgress.isEpisodeWatched(true, 1, 1)).toBe(true);
+  });
+  test('legacy-complete ({}) treats all episodes as watched', () => {
+    expect(WatchlistProgress.isEpisodeWatched({}, 1, 1)).toBe(true);
+  });
+  test('granular progress: episode in list = watched', () => {
+    const entry = { progress: { version: 1, episodes: ['1:1', '1:2'] } };
+    expect(WatchlistProgress.isEpisodeWatched(entry, 1, 1)).toBe(true);
+    expect(WatchlistProgress.isEpisodeWatched(entry, 1, 3)).toBe(false);
+  });
+});
+
+describe('WatchlistProgress — isLegacyComplete', () => {
+  test('null is not legacy-complete', () => {
+    expect(WatchlistProgress.isLegacyComplete(null)).toBe(false);
+  });
+  test('true is legacy-complete', () => {
+    expect(WatchlistProgress.isLegacyComplete(true)).toBe(true);
+  });
+  test('empty object is legacy-complete', () => {
+    expect(WatchlistProgress.isLegacyComplete({})).toBe(true);
+  });
+  test('granular progress is not legacy-complete', () => {
+    const entry = { progress: { version: 1, episodes: ['1:1'] } };
+    expect(WatchlistProgress.isLegacyComplete(entry)).toBe(false);
+  });
+});
+
+describe('WatchlistProgress — markEpisodeWatched', () => {
+  test('marks episode on unwatched entry', () => {
+    const result = WatchlistProgress.markEpisodeWatched(null, 1, 1, []);
+    expect(WatchlistProgress.isEpisodeWatched(result, 1, 1)).toBe(true);
+  });
+  test('materialises legacy-complete when unchecking an episode', () => {
+    const allAired = ['1:1', '1:2', '1:3'];
+    const result = WatchlistProgress.unmarkEpisodeWatched({}, 1, 2, allAired);
+    expect(WatchlistProgress.isEpisodeWatched(result, 1, 1)).toBe(true);
+    expect(WatchlistProgress.isEpisodeWatched(result, 1, 2)).toBe(false);
+    expect(WatchlistProgress.isEpisodeWatched(result, 1, 3)).toBe(true);
+  });
+  test('preserves rating and note', () => {
+    const entry = { rating: 8, note: 'Great', progress: { version: 1, episodes: [] } };
+    const result = WatchlistProgress.markEpisodeWatched(entry, 1, 1, []);
+    expect(result.rating).toBe(8);
+    expect(result.note).toBe('Great');
+  });
+});
+
+describe('WatchlistProgress — markSeasonWatched / unmarkSeasonWatched', () => {
+  test('marks all episodes in a season', () => {
+    const airedKeys = ['2:1', '2:2', '2:3'];
+    const result = WatchlistProgress.markSeasonWatched(null, airedKeys);
+    expect(WatchlistProgress.isEpisodeWatched(result, 2, 1)).toBe(true);
+    expect(WatchlistProgress.isEpisodeWatched(result, 2, 3)).toBe(true);
+  });
+  test('unmarks only episodes in specified season', () => {
+    const entry = { progress: { version: 1, episodes: ['1:1', '2:1', '2:2'] } };
+    const result = WatchlistProgress.unmarkSeasonWatched(entry, 2, ['1:1', '2:1', '2:2']);
+    expect(WatchlistProgress.isEpisodeWatched(result, 1, 1)).toBe(true);
+    expect(WatchlistProgress.isEpisodeWatched(result, 2, 1)).toBe(false);
+  });
+  test('empty season does not become complete', () => {
+    const result = WatchlistProgress.markSeasonWatched(null, []);
+    const airedEps = [];
+    expect(WatchlistProgress.isSeasonFullyWatched(result, 3, airedEps)).toBe(false);
+  });
+});
+
+describe('WatchlistProgress — markAllWatched / clearAllProgress', () => {
+  test('markAllWatched marks all provided keys', () => {
+    const keys = ['1:1', '1:2', '2:1'];
+    const result = WatchlistProgress.markAllWatched(null, keys);
+    expect(WatchlistProgress.isEpisodeWatched(result, 1, 1)).toBe(true);
+    expect(WatchlistProgress.isEpisodeWatched(result, 2, 1)).toBe(true);
+  });
+  test('clearAllProgress returns null', () => {
+    const result = WatchlistProgress.clearAllProgress({ progress: { version: 1, episodes: ['1:1'] } });
+    expect(result).toBeNull();
+  });
+});
+
+describe('WatchlistProgress — isSeasonFullyWatched / isSeasonPartiallyWatched', () => {
+  test('fully watched', () => {
+    const airedEps = [{ seasonNumber: 1, episodeNumber: 1 }, { seasonNumber: 1, episodeNumber: 2 }];
+    const entry    = { progress: { version: 1, episodes: ['1:1', '1:2'] } };
+    expect(WatchlistProgress.isSeasonFullyWatched(entry, 1, airedEps)).toBe(true);
+  });
+  test('partially watched', () => {
+    const airedEps = [{ seasonNumber: 1, episodeNumber: 1 }, { seasonNumber: 1, episodeNumber: 2 }];
+    const entry    = { progress: { version: 1, episodes: ['1:1'] } };
+    expect(WatchlistProgress.isSeasonPartiallyWatched(entry, 1, airedEps)).toBe(true);
+  });
+  test('legacy-complete is fully watched, not partial', () => {
+    const airedEps = [{ seasonNumber: 1, episodeNumber: 1 }];
+    expect(WatchlistProgress.isSeasonFullyWatched({}, 1, airedEps)).toBe(true);
+    expect(WatchlistProgress.isSeasonPartiallyWatched({}, 1, airedEps)).toBe(false);
+  });
+});
+
+describe('WatchlistProgress — itemWatchState', () => {
+  test('null entry = unwatched', () => {
+    const { state } = WatchlistProgress.itemWatchState(null, null);
+    expect(state).toBe('unwatched');
+  });
+  test('legacy-complete = watched', () => {
+    const { state } = WatchlistProgress.itemWatchState({}, null);
+    expect(state).toBe('watched');
+  });
+  test('granular: all watched = watched', () => {
+    const seasons = [{ seasonNumber: 1, episodes: [
+      { seasonNumber: 1, episodeNumber: 1, airDate: '2000-01-01' },
+      { seasonNumber: 1, episodeNumber: 2, airDate: '2000-01-08' },
+    ]}];
+    const entry = { progress: { version: 1, episodes: ['1:1', '1:2'] } };
+    expect(WatchlistProgress.itemWatchState(entry, seasons).state).toBe('watched');
+  });
+  test('granular: some watched = inprogress', () => {
+    const seasons = [{ seasonNumber: 1, episodes: [
+      { seasonNumber: 1, episodeNumber: 1, airDate: '2000-01-01' },
+      { seasonNumber: 1, episodeNumber: 2, airDate: '2000-01-08' },
+    ]}];
+    const entry = { progress: { version: 1, episodes: ['1:1'] } };
+    expect(WatchlistProgress.itemWatchState(entry, seasons).state).toBe('inprogress');
+  });
+  test('specials do not count toward title completion', () => {
+    // Only regular seasons (seasonNumber > 0) are counted
+    const seasons = [
+      { seasonNumber: 0, episodes: [{ seasonNumber: 0, episodeNumber: 1, airDate: '2000-01-01' }] },
+      { seasonNumber: 1, episodes: [{ seasonNumber: 1, episodeNumber: 1, airDate: '2000-01-01' }] },
+    ];
+    const entry = { progress: { version: 1, episodes: ['1:1'] } };
+    expect(WatchlistProgress.itemWatchState(entry, seasons).state).toBe('watched');
+  });
+  test('future episodes do not block completion', () => {
+    const future = new Date(Date.now() + 86400 * 30 * 1000).toISOString().slice(0, 10);
+    const seasons = [{ seasonNumber: 1, episodes: [
+      { seasonNumber: 1, episodeNumber: 1, airDate: '2000-01-01' },
+      { seasonNumber: 1, episodeNumber: 2, airDate: future }, // future
+    ]}];
+    const entry = { progress: { version: 1, episodes: ['1:1'] } };
+    expect(WatchlistProgress.itemWatchState(entry, seasons).state).toBe('watched');
+  });
+});
+
+describe('WatchlistProgress — isAiredEpisode', () => {
+  test('no airDate = assumed aired', () => {
+    expect(WatchlistProgress.isAiredEpisode({ airDate: null })).toBe(true);
+  });
+  test('past date = aired', () => {
+    expect(WatchlistProgress.isAiredEpisode({ airDate: '2000-01-01' })).toBe(true);
+  });
+  test('future date = not aired', () => {
+    const future = new Date(Date.now() + 86400 * 7 * 1000).toISOString().slice(0, 10);
+    expect(WatchlistProgress.isAiredEpisode({ airDate: future })).toBe(false);
+  });
+});
+
+describe('WatchlistProgress — airedEpisodeKeys', () => {
+  test('collects only aired episodes', () => {
+    const future = new Date(Date.now() + 86400 * 7 * 1000).toISOString().slice(0, 10);
+    const seasons = [{
+      seasonNumber: 1,
+      episodes: [
+        { seasonNumber: 1, episodeNumber: 1, airDate: '2000-01-01' },
+        { seasonNumber: 1, episodeNumber: 2, airDate: future },
+      ]
+    }];
+    const keys = WatchlistProgress.airedEpisodeKeys(seasons);
+    expect(keys).toContain('1:1');
+    expect(keys).not.toContain('1:2');
+  });
+});
+</script>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+// SUITE 2: title-seasons.js — attach/detach / DOM structure
+// ════════════════════════════════════════════════════════════════════════════
+
+// Minimal mock items
+const MOVIE_ITEM = { id: 'movies::Action::Die Hard', title: 'Die Hard', contentType: 'movies', kind: 'movie', poster: '' };
+const TV_ITEM    = { id: 'tvSeries::Drama::Breaking Bad', title: 'Breaking Bad', contentType: 'tvSeries', kind: 'tvSeries', poster: '', link: 'https://www.imdb.com/title/tt0903747/' };
+const ANIME_ITEM = { id: 'anime::Action::Naruto', title: 'Naruto', contentType: 'anime', kind: 'anime', poster: '', link: 'https://anilist.co/anime/20' };
+
+// Default resolution mock — used unless the test overrides
+const DEFAULT_RESOLUTION = { source: 'tmdb', tmdbId: 1, isNegative: false };
+
+/**
+ * Creates a WatchlistSeriesMetadata mock. Automatically injects resolveSeriesId
+ * and clearItemResolutionCache if not provided, so tests don't need to change
+ * when the loadSeriesMetadata call chain gains new steps.
+ */
+function mockMeta(overrides) {
+  return {
+    resolveSeriesId: async () => DEFAULT_RESOLUTION,
+    clearItemResolutionCache: () => {},
+    ...overrides,
+  };
+}
+
+// Auto-inject resolveSeriesId + clearItemResolutionCache into any direct
+// window.WatchlistSeriesMetadata = {...} assignment that omits them.
+// This keeps older test cases working without editing each one.
+(function installMetaInterceptor() {
+  let _actual = window.WatchlistSeriesMetadata;
+  Object.defineProperty(window, 'WatchlistSeriesMetadata', {
+    configurable: true,
+    get() { return _actual; },
+    set(val) {
+      if (val && typeof val === 'object') {
+        if (!val.resolveSeriesId) val.resolveSeriesId = async () => DEFAULT_RESOLUTION;
+        if (!val.clearItemResolutionCache) val.clearItemResolutionCache = () => {};
+      }
+      _actual = val;
+    },
+  });
+})();
+
+function makeSlot() {
+  const el = document.createElement('div');
+  document.body.appendChild(el);
+  return el;
+}
+
+function makeCallbacks(watchedEntry = null) {
+  let _entry = watchedEntry;
+  return {
+    getWatchEntry: () => _entry,
+    saveWatchedEntry: (e) => { _entry = e; },
+    updateCardInPlace: () => {},
+    updateHeaderWatchState: () => {},
+    updateDetailActions: () => {},
+    _getEntry: () => _entry,
+  };
+}
+
+describe('WatchlistSeasons — movies show no seasons', () => {
+  test('slot.hidden = true for movies', () => {
+    // Mock series metadata that says no seasons
+    window.WatchlistSeriesMetadata = mockMeta({ fetchSeriesMetadata: async () => null, fetchSeasonEpisodes: async () => null, ResultState: { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' } });
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, MOVIE_ITEM, makeCallbacks());
+    expect(slot.hidden).toBe(true);
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — TV series shows loading state', () => {
+  test('slot.hidden = false and loading spinner present for TV series', () => {
+    let _resolve;
+    window.WatchlistSeriesMetadata = mockMeta({
+      resolveSeriesId: () => new Promise(r => { _resolve = r; }),
+      fetchSeriesMetadata: async () => null,
+      fetchSeasonEpisodes: async () => null,
+      ResultState: window.WatchlistSeriesMetadata?.ResultState || {},
+    });
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, makeCallbacks());
+    expect(slot.hidden).toBe(false);
+    expect(slot.querySelector('.tds-loading-section')).toBeTruthy();
+    expect(slot.querySelector('.tds-spinner')).toBeTruthy();
+    _resolve && _resolve(null);
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — seasons render after metadata load', () => {
+  test('carousel renders season cards after successful load', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = mockMeta({
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Breaking Bad' },
+        seasons: [
+          { seasonNumber: 1, name: 'Season 1', episodeCount: 7, poster: '', isSpecials: false, isSynthetic: false },
+          { seasonNumber: 2, name: 'Season 2', episodeCount: 13, poster: '', isSpecials: false, isSynthetic: false },
+        ],
+      }),
+      fetchSeasonEpisodes: () => new Promise(() => {}), // pending
+    });
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, makeCallbacks());
+    await new Promise(r => setTimeout(r, 20)); // let async run
+    const cards = slot.querySelectorAll('.tds-season-card');
+    expect(cards.length).toBeGreaterThan(0);
+    expect(cards.length).toBe(2);
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — initial season selection', () => {
+  test('selects season with watched progress first', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Breaking Bad' },
+        seasons: [
+          { seasonNumber: 1, name: 'Season 1', episodeCount: 7, isSpecials: false },
+          { seasonNumber: 2, name: 'Season 2', episodeCount: 13, isSpecials: false },
+        ],
+      }),
+      fetchSeasonEpisodes: () => new Promise(() => {}),
+    };
+    // Entry has watched episode in season 2 → should select season 2
+    const entry = { progress: { version: 1, episodes: ['2:5'] } };
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, makeCallbacks(entry));
+    await new Promise(r => setTimeout(r, 20));
+    expect(WatchlistSeasons.getSelectedSeason()).toBe(2);
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+
+  test('falls back to first regular season when no progress', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Breaking Bad' },
+        seasons: [
+          { seasonNumber: 0, name: 'Specials', episodeCount: 2, isSpecials: true },
+          { seasonNumber: 1, name: 'Season 1', episodeCount: 7, isSpecials: false },
+        ],
+      }),
+      fetchSeasonEpisodes: () => new Promise(() => {}),
+    };
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, makeCallbacks(null));
+    await new Promise(r => setTimeout(r, 20));
+    // Should select season 1 (not specials)
+    expect(WatchlistSeasons.getSelectedSeason()).toBe(1);
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — episode list renders after season load', () => {
+  test('episode rows appear after fetchSeasonEpisodes resolves', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Breaking Bad' },
+        seasons: [{ seasonNumber: 1, name: 'Season 1', episodeCount: 2, isSpecials: false }],
+      }),
+      fetchSeasonEpisodes: async () => ({
+        state: RS.AVAILABLE,
+        episodes: [
+          { source: 'tmdb', seasonNumber: 1, episodeNumber: 1, title: 'Pilot', overview: '', isAired: true, still: '', progressKey: '1:1' },
+          { source: 'tmdb', seasonNumber: 1, episodeNumber: 2, title: 'Cat\'s in the Bag', overview: '', isAired: true, still: '', progressKey: '1:2' },
+        ],
+      }),
+    };
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, makeCallbacks(null));
+    await new Promise(r => setTimeout(r, 30));
+    const rows = slot.querySelectorAll('.tds-episode');
+    expect(rows.length).toBe(2);
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — episode toggle updates progress', () => {
+  test('toggling unwatched episode marks it watched', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Show' },
+        seasons: [{ seasonNumber: 1, name: 'Season 1', episodeCount: 1, isSpecials: false }],
+      }),
+      fetchSeasonEpisodes: async () => ({
+        state: RS.AVAILABLE,
+        episodes: [{ source: 'tmdb', seasonNumber: 1, episodeNumber: 1, title: 'Pilot', overview: '', isAired: true, still: '', progressKey: '1:1' }],
+      }),
+    };
+    const callbacks = makeCallbacks(null);
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, callbacks);
+    await new Promise(r => setTimeout(r, 30));
+
+    const checkBtn = slot.querySelector('[data-tds-action="toggle-ep"]');
+    expect(checkBtn).toBeTruthy();
+    expect(checkBtn.getAttribute('aria-checked')).toBe('false');
+
+    checkBtn.click();
+    await new Promise(r => setTimeout(r, 5));
+
+    // Progress should be saved
+    const saved = callbacks._getEntry();
+    expect(saved).toBeTruthy();
+    expect(WatchlistProgress.isEpisodeWatched(saved, 1, 1)).toBe(true);
+
+    // UI should update
+    expect(checkBtn.getAttribute('aria-checked')).toBe('true');
+    expect(checkBtn.classList.contains('tds-ep-check--watched')).toBe(true);
+
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+
+  test('toggling watched episode unmarks it', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Show' },
+        seasons: [{ seasonNumber: 1, name: 'Season 1', episodeCount: 1, isSpecials: false }],
+      }),
+      fetchSeasonEpisodes: async () => ({
+        state: RS.AVAILABLE,
+        episodes: [{ source: 'tmdb', seasonNumber: 1, episodeNumber: 1, title: 'Pilot', overview: '', isAired: true, still: '', progressKey: '1:1' }],
+      }),
+    };
+    const entry = { progress: { version: 1, episodes: ['1:1'] } };
+    const callbacks = makeCallbacks(entry);
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, callbacks);
+    await new Promise(r => setTimeout(r, 30));
+
+    const checkBtn = slot.querySelector('[data-tds-action="toggle-ep"]');
+    expect(checkBtn.getAttribute('aria-checked')).toBe('true');
+
+    checkBtn.click();
+    await new Promise(r => setTimeout(r, 5));
+
+    const saved = callbacks._getEntry();
+    expect(WatchlistProgress.isEpisodeWatched(saved, 1, 1)).toBe(false);
+    expect(checkBtn.getAttribute('aria-checked')).toBe('false');
+
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — episode toggle does not reset selected season', () => {
+  test('selected season stays the same after toggle', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Show' },
+        seasons: [
+          { seasonNumber: 1, name: 'S1', episodeCount: 1, isSpecials: false },
+          { seasonNumber: 2, name: 'S2', episodeCount: 1, isSpecials: false },
+        ],
+      }),
+      fetchSeasonEpisodes: async (item, num) => ({
+        state: RS.AVAILABLE,
+        episodes: [{ source: 'tmdb', seasonNumber: num, episodeNumber: 1, title: 'Ep 1', overview: '', isAired: true, still: '', progressKey: `${num}:1` }],
+      }),
+    };
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, makeCallbacks(null));
+    await new Promise(r => setTimeout(r, 30));
+
+    // Click season 2
+    const s2Card = slot.querySelector('[data-tds-season="2"]');
+    if (s2Card) s2Card.click();
+    await new Promise(r => setTimeout(r, 30));
+
+    expect(WatchlistSeasons.getSelectedSeason()).toBe(2);
+
+    // Toggle an episode
+    const checkBtn = slot.querySelector('[data-tds-action="toggle-ep"]');
+    if (checkBtn) checkBtn.click();
+    await new Promise(r => setTimeout(r, 10));
+
+    // Season should NOT have reset
+    expect(WatchlistSeasons.getSelectedSeason()).toBe(2);
+
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — whole-season mark/unmark', () => {
+  test('mark season marks all episodes', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Show' },
+        seasons: [{ seasonNumber: 1, name: 'Season 1', episodeCount: 2, isSpecials: false }],
+      }),
+      fetchSeasonEpisodes: async () => ({
+        state: RS.AVAILABLE,
+        episodes: [
+          { source: 'tmdb', seasonNumber: 1, episodeNumber: 1, title: 'Ep1', overview: '', isAired: true, still: '', progressKey: '1:1' },
+          { source: 'tmdb', seasonNumber: 1, episodeNumber: 2, title: 'Ep2', overview: '', isAired: true, still: '', progressKey: '1:2' },
+        ],
+      }),
+    };
+    const callbacks = makeCallbacks(null);
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, callbacks);
+    await new Promise(r => setTimeout(r, 30));
+
+    const markBtn = slot.querySelector('[data-tds-action="mark-season-info"]');
+    expect(markBtn).toBeTruthy();
+    markBtn.click();
+    await new Promise(r => setTimeout(r, 5));
+
+    const saved = callbacks._getEntry();
+    expect(WatchlistProgress.isEpisodeWatched(saved, 1, 1)).toBe(true);
+    expect(WatchlistProgress.isEpisodeWatched(saved, 1, 2)).toBe(true);
+
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — legacy-complete display', () => {
+  test('legacy-complete entry shows episodes as watched without materializing', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Show' },
+        seasons: [{ seasonNumber: 1, name: 'Season 1', episodeCount: 2, isSpecials: false }],
+      }),
+      fetchSeasonEpisodes: async () => ({
+        state: RS.AVAILABLE,
+        episodes: [
+          { source: 'tmdb', seasonNumber: 1, episodeNumber: 1, title: 'Ep1', overview: '', isAired: true, still: '', progressKey: '1:1' },
+          { source: 'tmdb', seasonNumber: 1, episodeNumber: 2, title: 'Ep2', overview: '', isAired: true, still: '', progressKey: '1:2' },
+        ],
+      }),
+    };
+    // Legacy-complete: watched = {} (no granular progress)
+    const callbacks = makeCallbacks({});
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, callbacks);
+    await new Promise(r => setTimeout(r, 30));
+
+    const checks = slot.querySelectorAll('.tds-ep-check--watched');
+    expect(checks.length).toBe(2); // All shown as watched
+
+    // Verify no granular progress has been written yet
+    const saved = callbacks._getEntry();
+    expect(WatchlistProgress.hasGranularProgress(saved)).toBe(false);
+
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+
+  test('unchecking one episode from legacy-complete materializes progress', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Show' },
+        seasons: [{ seasonNumber: 1, name: 'Season 1', episodeCount: 2, isSpecials: false }],
+      }),
+      fetchSeasonEpisodes: async () => ({
+        state: RS.AVAILABLE,
+        episodes: [
+          { source: 'tmdb', seasonNumber: 1, episodeNumber: 1, title: 'Ep1', overview: '', isAired: true, still: '', progressKey: '1:1' },
+          { source: 'tmdb', seasonNumber: 1, episodeNumber: 2, title: 'Ep2', overview: '', isAired: true, still: '', progressKey: '1:2' },
+        ],
+      }),
+    };
+    const callbacks = makeCallbacks({});
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, callbacks);
+    await new Promise(r => setTimeout(r, 30));
+
+    // Uncheck episode 1
+    const ep1Check = slot.querySelector('[data-tds-episode="1:1"] .tds-ep-check');
+    ep1Check.click();
+    await new Promise(r => setTimeout(r, 5));
+
+    const saved = callbacks._getEntry();
+    expect(WatchlistProgress.hasGranularProgress(saved)).toBe(true);
+    expect(WatchlistProgress.isEpisodeWatched(saved, 1, 1)).toBe(false);
+    expect(WatchlistProgress.isEpisodeWatched(saved, 1, 2)).toBe(true);
+
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — stale response does not overwrite newer title', () => {
+  test('response after detach is ignored', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    let resolveFirst;
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: () => new Promise(r => { resolveFirst = r; }),
+      fetchSeasonEpisodes: async () => null,
+    };
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, makeCallbacks(null));
+    // Detach immediately (simulates opening a different item)
+    WatchlistSeasons.detach();
+
+    // Now resolve the first request
+    resolveFirst({
+      state: RS.AVAILABLE,
+      series: { source: 'tmdb', title: 'Show' },
+      seasons: [{ seasonNumber: 1, name: 'S1', episodeCount: 1, isSpecials: false }],
+    });
+    await new Promise(r => setTimeout(r, 20));
+
+    // Carousel should NOT have been rendered (slot was detached)
+    const cards = slot.querySelectorAll('.tds-season-card');
+    expect(cards.length).toBe(0);
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — error states', () => {
+  test('shows error on API failure', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({ state: RS.API_FAILURE }),
+      fetchSeasonEpisodes: async () => null,
+    };
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, makeCallbacks(null));
+    await new Promise(r => setTimeout(r, 20));
+    expect(slot.querySelector('.tds-error-section')).toBeTruthy();
+    expect(slot.querySelector('.tds-retry-btn')).toBeTruthy();
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+
+  test('shows offline-no-cache error', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({ state: RS.OFFLINE_NO_CACHE }),
+      fetchSeasonEpisodes: async () => null,
+    };
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, makeCallbacks(null));
+    await new Promise(r => setTimeout(r, 20));
+    const errEl = slot.querySelector('.tds-error-section');
+    expect(errEl).toBeTruthy();
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+
+  test('invalid ID shows error without retry button', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({ state: RS.INVALID_ID }),
+      fetchSeasonEpisodes: async () => null,
+    };
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, makeCallbacks(null));
+    await new Promise(r => setTimeout(r, 20));
+    expect(slot.querySelector('.tds-error-section')).toBeTruthy();
+    expect(slot.querySelector('.tds-retry-btn')).toBeFalsy();
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — specials', () => {
+  test('specials card shows Specials label not Season 0', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Show' },
+        seasons: [
+          { seasonNumber: 0, name: 'Specials', episodeCount: 3, isSpecials: true },
+          { seasonNumber: 1, name: 'Season 1', episodeCount: 7, isSpecials: false },
+        ],
+      }),
+      fetchSeasonEpisodes: () => new Promise(() => {}),
+    };
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, makeCallbacks(null));
+    await new Promise(r => setTimeout(r, 20));
+
+    const specialsCard = slot.querySelector('[data-tds-season="0"]');
+    expect(specialsCard).toBeTruthy();
+    const nameEl = specialsCard.querySelector('.tds-season-name');
+    // Should say "Specials" not "Season 0"
+    expect(nameEl.textContent.toLowerCase()).toContain('special');
+    expect(nameEl.textContent).not.toContain('0');
+
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — onTitleWatchedChanged', () => {
+  test('refreshes episode rows when title is toggled', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = {
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Show' },
+        seasons: [{ seasonNumber: 1, name: 'Season 1', episodeCount: 1, isSpecials: false }],
+      }),
+      fetchSeasonEpisodes: async () => ({
+        state: RS.AVAILABLE,
+        episodes: [{ source: 'tmdb', seasonNumber: 1, episodeNumber: 1, title: 'Pilot', isAired: true, still: '', overview: '', progressKey: '1:1' }],
+      }),
+    };
+    const callbacks = makeCallbacks(null);
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, callbacks);
+    await new Promise(r => setTimeout(r, 30));
+
+    // Initially unwatched
+    let checkBtn = slot.querySelector('.tds-ep-check');
+    expect(checkBtn.getAttribute('aria-checked')).toBe('false');
+
+    // Simulate title-level "mark watched" (sets entry to {})
+    callbacks.saveWatchedEntry({});
+    WatchlistSeasons.onTitleWatchedChanged();
+
+    checkBtn = slot.querySelector('.tds-ep-check');
+    expect(checkBtn.getAttribute('aria-checked')).toBe('true');
+
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — opening does not change watched state', () => {
+  test('attach does not call saveWatchedEntry', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = mockMeta({
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Breaking Bad' },
+        seasons: [
+          { seasonNumber: 1, name: 'Season 1', episodeCount: 7, poster: 'https://example.com/s1.jpg', isSpecials: false },
+          { seasonNumber: 2, name: 'Season 2', episodeCount: 13, poster: 'https://example.com/s2.jpg', isSpecials: false },
+        ],
+      }),
+      fetchSeasonEpisodes: async () => ({ state: RS.AVAILABLE, episodes: [
+        { seasonNumber: 1, episodeNumber: 1, title: 'Pilot', still: 'https://example.com/ep1.jpg', isAired: true },
+      ] }),
+    });
+    let saveCount = 0;
+    const callbacks = makeCallbacks(null);
+    callbacks.saveWatchedEntry = () => { saveCount++; };
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, callbacks);
+    await new Promise(r => setTimeout(r, 40));
+    expect(saveCount).toBe(0);
+    const cards = slot.querySelectorAll('.tds-season-card');
+    cards.forEach((card) => {
+      expect(card.classList.contains('tds-season-card--unwatched')).toBe(true);
+    });
+    const epCheck = slot.querySelector('.tds-ep-check');
+    if (epCheck) expect(epCheck.getAttribute('aria-checked')).toBe('false');
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — season posters and section titles', () => {
+  test('different season posters render when provided', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = mockMeta({
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Arcane' },
+        seasons: [
+          { seasonNumber: 1, name: 'Season 1', episodeCount: 9, poster: 'https://example.com/arcane-s1.jpg', isSpecials: false },
+          { seasonNumber: 2, name: 'Season 2', episodeCount: 9, poster: 'https://example.com/arcane-s2.jpg', isSpecials: false },
+        ],
+      }),
+      fetchSeasonEpisodes: () => new Promise(() => {}),
+    });
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, makeCallbacks());
+    await new Promise(r => setTimeout(r, 30));
+    const imgs = [...slot.querySelectorAll('.tds-season-poster')].map((img) => img.getAttribute('src'));
+    expect(imgs).toContain('https://example.com/arcane-s1.jpg');
+    expect(imgs).toContain('https://example.com/arcane-s2.jpg');
+    expect(imgs[0]).not.toBe(imgs[1]);
+    const sectionTitle = slot.querySelector('[data-tds-label="seasons-title"]');
+    expect(sectionTitle.textContent).toBe('Seasons');
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+
+  test('episode stills use still image when available', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = mockMeta({
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Arcane' },
+        seasons: [{ seasonNumber: 1, name: 'Season 1', episodeCount: 1, poster: 'https://example.com/s1.jpg', isSpecials: false }],
+      }),
+      fetchSeasonEpisodes: async () => ({
+        state: RS.AVAILABLE,
+        seasonPoster: 'https://example.com/s1-detail.jpg',
+        episodes: [{ seasonNumber: 1, episodeNumber: 1, title: 'Pilot', still: 'https://example.com/still1.jpg', isAired: true }],
+      }),
+    });
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, makeCallbacks());
+    await new Promise(r => setTimeout(r, 40));
+    const still = slot.querySelector('.tds-ep-still');
+    expect(still).toBeTruthy();
+    expect(still.getAttribute('src')).toBe('https://example.com/still1.jpg');
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — season selection callback', () => {
+  test('onSeasonSelected fires when season changes', async () => {
+    const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+    window.WatchlistSeriesMetadata = mockMeta({
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Breaking Bad' },
+        seasons: [
+          { seasonNumber: 1, name: 'Season 1', episodeCount: 7, poster: 'https://example.com/s1.jpg', isSpecials: false },
+          { seasonNumber: 2, name: 'Season 2', episodeCount: 13, poster: 'https://example.com/s2.jpg', isSpecials: false },
+        ],
+      }),
+      fetchSeasonEpisodes: async () => ({ state: RS.AVAILABLE, episodes: [] }),
+    });
+    let selected = null;
+    const callbacks = makeCallbacks();
+    callbacks.onSeasonSelected = (s) => { selected = s; };
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, callbacks);
+    await new Promise(r => setTimeout(r, 30));
+    expect(selected?.seasonNumber).toBe(1);
+    const card2 = slot.querySelector('[data-tds-season="2"]');
+    card2.click();
+    await new Promise(r => setTimeout(r, 10));
+    expect(selected?.seasonNumber).toBe(2);
+    expect(WatchlistSeasons.getSelectedSeason()).toBe(2);
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+// ─── New Stage D correction tests ────────────────────────────────────────────
+
+describe('WatchlistProgress — empty episode array guard', () => {
+  const P = () => window.WatchlistProgress;
+
+  test('[].every() does not falsely mark season as fully watched', () => {
+    const entry = { progress: { version: 1, episodes: ['1:1', '1:2'] } };
+    // Empty airedEps — must return false, not true
+    expect(P().isSeasonFullyWatched(entry, 1, [])).toBe(false);
+  });
+
+  test('isSeasonFullyWatched with null entry returns false for empty array', () => {
+    expect(P().isSeasonFullyWatched(null, 1, [])).toBe(false);
+  });
+
+  test('isSeasonFullyWatched with null entry returns false for non-empty array', () => {
+    const eps = [{ seasonNumber: 1, episodeNumber: 1 }];
+    expect(P().isSeasonFullyWatched(null, 1, eps)).toBe(false);
+  });
+
+  test('isSeasonPartiallyWatched with empty array returns false', () => {
+    const entry = { progress: { version: 1, episodes: ['1:1'] } };
+    expect(P().isSeasonPartiallyWatched(entry, 1, [])).toBe(false);
+  });
+
+  test('watchedCountForSeason with null entry and episodes returns 0', () => {
+    const eps = [{ seasonNumber: 1, episodeNumber: 1 }, { seasonNumber: 1, episodeNumber: 2 }];
+    expect(P().watchedCountForSeason(null, 1, eps)).toBe(0);
+  });
+
+  test('legacy-complete entry + empty airedEps = 0 watched (not all watched)', () => {
+    const legacyEntry = { rating: 9 }; // no .progress → isLegacyComplete = true
+    expect(P().watchedCountForSeason(legacyEntry, 1, [])).toBe(0);
+    expect(P().isSeasonFullyWatched(legacyEntry, 1, [])).toBe(false);
+  });
+});
+
+describe('WatchlistProgress — unwatched title season states', () => {
+  const P = () => window.WatchlistProgress;
+
+  test('null entry → not legacy-complete', () => {
+    expect(P().isLegacyComplete(null)).toBe(false);
+  });
+
+  test('null entry → not fully watched even with loaded episodes', () => {
+    const eps = [
+      { seasonNumber: 1, episodeNumber: 1 },
+      { seasonNumber: 1, episodeNumber: 2 },
+    ];
+    expect(P().isSeasonFullyWatched(null, 1, eps)).toBe(false);
+    expect(P().isSeasonPartiallyWatched(null, 1, eps)).toBe(false);
+  });
+
+  test('null entry → watchedCount = 0', () => {
+    const eps = [{ seasonNumber: 1, episodeNumber: 1 }];
+    expect(P().watchedCountForSeason(null, 1, eps)).toBe(0);
+  });
+
+  test('actual legacy-complete entry → isLegacyComplete = true', () => {
+    expect(P().isLegacyComplete({})).toBe(true);
+    expect(P().isLegacyComplete({ rating: 9 })).toBe(true);
+    expect(P().isLegacyComplete(true)).toBe(false); // legacy boolean = not an object
+  });
+
+  test('granular progress entry → isLegacyComplete = false', () => {
+    const entry = { progress: { version: 1, episodes: ['1:1'] } };
+    expect(P().isLegacyComplete(entry)).toBe(false);
+  });
+});
+
+describe('WatchlistSeasons — watched state on open', () => {
+  const RS_AVAIL = 'available';
+  function makeRS() {
+    return { AVAILABLE: RS_AVAIL, OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+  }
+
+  test('opening an unwatched title (entry=null) — all seasons are "unwatched"', async () => {
+    const RS = makeRS();
+    window.WatchlistSeriesMetadata = mockMeta({
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Demo Show' },
+        seasons: [
+          { seasonNumber: 1, name: 'Season 1', episodeCount: 5, isSpecials: false },
+          { seasonNumber: 2, name: 'Season 2', episodeCount: 5, isSpecials: false },
+        ],
+      }),
+      fetchSeasonEpisodes: () => new Promise(() => {}),
+    });
+    let saveCount = 0;
+    const callbacks = makeCallbacks(null); // null = unwatched
+    callbacks.saveWatchedEntry = () => { saveCount++; };
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, callbacks);
+    await new Promise(r => setTimeout(r, 40));
+
+    // No save should have happened
+    expect(saveCount).toBe(0);
+
+    // Both season cards must be in the unwatched state
+    const cards = [...slot.querySelectorAll('.tds-season-card')];
+    expect(cards.length).toBeGreaterThan(0);
+    cards.forEach((card) => {
+      expect(card.classList.contains('tds-season-card--watched')).toBe(false);
+      expect(card.classList.contains('tds-season-card--unwatched')).toBe(true);
+    });
+
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+
+  test('legacy-complete title shows seasons as watched', async () => {
+    const RS = makeRS();
+    window.WatchlistSeriesMetadata = mockMeta({
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Demo Show' },
+        seasons: [
+          { seasonNumber: 1, name: 'Season 1', episodeCount: 5, isSpecials: false },
+        ],
+      }),
+      fetchSeasonEpisodes: () => new Promise(() => {}),
+    });
+    const legacyEntry = { rating: 8 }; // legacy-complete
+    const callbacks = makeCallbacks(legacyEntry);
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, callbacks);
+    await new Promise(r => setTimeout(r, 40));
+
+    const cards = [...slot.querySelectorAll('.tds-season-card')];
+    expect(cards.length).toBeGreaterThan(0);
+    cards.forEach((card) => {
+      expect(card.classList.contains('tds-season-card--watched')).toBe(true);
+    });
+
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+
+  test('partial progress — season shows as partial when some eps watched', async () => {
+    const RS = makeRS();
+    window.WatchlistSeriesMetadata = mockMeta({
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Demo Show' },
+        seasons: [
+          { seasonNumber: 1, name: 'Season 1', episodeCount: 3, isSpecials: false },
+        ],
+      }),
+      fetchSeasonEpisodes: async () => ({
+        state: RS.AVAILABLE,
+        episodes: [
+          { seasonNumber: 1, episodeNumber: 1, title: 'Ep 1', isAired: true },
+          { seasonNumber: 1, episodeNumber: 2, title: 'Ep 2', isAired: true },
+          { seasonNumber: 1, episodeNumber: 3, title: 'Ep 3', isAired: true },
+        ],
+      }),
+    });
+    const partialEntry = { progress: { version: 1, episodes: ['1:1'] } };
+    const callbacks = makeCallbacks(partialEntry);
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, callbacks);
+    await new Promise(r => setTimeout(r, 80));
+
+    const cards = [...slot.querySelectorAll('.tds-season-card')];
+    expect(cards.length).toBeGreaterThan(0);
+    cards.forEach((card) => {
+      expect(card.classList.contains('tds-season-card--partial')).toBe(true);
+    });
+
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistSeasons — unique episode stills', () => {
+  const RS = { AVAILABLE: 'available', OFFLINE_WITH_CACHE: 'offlineWithCache', OFFLINE_NO_CACHE: 'offlineNoCache', API_FAILURE: 'apiFailure', RATE_LIMITED: 'rateLimited', INVALID_ID: 'invalidId', NO_SEASONS: 'noSeasons', EPISODE_DETAILS_UNAVAILABLE: 'episodeDetailsUnavailable', UNAVAILABLE: 'unavailable', PARTIALLY_AVAILABLE: 'partiallyAvailable' };
+
+  test('each episode row uses its own still URL', async () => {
+    window.WatchlistSeriesMetadata = mockMeta({
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Test Show' },
+        seasons: [{ seasonNumber: 1, name: 'Season 1', episodeCount: 3, isSpecials: false }],
+      }),
+      fetchSeasonEpisodes: async () => ({
+        state: RS.AVAILABLE,
+        episodes: [
+          { seasonNumber: 1, episodeNumber: 1, title: 'Ep 1', still: 'https://img.tmdb.org/still1.jpg', isAired: true },
+          { seasonNumber: 1, episodeNumber: 2, title: 'Ep 2', still: 'https://img.tmdb.org/still2.jpg', isAired: true },
+          { seasonNumber: 1, episodeNumber: 3, title: 'Ep 3', still: 'https://img.tmdb.org/still3.jpg', isAired: true },
+        ],
+      }),
+    });
+    const slot = makeSlot();
+    WatchlistSeasons.attach(slot, TV_ITEM, makeCallbacks());
+    await new Promise(r => setTimeout(r, 80));
+
+    const stills = [...slot.querySelectorAll('.tds-ep-still')].map((img) => img.getAttribute('src'));
+    expect(stills.length).toBe(3);
+    // All stills must be distinct
+    const unique = new Set(stills);
+    expect(unique.size).toBe(3);
+    expect(stills[0]).toBe('https://img.tmdb.org/still1.jpg');
+    expect(stills[1]).toBe('https://img.tmdb.org/still2.jpg');
+    expect(stills[2]).toBe('https://img.tmdb.org/still3.jpg');
+
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+
+  test('episode without still shows placeholder, not repeated poster', async () => {
+    window.WatchlistSeriesMetadata = mockMeta({
+      ResultState: RS,
+      fetchSeriesMetadata: async () => ({
+        state: RS.AVAILABLE,
+        series: { source: 'tmdb', title: 'Test Show' },
+        seasons: [{ seasonNumber: 1, name: 'Season 1', episodeCount: 2, isSpecials: false }],
+      }),
+      fetchSeasonEpisodes: async () => ({
+        state: RS.AVAILABLE,
+        episodes: [
+          { seasonNumber: 1, episodeNumber: 1, title: 'Ep 1', still: '', isAired: true },
+          { seasonNumber: 1, episodeNumber: 2, title: 'Ep 2', still: null, isAired: true },
+        ],
+      }),
+    });
+    const slot = makeSlot();
+    const callbacks = makeCallbacks();
+    callbacks.getWatchEntry = () => null; // unwatched
+    WatchlistSeasons.attach(slot, { ...TV_ITEM, poster: 'https://poster.com/item.jpg' }, callbacks);
+    await new Promise(r => setTimeout(r, 80));
+
+    const placeholders = slot.querySelectorAll('.tds-ep-still-placeholder:not([hidden])');
+    expect(placeholders.length).toBe(2);
+
+    WatchlistSeasons.detach();
+    slot.remove();
+  });
+});
+
+describe('WatchlistProgress — My Rating states (unit)', () => {
+  const P = () => window.WatchlistProgress;
+
+  test('null entry → not watched, no rating', () => {
+    expect(P().isLegacyComplete(null)).toBe(false);
+    expect(P().getProgress(null)).toBe(null);
+  });
+
+  test('entry with rating → has rating', () => {
+    const entry = { rating: 8, progress: { version: 1, episodes: [] } };
+    const prog = P().getProgress(entry);
+    expect(prog).toBeTruthy();
+    expect(entry.rating).toBe(8);
+  });
+
+  test('legacy-complete entry with rating → still has rating data', () => {
+    const entry = { rating: 7 };
+    expect(P().isLegacyComplete(entry)).toBe(true);
+    expect(entry.rating).toBe(7);
+  });
+});
+
+describe('WatchlistProgress — season ratings vs series ratings', () => {
+  const P = () => window.WatchlistProgress;
+
+  test('itemWatchState does not use season-level ratings', () => {
+    const entry = { progress: { version: 1, episodes: ['1:1', '1:2'] } };
+    const seasons = [
+      {
+        seasonNumber: 1,
+        episodes: [
+          { seasonNumber: 1, episodeNumber: 1, airDate: '2020-01-01' },
+          { seasonNumber: 1, episodeNumber: 2, airDate: '2020-01-08' },
+        ],
+      },
+    ];
+    const result = P().itemWatchState(entry, seasons);
+    expect(result.state).toBe('watched');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGRESSION: getWatchEntry must return null for unwatched items
+// Root cause: app.js getWatchEntry returns {} for items with no entry, which
+// isLegacyComplete({}) then wrongly treats as fully watched, making all seasons
+// appear checked for completely unwatched titles.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('getWatchEntry null contract — unwatched items', () => {
+  const P = () => window.WatchlistProgress;
+
+  test('empty object {} is treated as legacy-complete (legacy behavior)', () => {
+    // This confirms {} IS legacy-complete, so unwatched items MUST NOT produce {}
+    expect(P().isLegacyComplete({})).toBe(true);
+  });
+
+  test('null entry is NOT legacy-complete', () => {
+    expect(P().isLegacyComplete(null)).toBe(false);
+  });
+
+  test('null entry → seasonWatchState returns "unwatched" via progress path', () => {
+    // With null entry and no aired episodes, season must be "unwatched"
+    const airedEps = [{ seasonNumber: 1, episodeNumber: 1 }, { seasonNumber: 1, episodeNumber: 2 }];
+    const watched = P().watchedCountForSeason(null, 1, airedEps);
+    expect(watched).toBe(0);
+    const fully = P().isSeasonFullyWatched(null, 1, airedEps);
+    expect(fully).toBe(false);
+    const partial = P().isSeasonPartiallyWatched(null, 1, airedEps);
+    expect(partial).toBe(false);
+  });
+
+  test('null entry → itemWatchState returns unwatched for a series', () => {
+    const seasons = [{
+      seasonNumber: 1,
+      episodes: [
+        { seasonNumber: 1, episodeNumber: 1, airDate: '2020-01-01' },
+        { seasonNumber: 1, episodeNumber: 2, airDate: '2020-01-08' },
+      ],
+    }];
+    const result = P().itemWatchState(null, seasons);
+    expect(result.state).toBe('unwatched');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGRESSION: Opening a detail view must never change progress
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Detail open is read-only — no progress mutation', () => {
+  test('attaching seasons for unwatched item never calls saveWatchedEntry', async () => {
+    // Simulate the scenario that caused the bug: an unwatched title is opened
+    // in the detail view. The only callbacks that can save progress are
+    // saveWatchedEntry and updateCardInPlace. Neither should be called.
+    let saveCalled = false;
+    let updateCalled = false;
+
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+
+    const callbacks = {
+      getWatchEntry: () => null, // unwatched — key: returns null, not {}
+      saveWatchedEntry: () => { saveCalled = true; },
+      updateCardInPlace: () => { updateCalled = true; },
+      openRatingModal: () => {},
+      updateHeaderWatchState: () => {},
+      updateDetailActions: () => {},
+    };
+
+    WatchlistSeasons?.attach?.(slot, {
+      id: 'test-read-only',
+      title: 'Test Show',
+      contentType: 'series',
+      link: null,
+      poster: '',
+    }, callbacks);
+
+    // Wait for any async init
+    await new Promise(r => setTimeout(r, 150));
+
+    expect(saveCalled).toBe(false);
+    expect(updateCalled).toBe(false);
+
+    WatchlistSeasons?.detach?.();
+    slot.remove();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// itemProgressState logic (mirrors app.js helper)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('itemProgressState derivation', () => {
+  const P = () => window.WatchlistProgress;
+
+  function deriveState(raw) {
+    // Mirrors the app.js itemProgressState logic for testing without app.js
+    if (!raw) return 'unwatched';
+    // normalizeWatchEntry equivalent
+    if (raw === true) return 'watched'; // legacy true = {}
+    const entry = typeof raw === 'object' ? raw : null;
+    if (!entry) return 'unwatched';
+    if (!P() || P().isLegacyComplete(entry)) return 'watched';
+    const prog = P().getProgress(entry);
+    if (prog && Array.isArray(prog.episodes) && prog.episodes.length > 0) return 'inProgress';
+    return 'unwatched';
+  }
+
+  test('no entry → unwatched', () => {
+    expect(deriveState(null)).toBe('unwatched');
+    expect(deriveState(undefined)).toBe('unwatched');
+  });
+
+  test('legacy true → watched', () => {
+    expect(deriveState(true)).toBe('watched');
+  });
+
+  test('empty object {} → watched (legacy-complete)', () => {
+    expect(deriveState({})).toBe('watched');
+  });
+
+  test('entry with rating only → watched (no granular progress)', () => {
+    expect(deriveState({ rating: 8 })).toBe('watched');
+  });
+
+  test('entry with empty episodes array → unwatched', () => {
+    expect(deriveState({ progress: { version: 1, episodes: [] } })).toBe('unwatched');
+  });
+
+  test('entry with 1 watched episode → inProgress', () => {
+    expect(deriveState({ progress: { version: 1, episodes: ['1:1'] } })).toBe('inProgress');
+  });
+
+  test('entry with multiple watched episodes → inProgress', () => {
+    expect(deriveState({ progress: { version: 1, episodes: ['1:1', '1:2', '2:1'] } })).toBe('inProgress');
+  });
+});
+</script>
+
+<script src="js/title-seasons.js"></script>
+<script>
+// Auto-run on load
+window.addEventListener('load', runAll);
+</script>
+</body>
+</html>

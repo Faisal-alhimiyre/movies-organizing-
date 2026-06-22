@@ -236,12 +236,7 @@ Map<String, WatchEntry> parseWatchedMap(dynamic raw) {
   final result = <String, WatchEntry>{};
   for (final entry in raw.entries) {
     final watch = WatchEntry.fromJson(entry.value);
-    if (watch.rating != null ||
-        (watch.note != null && watch.note!.isNotEmpty)) {
-      result[entry.key.toString()] = watch;
-    } else {
-      result[entry.key.toString()] = watch;
-    }
+    result[entry.key.toString()] = watch;
   }
   return result;
 }
@@ -335,12 +330,7 @@ WatchlistItem? findDuplicateTitle(
 Map<String, dynamic> watchedMapToJson(Map<String, WatchEntry> watched) {
   final result = <String, dynamic>{};
   for (final entry in watched.entries) {
-    final map = <String, dynamic>{};
-    if (entry.value.rating != null) map['rating'] = entry.value.rating;
-    if (entry.value.note != null && entry.value.note!.isNotEmpty) {
-      map['note'] = entry.value.note;
-    }
-    result[entry.key] = map;
+    result[entry.key] = entry.value.toJson();
   }
   return result;
 }

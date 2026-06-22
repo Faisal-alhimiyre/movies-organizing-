@@ -110,16 +110,79 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     }
 
     ref.listen(sessionProvider, (prev, next) {
-      if (prev?.listId != next?.listId) {
-        ref.invalidateSelf();
+      if (prev?.listId != next?.listId && next != null) {
+        _activateList(next.listId);
       }
     });
 
-    final cloud = ref.watch(appConfigProvider).isSupabaseConfigured;
-    return ref.read(watchlistRepositoryProvider).load(
-          session.listId,
+    final listId = session.listId;
+    final snapshot = _instantSnapshot(listId);
+    _scheduleCloudReconcile(listId);
+    return snapshot;
+  }
+
+  WatchlistSnapshot _instantSnapshot(String listId) {
+    final cloud = ref.read(appConfigProvider).isSupabaseConfigured;
+    final local = ref.read(watchlistRepositoryProvider).readSnapshot(
+          listId,
           cloudConfigured: cloud,
         );
+    if (!cloud) return local;
+    return local.copyWith(syncStatus: SyncDisplayStatus.pending);
+  }
+
+  void _activateList(String listId) {
+    state = AsyncData(_instantSnapshot(listId));
+    _scheduleCloudReconcile(listId);
+  }
+
+  void _scheduleCloudReconcile(String listId) {
+    if (!ref.read(appConfigProvider).isSupabaseConfigured) return;
+
+    Future(() async {
+      final changed = await ref
+          .read(watchlistRepositoryProvider)
+          .reconcileWithCloud(listId);
+
+      // Guard against stale reconcile after list switch or sign-out.
+      // (ref.mounted is Riverpod 3+; this project uses 2.6.x.)
+      if (ref.read(sessionProvider)?.listId != listId) return;
+
+      if (changed) {
+        final cloud = ref.read(appConfigProvider).isSupabaseConfigured;
+        final fresh = ref.read(watchlistRepositoryProvider).readSnapshot(
+              listId,
+              cloudConfigured: cloud,
+            );
+        state = AsyncData(
+          fresh.copyWith(syncStatus: SyncDisplayStatus.saved),
+        );
+      } else if (state.hasValue) {
+        state = AsyncData(
+          state.value!.copyWith(syncStatus: SyncDisplayStatus.saved),
+        );
+      }
+    });
+  }
+
+  /// Instant list switch: flush the outgoing list locally, then load the next one.
+  /// No modal or delay — background work is cancelled via list-id guards on save.
+  Future<void> switchToList(String targetListId) async {
+    final session = ref.read(sessionProvider);
+    if (session == null || targetListId.isEmpty) return;
+    if (session.listId == targetListId) return;
+
+    final snapshot = state.value;
+    if (snapshot != null) {
+      await _persist(
+        session,
+        snapshot.items,
+        snapshot.watched,
+        refresh: false,
+      );
+    }
+
+    await ref.read(sessionProvider.notifier).switchList(targetListId);
   }
 
   Future<String?> saveItem({
@@ -300,6 +363,11 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     Map<String, WatchEntry> watched, {
     bool refresh = true,
   }) async {
+    final live = ref.read(sessionProvider);
+    if (live == null || live.listId != session.listId) {
+      return null;
+    }
+
     final cloud = ref.read(appConfigProvider).isSupabaseConfigured;
     final listName = ref.read(authRepositoryProvider).listLabel(
               session.listId,
@@ -342,9 +410,14 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
   Future<void> replaceItems(
     List<WatchlistItem> items, {
     bool refresh = false,
+    String? expectedListId,
+    Map<String, WatchEntry>? watched,
   }) async {
     final session = ref.read(sessionProvider);
     if (session == null) return;
+
+    final listId = expectedListId ?? session.listId;
+    if (session.listId != listId) return;
 
     final snapshot = state.value;
     if (snapshot == null) return;
@@ -352,7 +425,7 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     await _persist(
       session,
       items,
-      snapshot.watched,
+      watched ?? snapshot.watched,
       refresh: refresh,
     );
   }

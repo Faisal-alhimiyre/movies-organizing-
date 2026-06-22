@@ -8,13 +8,37 @@ void main() {
     expect(formatEpisodeDurationLabel('~23 min/ep'), '~23 min/ep');
   });
 
+  test('formatAgeRatingDisplay maps common US ratings', () {
+    expect(formatAgeRatingDisplay('PG-13'), 'Ages 13+');
+    expect(formatAgeRatingDisplay('TV-MA'), 'Ages 17+');
+    expect(formatAgeRatingDisplay('PG'), 'Parental guidance');
+    expect(formatAgeRatingDisplay('R'), 'Ages 17+');
+    expect(formatAgeRatingDisplay('G'), 'All ages');
+    expect(formatAgeRatingDisplay('18+'), 'Adults only');
+    expect(formatAgeRatingDisplay('NR'), 'Unrated');
+    expect(formatAgeRatingDisplay('XYZ-99'), 'XYZ-99');
+  });
+
+  test('ageRatingSortRank orders from all ages to adults only', () {
+    expect(ageRatingSortRank('G'), 10);
+    expect(ageRatingSortRank('TV-Y'), 20);
+    expect(ageRatingSortRank('PG'), 40);
+    expect(ageRatingSortRank('PG-13'), 50);
+    expect(ageRatingSortRank('R'), 70);
+    expect(ageRatingSortRank('NC-17'), 80);
+    expect(ageRatingSortRank(null), isNull);
+    expect(ageRatingSortRank(''), isNull);
+    expect(ageRatingSortRank('G')! < ageRatingSortRank('NC-17')!, isTrue);
+  });
+
   test('buildTitleMetaBadges for movies shows age and duration', () {
     final badges = buildTitleMetaBadges(
       contentType: 'movies',
       ageRating: 'PG-13',
       runtime: '142 min',
     );
-    expect(badges.map((b) => b.label).toList(), ['PG-13', '142 min']);
+    expect(badges.map((b) => b.label).toList(), ['Ages 13+', '142 min']);
+    expect(badges.first.tooltip, 'PG-13');
     expect(badges.map((b) => b.kind).toList(), [
       TitleMetaBadgeKind.age,
       TitleMetaBadgeKind.duration,
@@ -30,7 +54,7 @@ void main() {
     );
     expect(
       badges.map((b) => b.label).toList(),
-      ['TV-MA', '3 seasons', '~45 min/ep'],
+      ['Ages 17+', '3 seasons', '~45 min/ep'],
     );
   });
 
@@ -66,7 +90,7 @@ void main() {
         ageRating: 'PG-13',
         runtime: '148 min',
       ),
-      ['PG-13', '148 min'],
+      ['Ages 13+', '148 min'],
     );
   });
 
@@ -80,6 +104,6 @@ void main() {
         runtime: '148 min',
       ),
     );
-    expect(parts, ['PG-13', '148 min']);
+    expect(parts, ['Ages 13+', '148 min']);
   });
 }

@@ -107,5 +107,8 @@ String? ratingSortEmptyHintKey({
 bool isImdbSortActive(WatchlistFilterState filters) =>
     filters.sortSource == 'imdb';
 
+bool isAgeSortActive(WatchlistFilterState filters) =>
+    filters.sortSource == 'age';
+
 bool isAnilistSortActive(WatchlistFilterState filters) =>
     filters.sortSource == 'anilist';

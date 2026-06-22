@@ -34,6 +34,7 @@ create table if not exists public.lists (
   description text not null default '',
   title_count integer not null default 0 check (title_count >= 0),
   watched_count integer not null default 0 check (watched_count >= 0),
+  in_progress_count integer not null default 0 check (in_progress_count >= 0),
   updated_at timestamptz not null default now(),
   check (watched_count <= title_count)
 );
@@ -65,6 +66,11 @@ create table if not exists public.watchlist_items (
   watched boolean not null default false,
   watch_rating numeric,          -- user's score 0-10 when watched (null = not rated yet)
   watch_note text not null default '',  -- private comment when watched
+  -- Granular progress: { "version":1, "episodes":["1:1","2:3"], "completed":true }
+  -- completed=true signals all required aired episodes are watched (set by client).
+  -- watched=false + episodes>0 + completed!=true  → in-progress
+  -- watched=true  OR completed=true               → fully watched
+  watch_progress jsonb not null default '{"version":1,"episodes":[]}'::jsonb,
   added_at timestamptz not null default now(),  -- when the title was added to the list
   updated_at timestamptz not null default now(),
   primary key (list_id, item_id)
@@ -79,6 +85,12 @@ create index if not exists watchlist_items_list_type_genre_idx
 create index if not exists watchlist_items_title_idx
   on public.watchlist_items (list_id, title);
 
+create index if not exists watchlist_items_in_progress_idx
+  on public.watchlist_items (list_id)
+  where watched = false
+    and jsonb_typeof(watch_progress->'episodes') = 'array'
+    and jsonb_array_length(watch_progress->'episodes') > 0;
+
 -- Keep lists.title_count / lists.watched_count in sync with watchlist_items
 create or replace function public.refresh_list_stats(p_list_id text)
 returns void
@@ -91,10 +103,25 @@ as $$
       from public.watchlist_items
       where list_id = p_list_id
     ),
+    -- watched = legacy-complete (watched=true) OR granular-complete (completed=true)
     watched_count = (
       select count(*)::integer
       from public.watchlist_items
-      where list_id = p_list_id and watched = true
+      where list_id = p_list_id
+        and (
+          watched = true
+          or (watch_progress->>'completed')::boolean is true
+        )
+    ),
+    -- in_progress = has episode keys, not complete, not legacy-complete
+    in_progress_count = (
+      select count(*)::integer
+      from public.watchlist_items
+      where list_id = p_list_id
+        and watched = false
+        and (watch_progress->>'completed') is distinct from 'true'
+        and jsonb_typeof(watch_progress->'episodes') = 'array'
+        and jsonb_array_length(watch_progress->'episodes') > 0
     )
   where list_id = p_list_id;
 $$;
@@ -247,6 +274,12 @@ create policy "list_snapshots_insert"
 --
 -- Already have watchlist_items but no age_rating / runtime? Run once:
 --   supabase/migrate-title-metadata.sql
+--
+-- Already have watchlist_items but no watch_progress? Run once:
+--   supabase/migrate-watch-progress.sql
+--
+-- Upgrading to Stage D three-state progress? Run once:
+--   supabase/migrate-stage-d.sql
 --
 -- Upgrading an older project? Run once:
 --   supabase/migrate-incremental.sql

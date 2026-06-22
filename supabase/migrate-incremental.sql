@@ -230,3 +230,80 @@ alter table public.watchlist_items
   add column if not exists runtime text not null default '',
   add column if not exists season_count text not null default '',
   add column if not exists episode_count text not null default '';
+
+-- 8) Granular episode progress (migrate-watch-progress.sql)
+alter table public.watchlist_items
+  add column if not exists watch_progress jsonb
+    not null default '{"version":1,"episodes":[]}'::jsonb;
+
+-- 9) Stage D: three-state progress (migrate-stage-d.sql)
+
+alter table public.lists
+  add column if not exists in_progress_count integer not null default 0;
+
+alter table public.lists
+  drop constraint if exists lists_in_progress_count_nonneg;
+
+alter table public.lists
+  add constraint lists_in_progress_count_nonneg
+    check (in_progress_count >= 0);
+
+alter table public.watchlist_items
+  drop constraint if exists watchlist_items_watch_progress_version;
+
+alter table public.watchlist_items
+  add constraint watchlist_items_watch_progress_version check (
+    (watch_progress->>'version')::int = 1
+    or watch_progress = '{}'::jsonb
+    or watch_progress = '{"version":1,"episodes":[]}'::jsonb
+  );
+
+create index if not exists watchlist_items_in_progress_idx
+  on public.watchlist_items (list_id)
+  where watched = false
+    and jsonb_typeof(watch_progress->'episodes') = 'array'
+    and jsonb_array_length(watch_progress->'episodes') > 0;
+
+create or replace function public.refresh_list_stats(p_list_id text)
+returns void
+language sql
+as $$
+  update public.lists
+  set
+    title_count = (
+      select count(*)::integer
+      from public.watchlist_items
+      where list_id = p_list_id
+    ),
+    watched_count = (
+      select count(*)::integer
+      from public.watchlist_items
+      where list_id = p_list_id
+        and (
+          watched = true
+          or (watch_progress->>'completed')::boolean is true
+        )
+    ),
+    in_progress_count = (
+      select count(*)::integer
+      from public.watchlist_items
+      where list_id = p_list_id
+        and watched = false
+        and (watch_progress->>'completed') is distinct from 'true'
+        and jsonb_typeof(watch_progress->'episodes') = 'array'
+        and jsonb_array_length(watch_progress->'episodes') > 0
+    )
+  where list_id = p_list_id;
+$$;
+
+update public.watchlist_items
+set watched = false
+where watched = true
+  and (watch_progress->>'completed') is distinct from 'true'
+  and jsonb_typeof(watch_progress->'episodes') = 'array'
+  and jsonb_array_length(watch_progress->'episodes') > 0
+  and watch_rating is null
+  and (watch_note is null or watch_note = '');
+
+select public.refresh_list_stats(list_id)
+from public.lists;

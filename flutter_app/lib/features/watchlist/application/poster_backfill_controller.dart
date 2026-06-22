@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/config/environment.dart';
+import '../../../core/services/session_service.dart';
 import '../../../models/watchlist_item.dart';
 import '../../../repositories/metadata/metadata_service.dart';
 import '../../../repositories/watchlist_repository.dart';
@@ -77,6 +78,11 @@ class PosterBackfillController extends Notifier<bool> {
     List<WatchlistItem> queue,
     WatchlistSnapshot snapshot,
   ) async {
+    final session = ref.read(sessionProvider);
+    if (session == null) return;
+    final listId = session.listId;
+    final watched = Map<String, WatchEntry>.from(snapshot.watched);
+
     final metadata = ref.read(metadataServiceProvider);
     final config = ref.read(appConfigProvider);
     final controller = ref.read(watchlistControllerProvider.notifier);
@@ -84,6 +90,7 @@ class PosterBackfillController extends Notifier<bool> {
     var updated = 0;
 
     for (final item in queue) {
+      if (ref.read(sessionProvider)?.listId != listId) break;
       try {
         final enriched =
             await enrichItemWithPoster(metadata, item, config: config);
@@ -93,7 +100,11 @@ class PosterBackfillController extends Notifier<bool> {
             items[index] = enriched;
             updated += 1;
             if (updated % 3 == 0) {
-              await controller.replaceItems(items);
+              await controller.replaceItems(
+                items,
+                expectedListId: listId,
+                watched: watched,
+              );
             }
           }
         }
@@ -104,8 +115,13 @@ class PosterBackfillController extends Notifier<bool> {
       await Future<void>.delayed(posterEnrichmentThrottle);
     }
 
-    if (updated > 0) {
-      await controller.replaceItems(items, refresh: false);
+    if (updated > 0 && ref.read(sessionProvider)?.listId == listId) {
+      await controller.replaceItems(
+        items,
+        expectedListId: listId,
+        watched: watched,
+        refresh: false,
+      );
     }
   }
 }

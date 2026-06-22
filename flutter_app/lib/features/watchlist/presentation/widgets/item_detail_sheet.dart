@@ -285,22 +285,51 @@ class _DetailContent extends StatelessWidget {
                     ),
                   ],
                   const SizedBox(height: 6),
-                  ContentTitleMetaBadges.fromItem(item),
-                  const SizedBox(height: 8),
                   Wrap(
                     spacing: 5,
                     runSpacing: 5,
                     children: [
                       ContentTypeBadge(contentType: item.contentType),
-                      if (item.genre.isNotEmpty)
-                        ContentGenreChip(
-                            label: l10n.genreLabel(item.genre), primary: true),
-                      ...item.secondaryGenres.map(
-                        (genre) => ContentGenreChip(
-                            label: l10n.genreLabel(genre), primary: false),
-                      ),
+                      if (item.year != null)
+                        ContentYearBadge(label: item.year.toString()),
+                      ContentTitleMetaBadges.fromItem(item),
                     ],
                   ),
+                  if (item.genre.isNotEmpty ||
+                      item.secondaryGenres.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      l10n.cardSectionGenres.toUpperCase(),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurface
+                            .withValues(alpha: 0.55),
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          if (item.genre.isNotEmpty)
+                            ContentGenreChip(
+                              label: l10n.genreLabel(item.genre),
+                              primary: true,
+                            ),
+                          ...item.secondaryGenres.map(
+                            (genre) => Padding(
+                              padding: const EdgeInsets.only(left: 5),
+                              child: ContentGenreChip(
+                                label: l10n.genreLabel(genre),
+                                primary: false,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

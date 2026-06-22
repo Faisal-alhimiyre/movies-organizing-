@@ -1,0 +1,763 @@
+/**
+ * title-seasons.css — Seasons, episodes, and granular watch-progress styles.
+ *
+ * Stage D. Works inside #tdSeasonsSlot, owned by title-seasons.js.
+ * Uses only CSS variables already defined by the theme files so every theme
+ * (dark, light, purple, brown, pink) is supported without overrides.
+ *
+ * Prefix: tds- (title-detail-seasons)
+ */
+
+/* ── Layout root ─────────────────────────────────────────────────────────── */
+
+.tds-root {
+  padding: 0;
+}
+
+/* ── Loading state ───────────────────────────────────────────────────────── */
+
+.tds-loading-section {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 1.25rem 1.25rem 0.5rem;
+  color: var(--text-secondary, #a0a0a0);
+  font-size: 0.85rem;
+}
+
+.tds-spinner {
+  display: inline-block;
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid var(--border-strong, #525252);
+  border-top-color: var(--accent, #7c6aff);
+  border-radius: 50%;
+  animation: tds-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes tds-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tds-spinner { animation: none; opacity: 0.6; }
+}
+
+/* ── Skeleton cards ──────────────────────────────────────────────────────── */
+
+.tds-skeleton-row {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.5rem 1.25rem;
+  overflow: hidden;
+}
+
+.tds-skeleton-card {
+  flex: 0 0 7rem;
+  height: 10.5rem;
+  border-radius: 8px;
+  background: var(--bg-card, #1e1e1e);
+  animation: tds-shimmer 1.5s infinite;
+}
+
+@keyframes tds-shimmer {
+  0%   { opacity: 0.6; }
+  50%  { opacity: 1; }
+  100% { opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tds-skeleton-card { animation: none; opacity: 0.7; }
+}
+
+/* ── Error / status ──────────────────────────────────────────────────────── */
+
+.tds-stale-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 1.25rem 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border, #363636);
+  background: var(--bg-card, #1e1e1e);
+  color: var(--text-muted, #888);
+  font-size: 0.78rem;
+}
+
+.tds-stale-banner::before {
+  content: "⚠";
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.tds-error-section {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin: 0.75rem 1.25rem;
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border, #363636);
+  background: var(--bg-card, #1e1e1e);
+  font-size: 0.83rem;
+}
+
+.tds-error-icon {
+  flex-shrink: 0;
+  display: flex;
+  padding-top: 0.05rem;
+  color: var(--text-muted, #888);
+  opacity: 0.75;
+}
+
+.tds-error-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.tds-error-msg {
+  margin: 0;
+  line-height: 1.45;
+  color: var(--text, #fafafa);
+  font-weight: 500;
+}
+
+.tds-error-sub {
+  margin: 0;
+  line-height: 1.4;
+  color: var(--text-secondary, #a0a0a0);
+  font-size: 0.79rem;
+}
+
+.tds-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  align-self: flex-start;
+  margin-top: 0.25rem;
+  padding: 0.38rem 0.85rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong, #525252);
+  background: transparent;
+  color: var(--accent, #7c6aff);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.tds-retry-btn:hover {
+  background: rgba(124, 106, 255, 0.08);
+  border-color: var(--accent, #7c6aff);
+}
+
+.tds-retry-btn:focus-visible {
+  outline: 2px solid var(--accent, #7c6aff);
+  outline-offset: 2px;
+}
+
+/* ── Season carousel section ─────────────────────────────────────────────── */
+
+.tds-seasons-section {
+  padding-top: 0.75rem;
+}
+
+.tds-section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 1.25rem 0.5rem;
+}
+
+.tds-section-title {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary, #a0a0a0);
+}
+
+/* ── Carousel wrapper ────────────────────────────────────────────────────── */
+
+.tds-carousel-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* Navigation arrows */
+.tds-nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated, #121212);
+  border: 1px solid var(--border-strong, #525252);
+  border-radius: 50%;
+  color: var(--text, #e8e8e8);
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.tds-nav-btn:hover { background: var(--bg-card-hover, #252525); opacity: 1; }
+.tds-nav-btn:focus-visible {
+  outline: 2px solid var(--accent, #7c6aff);
+  outline-offset: 2px;
+}
+
+.tds-nav-btn--prev { left: 0.4rem; }
+.tds-nav-btn--next { right: 0.4rem; }
+
+.tds-nav-btn svg { width: 1rem; height: 1rem; }
+
+/* Hide arrows when not needed */
+.tds-nav-btn[hidden] { display: none; }
+
+/* ── Carousel track ──────────────────────────────────────────────────────── */
+
+.tds-carousel {
+  display: flex;
+  gap: 0.6rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.5rem 1.5rem;
+  /* Always LTR so seasons are in chronological left→right order */
+  direction: ltr;
+  width: 100%;
+  /* Hide scrollbar visually */
+  scrollbar-width: none;
+}
+.tds-carousel::-webkit-scrollbar { display: none; }
+
+/* Let the user grab/drag on desktop */
+.tds-carousel--grabbing { cursor: grabbing; scroll-behavior: auto; }
+
+/* ── Season card ─────────────────────────────────────────────────────────── */
+
+.tds-season-card {
+  flex: 0 0 7.5rem;
+  scroll-snap-align: center;
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--bg-card, #1e1e1e);
+  border: 2px solid transparent;
+  transition: transform 0.22s ease, opacity 0.22s ease, border-color 0.22s ease;
+  transform: scale(0.86);
+  opacity: 0.55;
+  user-select: none;
+  position: relative;
+  outline: none;
+}
+
+.tds-season-card:focus-visible {
+  outline: 2px solid var(--accent, #7c6aff);
+  outline-offset: 2px;
+}
+
+.tds-season-card--selected {
+  transform: scale(1);
+  opacity: 1;
+  border-color: var(--accent, #7c6aff);
+  cursor: default;
+}
+
+.tds-season-card--adjacent {
+  transform: scale(0.91);
+  opacity: 0.72;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tds-season-card { transition: none; }
+}
+
+/* Season poster */
+.tds-season-poster-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  background: var(--bg-elevated, #121212);
+  overflow: hidden;
+}
+
+.tds-season-poster {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tds-season-poster.tds-img--broken,
+.tds-season-poster[hidden] {
+  display: none;
+}
+
+.tds-season-poster-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  color: var(--text-muted, #888);
+  background: var(--bg-card, #1e1e1e);
+}
+
+/* Whole-season mark overlay button */
+.tds-season-mark-overlay {
+  position: absolute;
+  bottom: 0.4rem;
+  right: 0.4rem;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong, #525252);
+  background: var(--bg-elevated, #121212);
+  color: var(--text-secondary, #a0a0a0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  z-index: 1;
+  opacity: 0.85;
+}
+.tds-season-mark-overlay:hover { opacity: 1; background: var(--bg-card-hover, #252525); }
+.tds-season-mark-overlay:focus-visible { outline: 2px solid var(--accent, #7c6aff); outline-offset: 2px; }
+.tds-season-mark-overlay svg { width: 0.9rem; height: 0.9rem; }
+
+/* Checked state */
+.tds-season-card--watched .tds-season-mark-overlay {
+  background: var(--accent, #7c6aff);
+  border-color: var(--accent, #7c6aff);
+  color: #fff;
+  opacity: 1;
+}
+
+/* Partial state */
+.tds-season-card--partial .tds-season-mark-overlay {
+  background: transparent;
+  border-color: var(--accent, #7c6aff);
+  color: var(--accent, #7c6aff);
+  opacity: 1;
+}
+
+/* Season card metadata */
+.tds-season-meta {
+  padding: 0.45rem 0.5rem 0.5rem;
+}
+
+.tds-season-name {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text, #e8e8e8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.tds-season-count {
+  margin: 0.15rem 0 0;
+  font-size: 0.68rem;
+  color: var(--text-secondary, #a0a0a0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tds-season-progress-text {
+  margin: 0.1rem 0 0;
+  font-size: 0.65rem;
+  color: var(--text-muted, #888);
+}
+
+/* Mini progress bar on season card */
+.tds-mini-progress {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border, #363636);
+  margin: 0.3rem 0 0;
+  overflow: hidden;
+}
+
+.tds-mini-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent, #7c6aff);
+  transition: width 0.3s ease;
+  min-width: 0;
+}
+
+.tds-season-card--watched .tds-mini-progress-fill {
+  background: var(--success, #4caf50);
+}
+
+/* ── Selected season info ────────────────────────────────────────────────── */
+
+.tds-season-info {
+  margin: 0.75rem 1.25rem 0;
+  padding: 0.8rem 0.9rem;
+  border-radius: 10px;
+  background: var(--bg-card, #1e1e1e);
+  border: 1px solid var(--border, #363636);
+}
+
+.tds-season-info-name {
+  margin: 0 0 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text, #e8e8e8);
+}
+
+.tds-season-info-meta {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary, #a0a0a0);
+}
+
+.tds-season-info-overview {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #a0a0a0);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.tds-season-info-overview--expanded {
+  -webkit-line-clamp: unset;
+}
+
+.tds-overview-toggle {
+  background: none;
+  border: none;
+  color: var(--accent, #7c6aff);
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 0;
+  margin: 0 0 0.5rem;
+  display: block;
+}
+
+.tds-overview-toggle:focus-visible {
+  outline: 2px solid var(--accent, #7c6aff);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.tds-season-info-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.35rem;
+}
+
+.tds-season-info-progress {
+  font-size: 0.78rem;
+  color: var(--text-secondary, #a0a0a0);
+  flex: 1;
+}
+
+.tds-season-mark-btn {
+  padding: 0.3rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong, #525252);
+  background: transparent;
+  color: var(--text, #e8e8e8);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.tds-season-mark-btn:hover { background: var(--bg-card-hover, #252525); }
+.tds-season-mark-btn:focus-visible {
+  outline: 2px solid var(--accent, #7c6aff);
+  outline-offset: 2px;
+}
+.tds-season-mark-btn--complete {
+  border-color: var(--accent, #7c6aff);
+  color: var(--accent, #7c6aff);
+}
+
+/* ── Episodes section ────────────────────────────────────────────────────── */
+
+.tds-episodes-section {
+  margin-top: 0.9rem;
+}
+
+.tds-episodes-header {
+  padding: 0 1.25rem 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.tds-episodes-title {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary, #a0a0a0);
+}
+
+.tds-episodes-status {
+  padding: 0.6rem 1.25rem;
+  font-size: 0.83rem;
+  color: var(--text-secondary, #a0a0a0);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.tds-episode-list {
+  display: flex;
+  flex-direction: column;
+  /* No outer padding — episode rows add their own horizontal padding */
+}
+
+/* ── Episode row ─────────────────────────────────────────────────────────── */
+
+.tds-episode {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.65rem 1.25rem;
+  border-bottom: 1px solid var(--border, #363636);
+  transition: background 0.1s;
+}
+
+.tds-episode:last-child { border-bottom: none; }
+.tds-episode:hover { background: var(--bg-card-hover, #252525); }
+
+/* Episode still */
+.tds-ep-still-wrap {
+  flex: 0 0 5.5rem;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-card, #1e1e1e);
+  position: relative;
+}
+
+.tds-ep-still {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tds-ep-still.tds-img--broken { display: none; }
+
+.tds-ep-still-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  color: var(--text-muted, #888);
+  background: var(--bg-card, #1e1e1e);
+}
+
+/* Episode content */
+.tds-ep-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.tds-ep-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-bottom: 0.2rem;
+}
+
+.tds-ep-num {
+  font-size: 0.72rem;
+  color: var(--text-muted, #888);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tds-ep-title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text, #e8e8e8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tds-ep-title--placeholder {
+  color: var(--text-secondary, #a0a0a0);
+  font-weight: 400;
+  font-style: italic;
+}
+
+.tds-ep-overview {
+  margin: 0 0 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary, #a0a0a0);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.tds-ep-meta {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--text-muted, #888);
+}
+
+/* Watched check button */
+.tds-ep-check {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong, #525252);
+  background: transparent;
+  color: var(--text-secondary, #a0a0a0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.tds-ep-check:hover { border-color: var(--accent, #7c6aff); color: var(--accent, #7c6aff); }
+.tds-ep-check:focus-visible {
+  outline: 2px solid var(--accent, #7c6aff);
+  outline-offset: 2px;
+}
+
+.tds-ep-check svg { width: 1rem; height: 1rem; }
+
+/* Watched state */
+.tds-ep-check--watched {
+  background: var(--accent, #7c6aff);
+  border-color: var(--accent, #7c6aff);
+  color: #fff;
+}
+
+.tds-episode--watched .tds-ep-title {
+  color: var(--text-secondary, #a0a0a0);
+}
+
+/* ── Separating line above seasons ───────────────────────────────────────── */
+
+.tds-root:not(:empty) {
+  border-top: 1px solid var(--border, #363636);
+  margin-top: 0.5rem;
+}
+
+/* ── Responsive adjustments ──────────────────────────────────────────────── */
+
+@media (max-width: 400px) {
+  .tds-season-card { flex: 0 0 6.5rem; }
+  .tds-ep-still-wrap { flex: 0 0 4.5rem; }
+}
+
+@media (min-width: 641px) {
+  .tds-season-card { flex: 0 0 8.5rem; }
+  .tds-carousel { padding: 0.5rem 2rem; }
+
+  .tds-ep-still-wrap { flex: 0 0 7rem; }
+  .tds-ep-overview { -webkit-line-clamp: 3; }
+
+  .tds-episodes-section,
+  .tds-section-header,
+  .tds-error-section,
+  .tds-stale-banner,
+  .tds-season-info {
+    margin-left: 1.5rem;
+    margin-right: 1.5rem;
+  }
+
+  .tds-section-header,
+  .tds-episodes-header,
+  .tds-episodes-status {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .tds-episode {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .tds-episodes-section {
+    padding: 0 1.5rem;
+  }
+
+  .tds-loading-section {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
+/* ── RTL support ─────────────────────────────────────────────────────────── */
+
+[dir="rtl"] .tds-nav-btn--prev { left: auto; right: 0.4rem; }
+[dir="rtl"] .tds-nav-btn--next { right: auto; left: 0.4rem; }
+
+/* The carousel itself always stays LTR (dir="ltr" on the element),
+   so season cards remain in chronological order regardless of page RTL.
+   Arrow key semantics are handled in JS (prev = lower season number always). */
+
+[dir="rtl"] .tds-season-mark-overlay {
+  right: auto;
+  left: 0.4rem;
+}
+
+/* ── Theme colour overrides ──────────────────────────────────────────────── */
+
+/* Light theme */
+html[data-theme="light"] .tds-stale-banner { background: #f8f7f4; }
+html[data-theme="light"] .tds-season-info { background: #f3f2ee; }
+
+/* Purple theme */
+html[data-theme="purple"] .tds-season-card--selected { border-color: var(--accent, #b280ff); }
+html[data-theme="purple"] .tds-ep-check--watched { background: var(--accent, #b280ff); border-color: var(--accent, #b280ff); }
+
+/* Brown theme */
+html[data-theme="brown"] .tds-season-card--selected { border-color: var(--accent, #d4875b); }
+html[data-theme="brown"] .tds-ep-check--watched { background: var(--accent, #d4875b); border-color: var(--accent, #d4875b); }
+
+/* Pink theme */
+html[data-theme="pink"] .tds-season-card { background: rgba(0,0,0,0.2); }
+html[data-theme="pink"] .tds-season-info { background: rgba(0,0,0,0.15); border-color: rgba(255,255,255,0.2); }
+html[data-theme="pink"] .tds-season-card--selected { border-color: #fff; }
+html[data-theme="pink"] .tds-ep-check--watched { background: rgba(255,255,255,0.9); border-color: rgba(255,255,255,0.9); color: #9b1149; }
+html[data-theme="pink"] .tds-retry-btn { color: #fff; border-color: rgba(255,255,255,0.4); }
+html[data-theme="pink"] .tds-overview-toggle { color: rgba(255,255,255,0.85); }
+html[data-theme="pink"] .tds-season-mark-btn { border-color: rgba(255,255,255,0.4); color: #fff; }
+html[data-theme="pink"] .tds-season-mark-btn--complete { border-color: #fff; color: #fff; }

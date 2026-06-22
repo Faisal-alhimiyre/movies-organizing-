@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../app/theme/theme_extensions.dart';
 import '../../core/utils/rating_utils.dart';
 import '../../core/utils/title_meta_format.dart';
+import '../../l10n/l10n.dart';
 import '../../models/watchlist_item.dart';
 
 // ── Shared gold accent for lead text ────────────────────────────────────────
@@ -195,12 +196,14 @@ class ContentTitleMetaBadges extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = L10n(Localizations.localeOf(context).languageCode);
     final badges = titleMetaBadgesFromItem(
       contentType: contentType,
       ageRating: ageRating,
       runtime: runtime,
       seasonCount: seasonCount,
       episodeCount: episodeCount,
+      formatAgeRating: l10n.ageRatingLabel,
     );
     if (badges.isEmpty) return const SizedBox.shrink();
 
@@ -272,7 +275,7 @@ class _TitleMetaBadge extends StatelessWidget {
             ),
     };
 
-    return DecoratedBox(
+    final chip = DecoratedBox(
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(999),
@@ -294,6 +297,12 @@ class _TitleMetaBadge extends StatelessWidget {
         ),
       ),
     );
+
+    final tip = badge.tooltip;
+    if (tip != null && tip.isNotEmpty && tip != badge.label) {
+      return Tooltip(message: tip, child: chip);
+    }
+    return chip;
   }
 }
 

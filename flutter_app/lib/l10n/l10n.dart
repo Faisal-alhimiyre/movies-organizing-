@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app/localization.dart';
 import '../app/theme/theme_controller.dart';
 import '../core/utils/code_validator.dart';
+import '../core/utils/title_meta_format.dart';
 
 /// Hand-maintained strings for Stage 3 gate/auth. Full `i18n.js` port in a later stage.
 class L10n {
@@ -148,6 +149,10 @@ class L10n {
   String get cardYourRating => _ar ? 'تقييمك' : 'Your rating';
   String get cardSectionDetails => _ar ? 'التفاصيل' : 'Details';
   String get cardSectionGenres => _ar ? 'الأنواع' : 'Genres';
+
+  /// Friendly label for MPAA / TV parental ratings (raw code stored separately).
+  String ageRatingLabel(String raw) =>
+      formatAgeRatingDisplay(raw, arabic: _ar);
   String get cardOpenLink => _ar ? 'فتح الرابط' : 'Open link';
   String get typeFilmSeries => _ar ? 'سلسلة أفلام' : 'Film series';
   String get mobileNotWatched => _ar ? 'لم تُشاهد بعد' : 'Not watched yet';
@@ -157,6 +162,29 @@ class L10n {
   String get mobileEditRating => _ar ? 'تعديل التقييم' : 'Edit rating';
   String get mobileClose => _ar ? 'إغلاق' : 'Close';
   String get btnClose => mobileClose;
+
+  // ─── Episode / season progress ────────────────────────────────────────────
+  String get progressUnwatched => _ar ? 'لم تُشاهد' : 'Unwatched';
+  String get progressInProgress => _ar ? 'قيد المشاهدة' : 'In progress';
+  String get progressWatched => _ar ? 'مشاهَد' : 'Watched';
+  String progressEpisodes(int watched, int total) =>
+      _ar ? '$watched/$total حلقة' : '$watched/$total episodes';
+  String get progressMarkSeasonWatched =>
+      _ar ? 'تعيين الموسم كمشاهَد' : 'Mark season watched';
+  String get progressUnmarkSeasonWatched =>
+      _ar ? 'إلغاء تحديد الموسم' : 'Unmark season';
+  String get progressSeasonPartial => _ar ? 'مشاهَد جزئياً' : 'Partially watched';
+  String get progressMarkAllWatched => _ar ? 'تعيين الكل كمشاهَد' : 'Mark all watched';
+  String get progressClearAllWatched => _ar ? 'إلغاء تحديد الكل' : 'Unwatch all';
+  String get progressLoadingEpisodes =>
+      _ar ? 'جارٍ تحميل الحلقات…' : 'Loading episodes…';
+  String get progressLoadError => _ar ? 'تعذّر تحميل الحلقات.' : 'Could not load episodes.';
+  String get progressOffline =>
+      _ar ? 'أنت غير متصل بالإنترنت. بيانات الحلقات غير متاحة.'
+          : 'You are offline. Episode data is unavailable.';
+  String get progressRetry => _ar ? 'إعادة المحاولة' : 'Retry';
+  String get progressSpecials => _ar ? 'حلقات خاصة' : 'Specials';
+  String progressSeason(int n) => _ar ? 'الموسم $n' : 'Season $n';
   String get btnRateLater => _ar ? 'التقييم لاحقاً' : 'Rate later';
   String get btnSaveRating => _ar ? 'حفظ التقييم' : 'Save rating';
   String get ratingTitle => _ar ? 'تقييم العنوان' : 'Rate title';
@@ -377,6 +405,12 @@ class L10n {
   String get emptyReleaseYearMissing => _ar
       ? 'سنوات الإصدار غير محفوظة بعد. تُحمّل تلقائياً من IMDb/AniList — انتظر قليلاً أو أضف عبر البحث.'
       : 'Release years are not saved yet. They load automatically from IMDb/AniList — give it a moment, or add titles via search.';
+  String get emptyAgeRatingLoading => _ar
+      ? 'جاري تحميل التصنيفات العمرية لعناوينك…'
+      : 'Loading age ratings for your titles…';
+  String get emptyAgeRatingMissing => _ar
+      ? 'التصنيفات العمرية غير محفوظة بعد. تُحمّل تلقائياً من IMDb/AniList — انتظر قليلاً أو أضف عبر البحث.'
+      : 'Age ratings are not saved yet. They load automatically from IMDb/AniList — give it a moment, or add titles via search.';
   String get emptyYearsNeedConfig => _ar
       ? 'سنوات الأفلام تحتاج مفتاح OMDb أو TMDB. سنوات الأنمي تُحمّل من AniList.'
       : 'Movie years need an OMDb or TMDB API key. Anime years still load from AniList.';
@@ -387,7 +421,8 @@ class L10n {
     }
     if (sortSource == 'imdb' ||
         sortSource == 'anilist' ||
-        sortSource == 'personal') {
+        sortSource == 'personal' ||
+        sortSource == 'age') {
       return sortDirection == 'worst' ? sortLowestFirst : sortHighestFirst;
     }
     return filterSortDirection;
@@ -397,6 +432,7 @@ class L10n {
         'all' => _ar ? 'الترتيب الافتراضي' : 'Default order',
         'added' => _ar ? 'أُضيف مؤخراً' : 'Recently added',
         'release' => _ar ? 'تاريخ الإصدار' : 'Release date',
+        'age' => _ar ? 'التصنيف العمري' : 'Age rating',
         'imdb' => _ar ? 'تقييمات IMDb' : 'IMDb ratings',
         'anilist' => _ar ? 'تقييمات AniList' : 'AniList ratings',
         'personal' => _ar ? 'تقييماتي' : 'My ratings',

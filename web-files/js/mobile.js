@@ -228,6 +228,9 @@
     return `<div class="card__rating-badges">${parts.join("")}</div>`;
   }
 
+  // DEPRECATED (Stage C): buildFocusMarkup / buildFocusActions / openCardFocus
+  // are no longer called when title-detail.js is loaded. Kept as a fallback
+  // for environments where title-detail.js fails to load. Remove in Stage F.
   function buildFocusMarkup(item, watchEntry) {
     const typeBadge = getTypeBadge(item);
     const secondaryBadges = (item.secondaryGenres || [])
@@ -239,6 +242,22 @@
     const mainGenreBadge = item.genre
       ? `<span class="badge badge--genre-primary">${escapeHtml(genreLabel(item.genre))}</span>`
       : "";
+    const yearLabel = item.year ? String(item.year).trim() : "";
+    const yearBadge = yearLabel
+      ? `<span class="badge badge--year text-num">${escapeHtml(yearLabel)}</span>`
+      : "";
+    const metaBadges = (window.WatchlistMetadata?.buildTitleMetaBadges(item, item.contentType) || [])
+      .map(
+        (badge) => {
+          const titleAttr =
+            badge.kind === "age" && badge.title
+              ? ` title="${escapeHtml(badge.title)}"`
+              : "";
+          return `<span class="badge badge--${badge.kind}"${titleAttr}>${escapeHtml(badge.label)}</span>`;
+        }
+      )
+      .join("");
+    const genreRow = [mainGenreBadge, secondaryBadges].filter(Boolean).join("");
     const altTitle = item.altTitle
       ? `<span class="mobile-card-focus__alt text-ltr">${escapeHtml(ltr(item.altTitle))}</span>`
       : "";
@@ -305,9 +324,15 @@
           <div class="mobile-card-focus__badges">
             <div class="mobile-card-focus__badge-row">
               <span class="badge badge--${typeBadge.className}">${escapeHtml(typeBadge.label)}</span>
-              ${mainGenreBadge}
-              ${secondaryBadges}
+              ${yearBadge}
+              ${metaBadges}
             </div>
+            ${
+              genreRow
+                ? `<span class="mobile-card-focus__section-label">${escapeHtml(t("card.sectionGenres"))}</span>
+                   <div class="mobile-card-focus__badge-row mobile-card-focus__badge-row--genres">${genreRow}</div>`
+                : ""
+            }
           </div>
         </div>
       </header>
@@ -473,6 +498,11 @@
   }
 
   function onMainClick(event) {
+    // title-detail.js now handles card clicks on all breakpoints.
+    // Return immediately when that module is loaded.
+    if (window.WatchlistTitleDetail) return;
+
+    // Legacy fallback (mobile-only, used if title-detail.js is absent)
     if (!isMobile()) return;
     if (focusOverlay && !focusOverlay.hidden) return;
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/services/session_service.dart';
 import '../../../models/watchlist_item.dart';
 import '../../../repositories/watchlist_repository.dart';
 import 'ratings_backfill.dart';
@@ -128,6 +129,11 @@ class RatingsBackfillController extends Notifier<RatingsBackfillProgress> {
     List<WatchlistItem> imdbQueue,
     WatchlistSnapshot snapshot,
   ) async {
+    final session = ref.read(sessionProvider);
+    if (session == null) return;
+    final listId = session.listId;
+    final watched = Map<String, WatchEntry>.from(snapshot.watched);
+
     final total = anilistQueue.length + imdbQueue.length;
     state = RatingsBackfillProgress(
       running: true,
@@ -144,6 +150,7 @@ class RatingsBackfillController extends Notifier<RatingsBackfillProgress> {
     var updated = 0;
 
     for (final item in anilistQueue) {
+      if (ref.read(sessionProvider)?.listId != listId) break;
       try {
         final result = await service.fetchAnilistRatingForItem(item);
         if (result?.anilistRating != null) {
@@ -155,7 +162,11 @@ class RatingsBackfillController extends Notifier<RatingsBackfillProgress> {
             );
             updated += 1;
             if (updated % 3 == 0) {
-              await controller.replaceItems(items);
+              await controller.replaceItems(
+                items,
+                expectedListId: listId,
+                watched: watched,
+              );
             }
           }
         }
@@ -173,6 +184,7 @@ class RatingsBackfillController extends Notifier<RatingsBackfillProgress> {
     }
 
     for (final item in imdbQueue) {
+      if (ref.read(sessionProvider)?.listId != listId) break;
       try {
         final result = await service.fetchImdbRatingForItem(item);
         if (result?.imdbRating != null) {
@@ -184,7 +196,11 @@ class RatingsBackfillController extends Notifier<RatingsBackfillProgress> {
             );
             updated += 1;
             if (updated % 3 == 0) {
-              await controller.replaceItems(items);
+              await controller.replaceItems(
+                items,
+                expectedListId: listId,
+                watched: watched,
+              );
             }
           }
         }
@@ -199,8 +215,13 @@ class RatingsBackfillController extends Notifier<RatingsBackfillProgress> {
 
     state = const RatingsBackfillProgress();
 
-    if (updated > 0) {
-      await controller.replaceItems(items, refresh: false);
+    if (updated > 0 && ref.read(sessionProvider)?.listId == listId) {
+      await controller.replaceItems(
+        items,
+        expectedListId: listId,
+        watched: watched,
+        refresh: false,
+      );
     }
   }
 }

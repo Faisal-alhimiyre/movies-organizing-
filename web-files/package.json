@@ -1,0 +1,19 @@
+{
+  "name": "watchlist-web",
+  "private": true,
+  "scripts": {
+    "test": "jest --no-coverage",
+    "test:watch": "jest --watch"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "testMatch": ["**/js/*.test.js"],
+    "testEnvironmentOptions": {
+      "url": "http://localhost/"
+    }
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  }
+}

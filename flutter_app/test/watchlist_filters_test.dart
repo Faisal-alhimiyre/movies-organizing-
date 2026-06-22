@@ -113,4 +113,84 @@ void main() {
     expect(groups.first.items.map((i) => i.title).toList(),
         ['Beta', 'Alpha', 'Gamma']);
   });
+
+  test('buildFilteredGroups sorts by age rating most mature first', () {
+    final items = [
+      const WatchlistItem(
+        id: 'movies::Action::Kids',
+        contentType: 'movies',
+        genre: 'Action',
+        title: 'Kids',
+        lead: 'Actor',
+        summary: 'Family fun.',
+        ageRating: 'G',
+      ),
+      const WatchlistItem(
+        id: 'movies::Action::Teen',
+        contentType: 'movies',
+        genre: 'Action',
+        title: 'Teen',
+        lead: 'Actor',
+        summary: 'Teen drama.',
+        ageRating: 'PG-13',
+      ),
+      const WatchlistItem(
+        id: 'movies::Action::Adult',
+        contentType: 'movies',
+        genre: 'Action',
+        title: 'Adult',
+        lead: 'Actor',
+        summary: 'Mature themes.',
+        ageRating: 'NC-17',
+      ),
+    ];
+
+    final groups = buildFilteredGroups(
+      items: items,
+      watched: const {},
+      typeFilter: WatchlistTypeFilter.all,
+      filters: const WatchlistFilterState(
+        sortSource: 'age',
+        sortDirection: 'best',
+      ),
+    );
+
+    expect(groups.first.items.map((i) => i.title).toList(),
+        ['Adult', 'Teen', 'Kids']);
+  });
+
+  test('buildFilteredGroups sorts by age rating least mature first', () {
+    final items = [
+      const WatchlistItem(
+        id: 'movies::Action::Kids',
+        contentType: 'movies',
+        genre: 'Action',
+        title: 'Kids',
+        lead: 'Actor',
+        summary: 'Family fun.',
+        ageRating: 'G',
+      ),
+      const WatchlistItem(
+        id: 'movies::Action::Adult',
+        contentType: 'movies',
+        genre: 'Action',
+        title: 'Adult',
+        lead: 'Actor',
+        summary: 'Mature themes.',
+        ageRating: 'NC-17',
+      ),
+    ];
+
+    final groups = buildFilteredGroups(
+      items: items,
+      watched: const {},
+      typeFilter: WatchlistTypeFilter.all,
+      filters: const WatchlistFilterState(
+        sortSource: 'age',
+        sortDirection: 'worst',
+      ),
+    );
+
+    expect(groups.first.items.map((i) => i.title).toList(), ['Kids', 'Adult']);
+  });
 }

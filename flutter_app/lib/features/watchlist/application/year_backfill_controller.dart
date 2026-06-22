@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/config/environment.dart';
+import '../../../core/services/session_service.dart';
 import '../../../models/watchlist_item.dart';
 import '../../../repositories/watchlist_repository.dart';
 import 'year_backfill.dart';
@@ -64,6 +65,11 @@ class YearBackfillController extends Notifier<YearBackfillProgress> {
     List<WatchlistItem> queue,
     WatchlistSnapshot snapshot,
   ) async {
+    final session = ref.read(sessionProvider);
+    if (session == null) return;
+    final listId = session.listId;
+    final watched = Map<String, WatchEntry>.from(snapshot.watched);
+
     state = YearBackfillProgress(running: true, total: queue.length);
 
     final service = ref.read(yearBackfillServiceProvider);
@@ -73,6 +79,7 @@ class YearBackfillController extends Notifier<YearBackfillProgress> {
     var updated = 0;
 
     for (final item in queue) {
+      if (ref.read(sessionProvider)?.listId != listId) break;
       try {
         final result = await service.fetchYearForItem(item);
         if (result?.year != null) {
@@ -85,7 +92,11 @@ class YearBackfillController extends Notifier<YearBackfillProgress> {
             );
             updated += 1;
             if (updated % 3 == 0) {
-              await controller.replaceItems(items);
+              await controller.replaceItems(
+                items,
+                expectedListId: listId,
+                watched: watched,
+              );
             }
           }
         }
@@ -100,8 +111,13 @@ class YearBackfillController extends Notifier<YearBackfillProgress> {
 
     state = const YearBackfillProgress();
 
-    if (updated > 0) {
-      await controller.replaceItems(items, refresh: true);
+    if (updated > 0 && ref.read(sessionProvider)?.listId == listId) {
+      await controller.replaceItems(
+        items,
+        expectedListId: listId,
+        watched: watched,
+        refresh: true,
+      );
     }
   }
 }

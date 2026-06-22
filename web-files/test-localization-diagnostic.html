@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Localization + Metadata Diagnostic</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; background: #111; color: #e8e8e8; }
+    h1 { font-size: 1.3rem; margin-bottom: 0.25rem; }
+    .subtitle { color: #888; font-size: 0.85rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; color: #bbb; }
+    .suite { border: 1px solid #333; border-radius: 8px; margin-bottom: 1.25rem; padding: 0.75rem 1rem; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; }
+    .warn { color: #ff9800; }
+    .result { font-family: monospace; font-size: 0.82rem; margin: 0.2rem 0; padding: 0.2rem 0; }
+    .summary { font-weight: bold; margin-top: 1.5rem; font-size: 1rem; }
+    #run-btn { padding: 0.5rem 1.2rem; background: #7c6aff; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
+    #run-btn:hover { background: #6b5ae0; }
+    pre { background: #1e1e1e; padding: 0.5rem; border-radius: 4px; font-size: 0.75rem; overflow-x: auto; margin: 0.3rem 0; color: #ccc; }
+  </style>
+</head>
+<body>
+<h1>Localization + Metadata Diagnostic</h1>
+<p class="subtitle">Loads real i18n.js and config.js. Open this file via the same server as the app (not file://).</p>
+<button id="run-btn" onclick="runAll()">Run All Tests</button>
+<div id="results"></div>
+
+<script>
+// ─── Minimal test harness ──────────────────────────────────────────────────
+const _suites = [];
+let _current = null;
+
+function describe(name, fn) {
+  _current = { name, tests: [] };
+  _suites.push(_current);
+  try { fn(); } catch(e) {}
+}
+
+function test(name, fn) {
+  if (!_current) return;
+  _current.tests.push({ name, fn });
+}
+
+function expect(val) {
+  return {
+    toBe(expected) {
+      if (val !== expected) throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(val)}`);
+    },
+    toBeTruthy() { if (!val) throw new Error(`Expected truthy, got ${JSON.stringify(val)}`); },
+    toBeFalsy()  { if (val) throw new Error(`Expected falsy, got ${JSON.stringify(val)}`); },
+    not: {
+      toBe(expected) { if (val === expected) throw new Error(`Expected not ${JSON.stringify(expected)}`); },
+    },
+  };
+}
+
+async function runAll() {
+  const resultsEl = document.getElementById('results');
+  resultsEl.innerHTML = '<p style="color:#aaa">Running…</p>';
+
+  let totalPass = 0, totalFail = 0;
+  const html = [];
+
+  for (const suite of _suites) {
+    const rows = [];
+    for (const t of suite.tests) {
+      let passed = false, err = '';
+      try {
+        const r = t.fn();
+        if (r && typeof r.then === 'function') await r;
+        passed = true; totalPass++;
+      } catch(e) { err = e.message; totalFail++; }
+      rows.push(`<div class="result ${passed ? 'pass' : 'fail'}">${passed ? '✓' : '✗'} ${t.name}${err ? '<pre>' + err + '</pre>' : ''}</div>`);
+    }
+    html.push(`<div class="suite"><h2>${suite.name}</h2>${rows.join('')}</div>`);
+  }
+
+  const total = totalPass + totalFail;
+  const cls = totalFail === 0 ? 'pass' : 'fail';
+  html.unshift(`<div class="summary ${cls}">${totalPass}/${total} passed${totalFail ? ` — ${totalFail} failed` : ' ✓'}</div>`);
+  resultsEl.innerHTML = html.join('');
+}
+</script>
+
+<!-- Load real config + i18n (must be on same origin as app, or copy files locally) -->
+<script src="js/config.js"></script>
+<script src="js/i18n.js"></script>
+
+<script>
+// ─── Suite 1: i18n.js parses and exposes WatchlistI18n ──────────────────────
+describe("i18n.js: WatchlistI18n available", () => {
+  test("window.WatchlistI18n is defined", () => {
+    expect(typeof window.WatchlistI18n).toBe("object");
+    expect(!!window.WatchlistI18n).toBeTruthy();
+  });
+
+  test("window.WatchlistI18n.t is a function", () => {
+    expect(typeof window.WatchlistI18n?.t).toBe("function");
+  });
+
+  test("window.WatchlistI18n.getLang is a function", () => {
+    expect(typeof window.WatchlistI18n?.getLang).toBe("function");
+  });
+});
+
+// ─── Suite 2: Translation keys resolve (not returned as-is) ──────────────────
+describe("Translation keys: English (en)", () => {
+  const i18n = window.WatchlistI18n;
+  const requiredKeys = [
+    // Type badges
+    "type.anime", "type.movie", "type.tvSeries",
+    // Detail panel
+    "detail.close", "detail.genres", "detail.notWatched", "detail.watched",
+    "detail.markWatched", "detail.markUnwatched",
+    "detail.edit", "detail.move", "detail.delete",
+    "detail.openMenu", "detail.openIMDb", "detail.openAniList",
+    "detail.myRating", "detail.myRatingUnrated", "detail.myRatingPlaceholder",
+    // Seasons
+    "seasons.sectionTitle", "seasons.episodesTitle",
+    "seasons.loading", "seasons.error", "seasons.retry",
+    "seasons.seasonNum", "seasons.specials", "seasons.episodeCount",
+    "seasons.offline", "seasons.offlineNoCache", "seasons.rateLimited",
+    "seasons.invalidId", "seasons.noSeasons",
+    "seasons.prevSeason", "seasons.nextSeason",
+    "seasons.markSeasonWatched", "seasons.unmarkSeason",
+    "seasons.episodeWatched", "seasons.episodeUnwatch",
+    "seasons.episodesError", "seasons.episodesLoading",
+    "seasons.episodesUnavailable", "seasons.emptySeason", "seasons.staleWarning",
+  ];
+
+  for (const key of requiredKeys) {
+    test(`t("${key}") resolves to non-key string`, () => {
+      if (!i18n) throw new Error("WatchlistI18n not available");
+      const result = i18n.t(key);
+      if (result === key) throw new Error(`Translation missing — returned key "${key}" unchanged`);
+      if (!result) throw new Error(`Translation for "${key}" is falsy: ${JSON.stringify(result)}`);
+    });
+  }
+});
+
+describe("Translation keys: Arabic (ar)", () => {
+  const i18n = window.WatchlistI18n;
+  const arRequiredKeys = [
+    "type.anime", "type.movie", "type.tvSeries",
+    "detail.genres", "detail.markWatched",
+    "detail.openMenu", "detail.openIMDb", "detail.openAniList",
+    "detail.myRating", "detail.myRatingUnrated", "detail.myRatingPlaceholder",
+    "seasons.error", "seasons.retry", "seasons.loading",
+  ];
+
+  // Temporarily switch to Arabic, test, then restore
+  test("Arabic translations resolve correctly", () => {
+    if (!i18n) throw new Error("WatchlistI18n not available");
+    const orig = localStorage.getItem("watchlist-lang-v1");
+    try {
+      i18n.setLang("ar");
+      for (const key of arRequiredKeys) {
+        const result = i18n.t(key);
+        if (result === key) throw new Error(`Arabic translation missing: "${key}"`);
+      }
+      // Verify t("type.anime") is not "type.anime"
+      const anime = i18n.t("type.anime");
+      if (anime === "type.anime" || anime === "Anime") {
+        if (anime === "Anime") throw new Error('Arabic type.anime returned English "Anime"');
+      }
+    } finally {
+      // Restore
+      if (orig) { localStorage.setItem("watchlist-lang-v1", orig); }
+      else { localStorage.removeItem("watchlist-lang-v1"); }
+      i18n.setLang("en");
+    }
+  });
+});
+
+describe("Translation: runtime language switch", () => {
+  test("switching en → ar → en returns different values", () => {
+    const i18n = window.WatchlistI18n;
+    if (!i18n) throw new Error("WatchlistI18n not available");
+
+    const orig = localStorage.getItem("watchlist-lang-v1");
+    try {
+      i18n.setLang("en");
+      const en = i18n.t("seasons.retry");
+
+      i18n.setLang("ar");
+      const ar = i18n.t("seasons.retry");
+
+      i18n.setLang("en");
+      const en2 = i18n.t("seasons.retry");
+
+      if (en !== en2) throw new Error(`English not stable: "${en}" vs "${en2}"`);
+      if (en === ar) throw new Error(`Arabic same as English for "seasons.retry": "${en}"`);
+      if (ar === "seasons.retry") throw new Error(`Arabic translation missing for "seasons.retry"`);
+    } finally {
+      if (orig) { localStorage.setItem("watchlist-lang-v1", orig); }
+      else { localStorage.removeItem("watchlist-lang-v1"); }
+      i18n.setLang("en");
+    }
+  });
+});
+
+// ─── Suite 3: config.js keys ─────────────────────────────────────────────────
+describe("config.js: WATCHLIST_CONFIG", () => {
+  test("window.WATCHLIST_CONFIG is defined", () => {
+    expect(typeof window.WATCHLIST_CONFIG).toBe("object");
+  });
+
+  test("omdbApiKey is present (may be demo key)", () => {
+    const key = window.WATCHLIST_CONFIG?.omdbApiKey?.trim();
+    expect(!!key).toBeTruthy();
+  });
+
+  test("tmdbApiKey is accessible (empty is OK)", () => {
+    // Empty is fine — series-metadata.js falls back to OMDb
+    expect(typeof window.WATCHLIST_CONFIG?.tmdbApiKey).toBe("string");
+  });
+});
+</script>
+</body>
+</html>

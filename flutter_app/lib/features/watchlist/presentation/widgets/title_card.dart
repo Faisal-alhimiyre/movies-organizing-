@@ -140,15 +140,15 @@ class _PosterTitleCard extends StatelessWidget {
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                Colors.black.withValues(alpha: 0.88),
-                                Colors.black.withValues(alpha: 0.72),
+                                Colors.black.withValues(alpha: 0.62),
+                                Colors.black.withValues(alpha: 0.38),
                                 Colors.black.withValues(alpha: 0),
                               ],
-                              stops: const [0.0, 0.72, 1.0],
+                              stops: const [0.0, 0.48, 1.0],
                             ),
                           ),
                           child: Padding(
-                            padding: const EdgeInsets.fromLTRB(5, 4.5, 5, 7),
+                            padding: const EdgeInsets.fromLTRB(5, 3.5, 5, 5),
                             child: _CardSections(
                               item: item,
                               l10n: l10n,
@@ -478,40 +478,41 @@ class _CardSections extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _CardSectionBlock(
-          label: l10n.cardSectionDetails,
-          onOverlay: onOverlay,
-          child: Wrap(
-            spacing: 3,
-            runSpacing: 3,
-            children: [
-              _MobileTypeBadge(contentType: item.contentType, tc: tc),
-              if (yearLabel != null) _SolidYearBadge(label: yearLabel!),
-              ContentTitleMetaBadges(
-                contentType: item.contentType,
-                ageRating: item.ageRating,
-                runtime: item.runtime,
-                seasonCount: item.seasonCount,
-                episodeCount: item.episodeCount,
-                solid: true,
-                spacing: 3,
-                runSpacing: 3,
-                fontSize: 7.5,
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-              ),
-            ],
-          ),
+        Wrap(
+          spacing: 3,
+          runSpacing: 3,
+          children: [
+            _MobileTypeBadge(contentType: item.contentType, tc: tc),
+            if (yearLabel != null) _SolidYearBadge(label: yearLabel!),
+            ContentTitleMetaBadges(
+              contentType: item.contentType,
+              ageRating: item.ageRating,
+              runtime: item.runtime,
+              seasonCount: item.seasonCount,
+              episodeCount: item.episodeCount,
+              solid: onOverlay,
+              spacing: 3,
+              runSpacing: 3,
+              fontSize: 7.5,
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            ),
+          ],
         ),
         if (genreBadges.isNotEmpty) ...[
-          const SizedBox(height: 4),
+          SizedBox(height: onOverlay ? 3 : 4),
           _CardSectionBlock(
             label: l10n.cardSectionGenres,
             onOverlay: onOverlay,
-            showTopDivider: true,
-            child: Wrap(
-              spacing: 3,
-              runSpacing: 3,
-              children: genreBadges,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (var i = 0; i < genreBadges.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 3),
+                    genreBadges[i],
+                  ],
+                ],
+              ),
             ),
           ),
         ],
@@ -525,13 +526,11 @@ class _CardSectionBlock extends StatelessWidget {
     required this.label,
     required this.onOverlay,
     required this.child,
-    this.showTopDivider = false,
   });
 
   final String label;
   final bool onOverlay;
   final Widget child;
-  final bool showTopDivider;
 
   @override
   Widget build(BuildContext context) {
@@ -547,18 +546,6 @@ class _CardSectionBlock extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (showTopDivider)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(color: dividerColor),
-                ),
-              ),
-              child: const SizedBox(height: 3),
-            ),
-          ),
         Text(
           label.toUpperCase(),
           style: TextStyle(
@@ -568,7 +555,13 @@ class _CardSectionBlock extends StatelessWidget {
             letterSpacing: 1.6,
             height: 1.15,
             shadows: onOverlay
-                ? const [Shadow(color: Colors.black87, blurRadius: 3, offset: Offset(0, 1))]
+                ? const [
+                    Shadow(
+                      color: Colors.black87,
+                      blurRadius: 3,
+                      offset: Offset(0, 1),
+                    ),
+                  ]
                 : null,
           ),
         ),

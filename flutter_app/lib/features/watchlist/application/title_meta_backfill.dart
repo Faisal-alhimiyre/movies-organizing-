@@ -1,10 +1,15 @@
+import '../../../core/config/app_config.dart';
 import '../../../models/metadata_detail.dart';
 import '../../../models/watchlist_item.dart';
 import 'year_backfill.dart';
 
-bool itemHasTitleMeta(WatchlistItem item) {
+bool hasStoredAgeRating(WatchlistItem item) {
   final age = item.ageRating?.trim();
-  if (age != null && age.isNotEmpty) return true;
+  return age != null && age.isNotEmpty;
+}
+
+bool itemHasTitleMeta(WatchlistItem item) {
+  if (hasStoredAgeRating(item)) return true;
   final runtime = item.runtime?.trim();
   if (runtime != null && runtime.isNotEmpty) return true;
   if (item.seasonCount != null && item.seasonCount! > 0) return true;
@@ -51,4 +56,22 @@ WatchlistItem mergeTitleMetaFromDetail(
     addedAt: item.addedAt,
     secondaryGenres: item.secondaryGenres,
   );
+}
+
+String? ageSortEmptyHintKey({
+  required List<WatchlistItem> items,
+  required bool backfillRunning,
+  required AppConfig config,
+}) {
+  if (backfillRunning) return 'empty.ageRatingLoading';
+  if (yearBackfillNeedsMovieApiKeys(items, config)) {
+    final needsMovie = items.any(
+      (item) => !hasStoredAgeRating(item) && getImdbIdFromItem(item) != null,
+    );
+    if (needsMovie) return 'empty.yearsNeedConfig';
+  }
+  if (items.isNotEmpty && !items.any(hasStoredAgeRating)) {
+    return 'empty.ageRatingMissing';
+  }
+  return null;
 }

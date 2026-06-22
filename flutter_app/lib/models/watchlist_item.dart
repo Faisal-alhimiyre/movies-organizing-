@@ -59,14 +59,112 @@ class WatchlistItem {
       };
 }
 
+/// Granular episode-level progress (stored alongside rating/note).
+///
+/// Format: `{ "version": 1, "episodes": ["1:1", "1:2", "2:5"] }`
+/// Episode keys are `"seasonNumber:episodeNumber"` strings.
+///
+/// `null` progress on a [WatchEntry] means **legacy-complete**: the title was
+/// marked watched before granular tracking existed. It still counts as fully
+/// watched for filters and display.
+class WatchProgress {
+  const WatchProgress({
+    required this.version,
+    required this.episodes,
+  });
+
+  static const int currentVersion = 1;
+
+  /// Canonical empty progress object (no episodes watched yet).
+  static const WatchProgress empty =
+      WatchProgress(version: currentVersion, episodes: []);
+
+  final int version;
+  final List<String> episodes;
+
+  String episodeKey(int season, int episode) => '$season:$episode';
+
+  bool hasEpisode(int season, int episode) =>
+      episodes.contains(episodeKey(season, episode));
+
+  WatchProgress withEpisode(int season, int episode) {
+    final key = episodeKey(season, episode);
+    if (episodes.contains(key)) return this;
+    return WatchProgress(version: currentVersion, episodes: [...episodes, key]);
+  }
+
+  WatchProgress withoutEpisode(int season, int episode) {
+    final key = episodeKey(season, episode);
+    return WatchProgress(
+        version: currentVersion,
+        episodes: episodes.where((e) => e != key).toList());
+  }
+
+  WatchProgress withoutSeason(int season) {
+    return WatchProgress(
+        version: currentVersion,
+        episodes: episodes.where((e) => !e.startsWith('$season:')).toList());
+  }
+
+  Map<String, dynamic> toJson() => {
+        'version': version,
+        'episodes': episodes,
+      };
+
+  factory WatchProgress.fromJson(dynamic raw) {
+    if (raw == null) return empty;
+    if (raw is! Map) return empty;
+    final map = Map<String, dynamic>.from(raw);
+    final epsList = map['episodes'];
+    final eps = (epsList is List)
+        ? epsList
+            .map((e) => e.toString())
+            .where((e) => e.contains(':'))
+            .toList()
+        : <String>[];
+    return WatchProgress(version: currentVersion, episodes: eps);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is WatchProgress &&
+          version == other.version &&
+          episodes.length == other.episodes.length &&
+          episodes.every((e) => other.episodes.contains(e));
+
+  @override
+  int get hashCode => Object.hash(version, Object.hashAll(episodes));
+}
+
 /// Watched / rating entry (`watchlist-watched-v1-{listId}`).
+///
+/// [progress] is `null` for **legacy-complete** entries (pre-granular-tracking).
+/// A null progress + present key in the watched map = title is fully watched
+/// (legacy). Granular state is only present once the user explicitly interacts
+/// with individual episodes.
 class WatchEntry {
-  const WatchEntry({this.rating, this.note});
+  const WatchEntry({this.rating, this.note, this.progress});
 
   final double? rating;
   final String? note;
 
+  /// `null` = legacy-complete. Non-null = explicit episode-level tracking.
+  final WatchProgress? progress;
+
   bool get isWatched => true;
+
+  /// True when no granular progress exists — the entry came from the old
+  /// watched model and all episodes are implicitly watched.
+  bool get isLegacyComplete => progress == null;
+
+  Map<String, dynamic> toJson() {
+    final json = <String, dynamic>{};
+    if (rating != null) json['rating'] = rating;
+    if (note != null && note!.isNotEmpty) json['note'] = note;
+    if (progress != null) json['progress'] = progress!.toJson();
+    return json;
+  }
 
   factory WatchEntry.fromJson(dynamic raw) {
     if (raw == null) return const WatchEntry();
@@ -84,9 +182,15 @@ class WatchEntry {
     }
 
     final note = map['note']?.toString().trim();
+    WatchProgress? progress;
+    if (map.containsKey('progress') && map['progress'] != null) {
+      progress = WatchProgress.fromJson(map['progress']);
+    }
+
     return WatchEntry(
       rating: rating,
       note: (note != null && note.isNotEmpty) ? note : null,
+      progress: progress,
     );
   }
 }

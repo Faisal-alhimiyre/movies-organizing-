@@ -50,6 +50,20 @@ class WatchlistSnapshot {
 
   int get watchedCount =>
       items.where((i) => isItemWatched(i.id, watched)).length;
+
+  WatchlistSnapshot copyWith({
+    List<WatchlistItem>? items,
+    Map<String, WatchEntry>? watched,
+    bool? isEmptyList,
+    SyncDisplayStatus? syncStatus,
+  }) {
+    return WatchlistSnapshot(
+      items: items ?? this.items,
+      watched: watched ?? this.watched,
+      isEmptyList: isEmptyList ?? this.isEmptyList,
+      syncStatus: syncStatus ?? this.syncStatus,
+    );
+  }
 }
 
 class WatchlistSaveResult {
@@ -64,15 +78,17 @@ class WatchlistRepository {
   final LocalStorageRepository _local;
   final SupabaseSyncRepository? _supabase;
 
-  Future<WatchlistSnapshot> load(
+  /// Local cache only — use [reconcileWithCloud] for background sync.
+  WatchlistSnapshot readSnapshot(
     String listId, {
     bool cloudConfigured = false,
-  }) async {
-    if (cloudConfigured && _supabase != null) {
-      await _reconcileWithCloud(listId);
-    }
-
+  }) {
     return _readSnapshot(listId, cloudConfigured: cloudConfigured);
+  }
+
+  /// Pulls remote snapshot when newer than local. Returns true if local data changed.
+  Future<bool> reconcileWithCloud(String listId) async {
+    return _reconcileWithCloud(listId);
   }
 
   Future<WatchlistSaveResult> saveItems({
@@ -187,18 +203,18 @@ class WatchlistRepository {
     );
   }
 
-  Future<void> _reconcileWithCloud(String listId) async {
+  Future<bool> _reconcileWithCloud(String listId) async {
     final supabase = _supabase;
-    if (supabase == null) return;
+    if (supabase == null) return false;
 
     final localData = _local.readWatchlist(listId);
     final localHasData = localData != null && !localData.isEmpty;
 
     final remote = await supabase.fetchSnapshot(listId);
-    if (remote == null) return;
+    if (remote == null) return false;
 
     final remoteHasData = !remote.watchlist.isEmpty;
-    if (!remoteHasData) return;
+    if (!remoteHasData) return false;
 
     final meta = _readSyncMeta(listId);
     final localStamp = math.max(meta.localUpdated, meta.syncedAt);
@@ -219,7 +235,10 @@ class WatchlistRepository {
             ? remoteUpdated
             : DateTime.now().millisecondsSinceEpoch,
       );
+      return true;
     }
+
+    return false;
   }
 
   ({int localUpdated, int syncedAt}) _readSyncMeta(String listId) {
