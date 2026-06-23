@@ -13,15 +13,21 @@
  * Cache keys (all stored inside a separate localStorage object so as not to
  * contaminate the existing title-level metadata cache):
  *
- *   metadata:v5:resolve:imdb:<imdbId>          30 days
- *   metadata:v5:resolve:negative:imdb:<imdbId>  2 hours  (negative)
- *   metadata:v5:resolve:mal:<malId>            30 days
- *   metadata:v5:series:tmdb:<id>:<locale>       7 days
- *   metadata:v5:series:anilist:<id>:<locale>    7 days
- *   metadata:v5:seasons:tmdb:<id>:<locale>      7 days   (alias, same entry)
- *   metadata:v6:season:tmdb:<id>:<n>:<locale>  24 hours  (v6 fixes episode stills)
- *   metadata:v5:season:omdb:<imdbId>:<n>       24 hours
- *   metadata:v5:episodes:anilist:<id>          24 hours
+ *   metadata:v5:resolve:imdb:<imdbId>                 30 days
+ *   metadata:v5:resolve:negative:imdb:<imdbId>         2 hours  (negative)
+ *   metadata:v5:resolve:mal:<malId>                   30 days
+ *   metadata:v7:resolve:tvdb:imdb:<imdbId>            30 days   (TheTVDB)
+ *   metadata:v7:resolve:tvdb:tmdb:<tmdbId>            30 days   (TheTVDB)
+ *   metadata:v7:resolve:tvdb:negative:imdb:<imdbId>    2 hours  (negative)
+ *   metadata:v7:resolve:tvdb:negative:tmdb:<tmdbId>    2 hours  (negative)
+ *   metadata:v5:series:tmdb:<id>:<locale>              7 days
+ *   metadata:v5:series:anilist:<id>:<locale>           7 days
+ *   metadata:v5:seasons:tmdb:<id>:<locale>             7 days   (alias, same entry)
+ *   metadata:v6:season:tmdb:<id>:<n>:<locale>         24 hours  (v6 fixes episode stills)
+ *   metadata:v5:season:omdb:<imdbId>:<n>              24 hours
+ *   metadata:v5:episodes:anilist:<id>                 24 hours
+ *   metadata:v7:series:tvdb:<id>:<locale>              7 days   (TheTVDB series+seasons)
+ *   metadata:v7:season:tvdb:<id>:<n>:<locale>         24 hours  (TheTVDB episode stills)
  */
 (function () {
   "use strict";
@@ -271,6 +277,29 @@
     if (resolution?.isNegative) {
       return { state: ResultState.INVALID_ID };
     }
+
+    // ── TheTVDB — primary provider for TV series and anime ───────────────
+    // Attempted when a known external ID (IMDb or TMDb) is available.
+    // On any failure the existing providers are used as fallback.
+    if (window.WatchlistTvdb && (resolution?.imdbId || resolution?.tmdbId)) {
+      try {
+        const tvdbId = await resolveTvdbId(resolution);
+        if (tvdbId) {
+          const tvdbResult = await fetchTvdbSeriesMetadata(tvdbId, locale, fallbackPoster);
+          if (
+            tvdbResult?.state === ResultState.AVAILABLE ||
+            tvdbResult?.state === ResultState.PARTIALLY_AVAILABLE ||
+            tvdbResult?.state === ResultState.OFFLINE_WITH_CACHE
+          ) {
+            return tvdbResult;
+          }
+        }
+      } catch {
+        // TheTVDB unavailable — fall through to existing providers
+      }
+    }
+
+    // ── Existing fallback providers ──────────────────────────────────────
     switch (resolution?.source) {
       case "tmdb":
         return fetchTmdbSeriesMetadata(resolution.tmdbId, locale, fallbackPoster);
@@ -392,6 +421,28 @@
   async function fetchSeasonEpisodes(resolution, seasonNumber, locale, fallbackPoster = "", seasonSummary = null) {
     if (resolution?.isNegative) return { state: ResultState.INVALID_ID };
     const effectivePoster = seasonSummary?.poster || fallbackPoster;
+
+    // ── TheTVDB — primary for episode-specific artwork ───────────────────
+    if (window.WatchlistTvdb) {
+      try {
+        const tvdbId = await resolveTvdbId(resolution);
+        if (tvdbId) {
+          const tvdbResult = await fetchTvdbSeasonEpisodes(
+            tvdbId, seasonNumber, locale, effectivePoster
+          );
+          if (
+            tvdbResult?.state === ResultState.AVAILABLE ||
+            tvdbResult?.state === ResultState.OFFLINE_WITH_CACHE
+          ) {
+            return tvdbResult;
+          }
+        }
+      } catch {
+        // TheTVDB unavailable — fall through to existing providers
+      }
+    }
+
+    // ── Existing fallback providers ──────────────────────────────────────
     switch (resolution?.source) {
       case "tmdb":
         return fetchTmdbSeasonEpisodes(resolution.tmdbId, seasonNumber, locale, effectivePoster);
@@ -560,7 +611,8 @@
       return { state: ResultState.UNAVAILABLE };
     }
 
-    const cacheKey = `metadata:v5:episodes:anilist:${anilistId}`;
+    // v6 key: invalidates old entries that stored the series poster as episode still
+    const cacheKey = `metadata:v6:episodes:anilist:${anilistId}`;
     const cached = readCached(cacheKey, TTL_EPISODES);
     if (cached?.payload) {
       return parseCachedEpisodesResult(cached, { isStale: isStale(cacheKey, TTL_EPISODES) });
@@ -596,26 +648,36 @@
 
     if (streamingEps.length > 0) {
       // streamingEpisodes is incomplete and unordered — treat as best-effort.
-      episodes = streamingEps.map((ep, i) => ({
+      // Never fall back to the series poster: if a thumbnail is missing the
+      // renderer will show the neutral placeholder instead.
+      const rawEps = streamingEps.map((ep, i) => ({
         source: "anilist",
         seasonNumber: 1,
         episodeNumber: i + 1,
         title: ep.title || `Episode ${i + 1}`,
-        still: ep.thumbnail || poster,
+        still: ep.thumbnail || "",
         overview: "",
         runtimeMinutes: null,
         airDate: null,
         isAired: true,
         progressKey: `1:${i + 1}`,
       }));
+      // Duplicate-thumbnail guard: if every non-empty thumbnail is the same URL
+      // (common with promotional art served by some streaming platforms) clear
+      // them all so the neutral placeholder shows instead.
+      const nonEmpty = rawEps.filter((e) => e.still);
+      const uniqueUrls = new Set(nonEmpty.map((e) => e.still));
+      const allSame = nonEmpty.length >= 2 && uniqueUrls.size === 1;
+      episodes = allSame ? rawEps.map((e) => ({ ...e, still: "" })) : rawEps;
       state = ResultState.PARTIALLY_AVAILABLE;
     } else if (episodeCount != null) {
+      // No streaming episode detail — show placeholder for every episode
       episodes = Array.from({ length: episodeCount }, (_, i) => ({
         source: "anilist",
         seasonNumber: 1,
         episodeNumber: i + 1,
         title: `Episode ${i + 1}`,
-        still: poster,
+        still: "",
         overview: "",
         runtimeMinutes: null,
         airDate: null,
@@ -875,6 +937,234 @@
     } catch { /* ignore */ }
   }
 
+  // ─── One-time cache eviction ──────────────────────────────────
+  // Purge old v5 AniList episode entries that stored the series poster as
+  // episode stills. Runs once at module load; harmless if keys are absent.
+  (function evictObsoleteEpisodeCache() {
+    try {
+      const cache = readSeriesCache();
+      let changed = false;
+      Object.keys(cache).forEach((k) => {
+        if (k.startsWith("metadata:v5:episodes:anilist:")) {
+          delete cache[k];
+          _memory.delete(k);
+          changed = true;
+        }
+      });
+      if (changed) localStorage.setItem(SERIES_CACHE_KEY, JSON.stringify(cache));
+    } catch { /* storage unavailable — skip */ }
+  })();
+
+  // ─── TheTVDB provider ─────────────────────────────────────────
+
+  /**
+   * Resolve a TheTVDB series ID from the existing resolution object.
+   * Uses the v7 cache tier (separate from the existing v5 TMDb resolution).
+   * Returns the numeric tvdbId, or null on miss/failure.
+   *
+   * @param {{ imdbId?: string, tmdbId?: number }} resolution
+   * @returns {Promise<number|null>}
+   */
+  async function resolveTvdbId(resolution) {
+    const WTvdb = window.WatchlistTvdb;
+    if (!WTvdb) return null;
+
+    const imdbId = resolution?.imdbId;
+    const tmdbId = resolution?.tmdbId;
+
+    if (imdbId) {
+      const cacheKey = `metadata:v7:resolve:tvdb:imdb:${imdbId}`;
+      const cached = readCached(cacheKey, TTL_RESOLVE);
+      if (cached?.tvdbId) return cached.tvdbId;
+
+      const negKey = `metadata:v7:resolve:tvdb:negative:imdb:${imdbId}`;
+      if (isNegativeCacheValid(negKey)) return null;
+
+      const result = await WTvdb.resolveId({ imdbId });
+      if (result?.tvdbId) {
+        writeSeriesCacheEntry(cacheKey, { tvdbId: result.tvdbId }, TTL_RESOLVE);
+        return result.tvdbId;
+      }
+      writeNegativeCache(negKey, TTL_NEGATIVE);
+      return null;
+    }
+
+    if (tmdbId) {
+      const cacheKey = `metadata:v7:resolve:tvdb:tmdb:${tmdbId}`;
+      const cached = readCached(cacheKey, TTL_RESOLVE);
+      if (cached?.tvdbId) return cached.tvdbId;
+
+      const negKey = `metadata:v7:resolve:tvdb:negative:tmdb:${tmdbId}`;
+      if (isNegativeCacheValid(negKey)) return null;
+
+      const result = await WTvdb.resolveId({ tmdbId });
+      if (result?.tvdbId) {
+        writeSeriesCacheEntry(cacheKey, { tvdbId: result.tvdbId }, TTL_RESOLVE);
+        return result.tvdbId;
+      }
+      writeNegativeCache(negKey, TTL_NEGATIVE);
+      return null;
+    }
+
+    return null;
+  }
+
+  /**
+   * Fetch series and season metadata from TheTVDB.
+   * Makes two parallel Edge Function calls: series info + season list.
+   *
+   * @param {number} tvdbId
+   * @param {string} locale
+   * @param {string} fallbackPoster
+   * @returns {Promise<SeriesMetadataResult>}
+   */
+  async function fetchTvdbSeriesMetadata(tvdbId, locale, fallbackPoster = "") {
+    const cacheKey = `metadata:v7:series:tvdb:${tvdbId}:${locale}`;
+    const cached = readCached(cacheKey, TTL_SERIES);
+    if (cached?.payload) {
+      return parseCachedSeriesResult(cached, { isStale: isStale(cacheKey, TTL_SERIES) });
+    }
+
+    const WTvdb = window.WatchlistTvdb;
+    if (!WTvdb) return { state: ResultState.UNAVAILABLE };
+
+    try {
+      const [seriesData, seasonsData] = await Promise.all([
+        WTvdb.fetchSeries(tvdbId),
+        WTvdb.fetchSeasons(tvdbId),
+      ]);
+
+      if (!seriesData) {
+        const stale = readCacheStale(cacheKey);
+        if (stale?.payload) {
+          return parseCachedSeriesResult(stale, {
+            isStale: true,
+            forceState: ResultState.OFFLINE_WITH_CACHE,
+          });
+        }
+        return { state: ResultState.OFFLINE_NO_CACHE };
+      }
+
+      const poster = seriesData.poster || fallbackPoster || "";
+      const rawSeasons = seasonsData || [];
+
+      const series = {
+        source: "tvdb",
+        tvdbId,
+        imdbId: seriesData.imdbId || null,
+        title: seriesData.title || "",
+        overview: seriesData.overview || "",
+        poster,
+        status: seriesData.status || null,
+        firstAirDate: seriesData.firstAired || null,
+        totalSeasons: rawSeasons.filter((s) => !s.isSpecials).length,
+      };
+
+      const seasons = rawSeasons.map((s) => ({
+        source: "tvdb",
+        seasonNumber: s.seasonNumber,
+        tvdbSeasonId: s.tvdbSeasonId,
+        name: s.name,
+        poster: s.poster || poster,
+        episodeCount: null, // filled when the user opens a season
+        overview: s.overview || "",
+        airDate: s.airDate || null,
+        isSpecials: s.isSpecials || false,
+      }));
+
+      const result = {
+        state: seasons.length > 0 ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
+        series,
+        seasons,
+      };
+
+      writeSeriesCacheEntry(
+        cacheKey,
+        { payload: seriesResultPayload(result), state: result.state },
+        TTL_SERIES
+      );
+      return result;
+
+    } catch {
+      const stale = readCacheStale(cacheKey);
+      if (stale?.payload) {
+        return parseCachedSeriesResult(stale, {
+          isStale: true,
+          forceState: ResultState.OFFLINE_WITH_CACHE,
+        });
+      }
+      return { state: ResultState.UNAVAILABLE };
+    }
+  }
+
+  /**
+   * Fetch episode details for one season from TheTVDB.
+   * Applies duplicate-image detection: if every episode in a season has the
+   * exact same still URL the images are treated as non-unique and cleared.
+   *
+   * @param {number} tvdbId
+   * @param {number} season
+   * @param {string} locale
+   * @param {string} fallbackPoster
+   * @returns {Promise<EpisodesResult>}
+   */
+  async function fetchTvdbSeasonEpisodes(tvdbId, season, locale, fallbackPoster = "") {
+    // Use locale-keyed cache so locale switches still work correctly
+    const cacheKey = `metadata:v7:season:tvdb:${tvdbId}:${season}:${locale}`;
+    const cached = readCached(cacheKey, TTL_EPISODES);
+    if (cached?.payload) {
+      return parseCachedEpisodesResult(cached, { isStale: isStale(cacheKey, TTL_EPISODES) });
+    }
+
+    const WTvdb = window.WatchlistTvdb;
+    if (!WTvdb) return { state: ResultState.UNAVAILABLE };
+
+    try {
+      const raw = await WTvdb.fetchEpisodes(tvdbId, season);
+
+      if (!raw) {
+        const stale = readCacheStale(cacheKey);
+        if (stale?.payload) {
+          return parseCachedEpisodesResult(stale, {
+            isStale: true,
+            forceState: ResultState.OFFLINE_WITH_CACHE,
+          });
+        }
+        return { state: ResultState.OFFLINE_NO_CACHE };
+      }
+
+      if (!raw.length) return { state: ResultState.UNAVAILABLE };
+
+      // Duplicate-image guard: if every non-empty still in the season is
+      // identical, treat them as a generic placeholder and clear them so
+      // the renderer shows the neutral film-strip placeholder instead.
+      const nonEmpty = raw.filter((e) => e.still);
+      const uniqueUrls = new Set(nonEmpty.map((e) => e.still));
+      const isDuplicate = nonEmpty.length >= 2 && uniqueUrls.size === 1;
+      const episodes = isDuplicate
+        ? raw.map((e) => ({ ...e, still: "" }))
+        : raw;
+
+      const result = { state: ResultState.AVAILABLE, episodes };
+      writeSeriesCacheEntry(
+        cacheKey,
+        { payload: episodesResultPayload(result), state: result.state },
+        TTL_EPISODES
+      );
+      return result;
+
+    } catch {
+      const stale = readCacheStale(cacheKey);
+      if (stale?.payload) {
+        return parseCachedEpisodesResult(stale, {
+          isStale: true,
+          forceState: ResultState.OFFLINE_WITH_CACHE,
+        });
+      }
+      return { state: ResultState.UNAVAILABLE };
+    }
+  }
+
   // ─── Expose public API ────────────────────────────────────────
 
   window.WatchlistSeriesMetadata = {
@@ -892,5 +1182,9 @@
     _parsePositiveCount: parsePositiveCount,
     _anilistDateStr: anilistDateStr,
     _stripHtml: stripHtml,
+    // TheTVDB provider functions exposed for testing
+    _resolveTvdbId: resolveTvdbId,
+    _fetchTvdbSeriesMetadata: fetchTvdbSeriesMetadata,
+    _fetchTvdbSeasonEpisodes: fetchTvdbSeasonEpisodes,
   };
 })();

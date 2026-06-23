@@ -849,9 +849,9 @@
       ? t("seasons.episodeUnwatch", { title })
       : t("seasons.episodeWatched", { title });
 
-    const titlePoster = getItemPoster();
-    const seasonPoster = getSeasonPoster(seasonNum);
-    const still = ep.still || seasonPoster || titlePoster || "";
+    // Only use the episode's own unique still — never fall back to season/title
+    // poster, which would make every episode without a still show the same image.
+    const still = ep.still || "";
 
     return `<div class="tds-episode${watched ? " tds-episode--watched" : ""}"
       role="listitem"
@@ -859,11 +859,10 @@
       <div class="tds-ep-still-wrap">
         ${still
           ? `<img class="tds-ep-still" src="${esc(still)}" alt=""
-               data-fallback="${esc(seasonPoster || titlePoster)}"
                loading="lazy"
-               onerror="this.classList.add('tds-img--broken');var fb=this.dataset.fallback;if(fb&&this.src!==fb){this.src=fb;}else{this.nextElementSibling.hidden=false;}" />`
+               onerror="this.classList.add('tds-img--broken');this.hidden=true;this.nextElementSibling.hidden=false;" />`
           : ""}
-        <div class="tds-ep-still-placeholder"${still ? ' hidden' : ''} aria-hidden="true" title="${esc(t("seasons.emptyStill"))}">🎞</div>
+        <div class="tds-ep-still-placeholder"${still ? ' hidden' : ''} aria-hidden="true" title="${esc(t("seasons.emptyStill"))}"></div>
       </div>
       <div class="tds-ep-content">
         <div class="tds-ep-header">
