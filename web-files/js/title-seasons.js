@@ -301,6 +301,42 @@
     });
   }
 
+  /** True when any earlier regular season is not fully watched. */
+  function hasUnwatchedPriorSeasons(entry, seasonNum) {
+    return (_seriesResult?.seasons || []).some((season) => {
+      const num = season.seasonNumber;
+      if (num <= 0 || num >= seasonNum) return false;
+      return seasonWatchState(entry, season) !== "watched";
+    });
+  }
+
+  function shouldPromptGapFill(entry, seasonNum, epNum) {
+    return (
+      hasUnwatchedPriorEpisodes(entry, seasonNum, epNum) ||
+      hasUnwatchedPriorSeasons(entry, seasonNum)
+    );
+  }
+
+  /** Episode keys for prior seasons (full) plus current season through epNum. */
+  function gapFillWatchKeys(entry, seasonNum, epNum) {
+    const keys = [];
+    for (const season of _seriesResult?.seasons || []) {
+      const sNum = season.seasonNumber;
+      if (sNum <= 0 || sNum > seasonNum) continue;
+      if (sNum === seasonNum) {
+        keys.push(...airedEpisodeKeysUpTo(seasonNum, epNum));
+        continue;
+      }
+      if (_episodesResult?.seasonNum === sNum && _episodesResult?.episodes) {
+        keys.push(...airedEpisodeKeysForSeason(sNum));
+      } else {
+        const count = seasonEpisodeTotal(season, entry);
+        for (let i = 1; i <= count; i++) keys.push(`${sNum}:${i}`);
+      }
+    }
+    return [...new Set(keys)];
+  }
+
   function refreshEpisodeWatchUi(seasonNum) {
     if (_episodesResult?.seasonNum === seasonNum && _episodesResult?.episodes) {
       const freshEntry = getEntry();
@@ -308,7 +344,7 @@
         updateEpisodeRowStateFromEntry(freshEntry, ep.seasonNumber, ep.episodeNumber, ep);
       });
     }
-    refreshSeasonCard(seasonNum);
+    (_seriesResult?.seasons || []).forEach((s) => refreshSeasonCard(s.seasonNumber));
     updateSeasonInfoProgress(seasonNum);
     _callbacks?.updateHeaderWatchState?.();
     _callbacks?.updateDetailActions?.();
@@ -1606,7 +1642,7 @@
     if (watched) {
       newEntry = P()?.unmarkEpisodeWatched(entry, seasonNum, epNum, allAired);
     } else if (
-      hasUnwatchedPriorEpisodes(entry, seasonNum, epNum) &&
+      shouldPromptGapFill(entry, seasonNum, epNum) &&
       window.WatchlistDialog?.confirm
     ) {
       const markAll = await window.WatchlistDialog.confirm(
@@ -1618,7 +1654,7 @@
         }
       );
       if (markAll) {
-        const keys = airedEpisodeKeysUpTo(seasonNum, epNum);
+        const keys = gapFillWatchKeys(entry, seasonNum, epNum);
         newEntry = P()?.markSeasonWatched(entry, keys);
       } else {
         newEntry = P()?.markEpisodeWatched(entry, seasonNum, epNum, allAired);

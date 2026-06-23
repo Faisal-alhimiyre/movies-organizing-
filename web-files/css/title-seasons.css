@@ -561,17 +561,21 @@
 }
 
 .tds-spoiler-row {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.4rem;
+  display: grid;
+  grid-template-columns: max-content 2.1rem;
+  column-gap: 0.55rem;
+  row-gap: 0.4rem;
+  align-items: center;
   padding: 0 1.25rem 0.55rem;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .tds-spoiler-toggle {
-  display: inline-flex;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 0.55rem;
   padding: 0;
   border: none;
   background: none;
@@ -579,6 +583,11 @@
   font: inherit;
   font-size: 0.78rem;
   cursor: pointer;
+  text-align: start;
+}
+
+.tds-spoiler-toggle__label {
+  padding-inline-end: 0;
 }
 
 .tds-spoiler-toggle:focus-visible {
@@ -614,6 +623,10 @@
 
 .tds-spoiler-toggle--on .tds-spoiler-toggle__thumb {
   transform: translateX(0.95rem);
+}
+
+html[dir="rtl"] .tds-spoiler-toggle {
+  text-align: end;
 }
 
 html[dir="rtl"] .tds-spoiler-toggle--on .tds-spoiler-toggle__thumb {
