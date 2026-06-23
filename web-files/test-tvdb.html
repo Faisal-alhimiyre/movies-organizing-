@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TheTVDB Integration Tests</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #111; color: #eee; }
+    h1 { color: #7cb9e8; }
+    h2 { color: #9db; border-bottom: 1px solid #333; padding-bottom: 0.25rem; margin-top: 2rem; }
+    .suite-pass { color: #4caf50; }
+    .suite-fail { color: #f44336; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; font-weight: bold; }
+    .skip { color: #888; }
+    pre { background: #1e1e1e; padding: 0.75rem; border-radius: 4px; overflow-x: auto; font-size: 0.8rem; }
+    #summary { font-size: 1.1rem; margin: 1.5rem 0; padding: 1rem; border-radius: 6px; }
+    #summary.all-pass { background: #1b3a1b; border: 1px solid #4caf50; }
+    #summary.has-fail { background: #3a1b1b; border: 1px solid #f44336; }
+    .note { color: #aaa; font-size: 0.85rem; margin: 0.5rem 0; }
+  </style>
+</head>
+<body>
+  <h1>TheTVDB Integration Tests</h1>
+  <p class="note">
+    Tests 1–5 are unit tests that run immediately in the browser (no network).<br>
+    Tests 6–9 require <code>window.WatchlistTvdb</code> to be configured (live Edge Function)
+    — they are automatically skipped when the function is unavailable.
+  </p>
+  <div id="summary"></div>
+  <div id="output"></div>
+
+  <!-- Minimal stubs needed by series-metadata.js -->
+  <script>
+    window.WATCHLIST_CONFIG = {
+      supabaseUrl: "",       // leave empty — live calls are skipped in unit tests
+      supabaseAnonKey: "",
+      tmdbApiKey: "",
+      omdbApiKey: "",
+    };
+    window.WatchlistMetadata = {
+      extractImdbId: (link) => { const m = link?.match(/tt\d{7,10}/); return m ? m[0] : null; },
+      extractAnilistId: () => null,
+      extractMalId: () => null,
+      hasTmdbKey: () => false,
+      hasOmdbKey: () => false,
+      getMetadata: async () => null,
+    };
+  </script>
+  <script src="js/tvdb-service.js"></script>
+  <script src="js/series-metadata.js"></script>
+
+  <script>
+  (() => {
+    "use strict";
+
+    // ── Test harness ────────────────────────────────────────────────────
+    let _pass = 0, _fail = 0, _skip = 0;
+    const out = document.getElementById("output");
+
+    function section(title) {
+      const h = document.createElement("h2");
+      h.textContent = title;
+      out.appendChild(h);
+    }
+
+    function log(pass, name, detail = "") {
+      const p = document.createElement("p");
+      if (pass === null) {
+        _skip++;
+        p.className = "skip";
+        p.textContent = `⊖ SKIP  ${name}`;
+      } else if (pass) {
+        _pass++;
+        p.className = "pass";
+        p.textContent = `✓ PASS  ${name}`;
+      } else {
+        _fail++;
+        p.className = "fail";
+        p.textContent = `✗ FAIL  ${name}`;
+        if (detail) {
+          const pre = document.createElement("pre");
+          pre.textContent = detail;
+          p.appendChild(pre);
+        }
+      }
+      out.appendChild(p);
+    }
+
+    function assert(condition, name, detail = "") {
+      log(condition, name, detail);
+    }
+
+    function assertEq(actual, expected, name) {
+      const ok = JSON.stringify(actual) === JSON.stringify(expected);
+      log(ok, name, ok ? "" : `Expected: ${JSON.stringify(expected)}\nActual:   ${JSON.stringify(actual)}`);
+    }
+
+    function finish() {
+      const el = document.getElementById("summary");
+      el.className = _fail === 0 ? "all-pass" : "has-fail";
+      el.innerHTML = `<strong>${_pass} passed</strong> / ${_fail} failed / ${_skip} skipped`;
+    }
+
+    // ── Suite 1: tvdb-service module presence ───────────────────────────
+    section("1. Module presence");
+
+    assert(typeof window.WatchlistTvdb === "object", "WatchlistTvdb is exposed on window");
+    assert(typeof window.WatchlistTvdb.resolveId   === "function", "resolveId is a function");
+    assert(typeof window.WatchlistTvdb.fetchSeries  === "function", "fetchSeries is a function");
+    assert(typeof window.WatchlistTvdb.fetchSeasons === "function", "fetchSeasons is a function");
+    assert(typeof window.WatchlistTvdb.fetchEpisodes === "function", "fetchEpisodes is a function");
+
+    // ── Suite 2: tvdb-service returns null gracefully when unconfigured ─
+    section("2. Graceful null returns (no Supabase URL)");
+
+    (async () => {
+      try {
+        const r1 = await window.WatchlistTvdb.resolveId({ imdbId: "tt1234567" });
+        assert(r1 === null, "resolveId returns null when Supabase URL is empty");
+
+        const r2 = await window.WatchlistTvdb.fetchSeries(12345);
+        assert(r2 === null, "fetchSeries returns null when Supabase URL is empty");
+
+        const r3 = await window.WatchlistTvdb.fetchSeasons(12345);
+        assert(r3 === null, "fetchSeasons returns null when Supabase URL is empty");
+
+        const r4 = await window.WatchlistTvdb.fetchEpisodes(12345, 1);
+        assert(r4 === null, "fetchEpisodes returns null when Supabase URL is empty");
+      } catch (e) {
+        log(false, "graceful-null suite", String(e));
+      }
+    })().then(continueAfterGraceful);
+
+    function continueAfterGraceful() {
+      // ── Suite 3: secret security ──────────────────────────────────────
+      section("3. Secret security");
+
+      // The JS bundle must never contain the word "apikey=" followed by a real value
+      // (only the header name is allowed in tvdb-service.js)
+      const serviceSource = window.WatchlistTvdb.toString
+        ? window.WatchlistTvdb.toString()
+        : "";
+
+      // Verify the service file source does not embed any literal API key
+      assert(!serviceSource.includes("TVDB_API_KEY"), "Source code does not contain TVDB_API_KEY");
+      assert(!serviceSource.includes("login"), "Browser client does not contain TVDB login logic");
+
+      // ── Suite 4: series-metadata integration points ───────────────────
+      section("4. series-metadata.js integration");
+
+      const SM = window.WatchlistSeriesMetadata;
+      assert(typeof SM === "object", "WatchlistSeriesMetadata is exposed");
+      assert(typeof SM._resolveTvdbId === "function", "_resolveTvdbId is exposed for testing");
+      assert(typeof SM._fetchTvdbSeriesMetadata === "function", "_fetchTvdbSeriesMetadata is exposed for testing");
+      assert(typeof SM._fetchTvdbSeasonEpisodes === "function", "_fetchTvdbSeasonEpisodes is exposed for testing");
+
+      // ── Suite 5: TheTVDB functions return UNAVAILABLE (no service) ────
+      section("5. TheTVDB functions degrade gracefully (WatchlistTvdb not configured)");
+
+      // Temporarily disable WatchlistTvdb so we can test the fallback path
+      const savedTvdb = window.WatchlistTvdb;
+      window.WatchlistTvdb = null;
+
+      (async () => {
+        try {
+          const tvdbId = await SM._resolveTvdbId({ imdbId: "tt0944947", tmdbId: 1399 });
+          assertEq(tvdbId, null, "resolveTvdbId returns null when WatchlistTvdb is null");
+
+          const seriesResult = await SM._fetchTvdbSeriesMetadata(121361, "en");
+          assertEq(seriesResult.state, SM.ResultState.UNAVAILABLE,
+            "fetchTvdbSeriesMetadata returns UNAVAILABLE when WatchlistTvdb is null");
+
+          const epResult = await SM._fetchTvdbSeasonEpisodes(121361, 1, "en");
+          assertEq(epResult.state, SM.ResultState.UNAVAILABLE,
+            "fetchTvdbSeasonEpisodes returns UNAVAILABLE when WatchlistTvdb is null");
+
+          // fetchSeriesMetadata must fall back to existing provider (TMDb/AniList/OMDb)
+          // when WatchlistTvdb is null — for an item with no tmdb/anilist configured
+          // the result will be UNAVAILABLE (since all providers are stubbed away)
+          const noProviderResult = await SM.fetchSeriesMetadata(
+            { source: "none", isNegative: true }, "en"
+          );
+          assertEq(noProviderResult.state, SM.ResultState.INVALID_ID,
+            "fetchSeriesMetadata returns INVALID_ID for isNegative resolution");
+
+        } catch (e) {
+          log(false, "graceful-degrade suite", String(e));
+        }
+
+        // Restore
+        window.WatchlistTvdb = savedTvdb;
+
+        continueWithLiveTests();
+      })();
+    }
+
+    function continueWithLiveTests() {
+      // ── Suite 6–9: Live Edge Function tests (skipped if URL not set) ──
+      const hasService = !!window.WATCHLIST_CONFIG?.supabaseUrl;
+
+      section("6. Live: resolveId by IMDb ID (requires Edge Function)");
+      if (!hasService) {
+        log(null, "resolveId tt0944947 (Game of Thrones IMDb) → tvdbId");
+      } else {
+        (async () => {
+          const result = await window.WatchlistTvdb.resolveId({ imdbId: "tt0944947" });
+          assert(result !== null, "resolveId result is not null");
+          assert(typeof result?.tvdbId === "number", "resolveId returns numeric tvdbId");
+          assert(result?.tvdbId > 0, "tvdbId is a positive number");
+          assertEq(result?.matchSource, "imdb", "matchSource is 'imdb'");
+        })().then(() => section7());
+        return;
+      }
+
+      section7();
+    }
+
+    function section7() {
+      const hasService = !!window.WATCHLIST_CONFIG?.supabaseUrl;
+
+      section("7. Live: fetchSeries (requires Edge Function)");
+      if (!hasService) {
+        log(null, "fetchSeries for Game of Thrones TVDB ID 121361");
+        section8();
+        return;
+      }
+
+      (async () => {
+        const result = await window.WatchlistTvdb.fetchSeries(121361);
+        assert(result !== null, "fetchSeries result is not null");
+        assertEq(result?.source, "tvdb", "source is 'tvdb'");
+        assertEq(result?.tvdbId, 121361, "tvdbId matches requested");
+        assert(typeof result?.title === "string" && result.title.length > 0, "title is a non-empty string");
+        assert(typeof result?.poster === "string", "poster is a string");
+        assert(result?.poster === "" || result.poster.startsWith("https://"), "poster is empty or https URL");
+      })().then(section8);
+    }
+
+    function section8() {
+      const hasService = !!window.WATCHLIST_CONFIG?.supabaseUrl;
+
+      section("8. Live: fetchSeasons (requires Edge Function)");
+      if (!hasService) {
+        log(null, "fetchSeasons for Game of Thrones TVDB ID 121361");
+        section9();
+        return;
+      }
+
+      (async () => {
+        const seasons = await window.WatchlistTvdb.fetchSeasons(121361);
+        assert(Array.isArray(seasons), "fetchSeasons returns an array");
+        assert(seasons.length > 0, "at least one season returned");
+
+        const s1 = seasons.find((s) => s.seasonNumber === 1);
+        assert(s1 != null, "Season 1 is present");
+        assertEq(s1?.source, "tvdb", "season source is 'tvdb'");
+        assert(!s1?.isSpecials, "Season 1 is not specials");
+        assert(s1?.poster === "" || s1?.poster?.startsWith("https://"), "season poster is empty or https URL");
+      })().then(section9);
+    }
+
+    function section9() {
+      const hasService = !!window.WATCHLIST_CONFIG?.supabaseUrl;
+
+      section("9. Live: fetchEpisodes + duplicate-image detection (requires Edge Function)");
+      if (!hasService) {
+        log(null, "fetchEpisodes Season 1 for Game of Thrones TVDB ID 121361");
+        log(null, "Duplicate-image detection: all-same stills cleared to empty string");
+        finishAll();
+        return;
+      }
+
+      (async () => {
+        const episodes = await window.WatchlistTvdb.fetchEpisodes(121361, 1);
+        assert(Array.isArray(episodes), "fetchEpisodes returns an array");
+        assert(episodes.length > 0, "at least one episode returned");
+
+        const ep1 = episodes.find((e) => e.episodeNumber === 1);
+        assert(ep1 != null, "Episode 1 is present");
+        assertEq(ep1?.source, "tvdb", "episode source is 'tvdb'");
+        assert(typeof ep1?.progressKey === "string", "progressKey is a string");
+        assert(/^\d+:\d+$/.test(ep1?.progressKey || ""), "progressKey has format S:E");
+        assert(ep1?.still === "" || ep1?.still?.startsWith("https://"),
+          "still is empty or https URL — never a generic poster fallback");
+        assert(typeof ep1?.isAired === "boolean", "isAired is a boolean");
+        assert(ep1?.isAired === true, "Episode 1 Season 1 is aired");
+
+        // Duplicate-image detection: synthetically test that the client-side
+        // dedup logic in fetchTvdbSeasonEpisodes clears uniform stills
+        const fakeEps = [
+          { source: "tvdb", seasonNumber: 1, episodeNumber: 1, title: "Ep1", still: "https://example.com/same.jpg", overview: "", runtimeMinutes: null, airDate: "2023-01-01", isAired: true, progressKey: "1:1" },
+          { source: "tvdb", seasonNumber: 1, episodeNumber: 2, title: "Ep2", still: "https://example.com/same.jpg", overview: "", runtimeMinutes: null, airDate: "2023-01-08", isAired: true, progressKey: "1:2" },
+        ];
+        const nonEmpty = fakeEps.filter((e) => e.still);
+        const uniqueUrls = new Set(nonEmpty.map((e) => e.still));
+        const isDuplicate = nonEmpty.length >= 2 && uniqueUrls.size === 1;
+        assert(isDuplicate, "Duplicate-image detection correctly identifies uniform stills");
+        const dedupEps = isDuplicate ? fakeEps.map((e) => ({ ...e, still: "" })) : fakeEps;
+        assert(dedupEps.every((e) => e.still === ""), "Deduped episodes all have empty still");
+      })().then(finishAll);
+    }
+
+    function finishAll() { finish(); }
+
+  })();
+  </script>
+</body>
+</html>

@@ -48,6 +48,7 @@
   display: flex;
   flex-direction: column;
   width: 100%;
+  min-height: min(50dvh, 50vh);
   max-height: 92dvh;
   max-height: 92vh; /* fallback */
   background: var(--bg-elevated, #121212);
@@ -56,8 +57,11 @@
   border-radius: 20px 20px 0 0;
   box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.5);
   overflow: hidden;
+  overflow-x: hidden;
   transform: translateY(100%);
   transition: transform 0.32s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  /* Extend panel background into the safe-area so no gap below home indicator */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .td-overlay.td-is-open .td-panel {
@@ -252,9 +256,12 @@
 .td-scroll {
   flex: 1 1 auto;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   padding: 0;
+  /* Keep last content clear of the phone's home-indicator / safe area */
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 1.5rem));
 }
 
 /* shadow cue for content behind topbar */
@@ -446,6 +453,81 @@
   border-radius: 8px;
 }
 
+.td-my-rating--status,
+.td-my-rating--actionable,
+.td-my-rating--rated {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.td-my-rating--status .td-my-rating__label,
+.td-my-rating--actionable .td-my-rating__label,
+.td-my-rating--rated .td-my-rating__label {
+  margin-bottom: 0;
+}
+
+.td-my-rating__status {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted, #a8a8a8);
+}
+
+.td-my-rating__status--progress {
+  color: var(--accent, #7c6aff);
+}
+
+/* Pill-style status badges matching the card's outside badge look */
+.td-my-rating__status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.td-my-rating__status-badge--unwatched {
+  color: var(--text-muted, #a8a8a8);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border, #363636);
+}
+
+.td-my-rating__status-badge--progress {
+  color: var(--in-progress, #fb923c);
+  background: rgba(251, 146, 60, 0.08);
+  border: 1px solid rgba(251, 146, 60, 0.28);
+}
+
+.td-my-rating__rate-btn {
+  flex-shrink: 0;
+}
+
+.td-my-rating__edit-btn,
+.td-my-rating__note-btn {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+}
+
+.td-my-rating--status .td-my-rating__note {
+  flex-basis: 100%;
+  margin: 0.2rem 0 0;
+  order: 10;
+}
+
+.td-my-rating--rated .td-my-rating__value {
+  flex: 1;
+  min-width: 0;
+}
+
+.td-my-rating--rated .td-my-rating__note {
+  flex-basis: 100%;
+  margin: 0.2rem 0 0;
+}
+
 .td-my-rating--interactive {
   cursor: pointer;
   font: inherit;
@@ -466,6 +548,19 @@
 
 .td-my-rating--interactive:focus-visible {
   box-shadow: var(--focus-ring, 0 0 0 3px rgba(196, 168, 130, 0.38));
+}
+
+/* Disabled until the whole title is fully watched */
+.td-my-rating--disabled {
+  opacity: 0.72;
+  cursor: default;
+}
+
+.td-my-rating--disabled .td-my-rating__placeholder {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
 }
 
 /* Keep layout height stable whether rated, unrated, or placeholder */
@@ -530,6 +625,38 @@
   font-weight: 600;
   color: var(--accent, #7c6aff);
   line-height: 1.3;
+}
+
+.td-season-detail {
+  padding: 0.5rem 1rem 0;
+}
+
+.td-season-detail__title {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text, #e8e8e8);
+}
+
+.td-season-detail__meta {
+  margin: 0.2rem 0 0;
+  font-size: 0.76rem;
+  color: var(--text-muted, #a8a8a8);
+  line-height: 1.35;
+}
+
+.td-season-detail__overview {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--text-muted, #a8a8a8);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.td-summary[data-td-series-summary][hidden] {
+  display: none;
 }
 
 /* ── Seasons slot ────────────────────────────────────────────────────────── */
@@ -730,6 +857,10 @@ html[dir="rtl"] .td-close {
 
 html[dir="rtl"] .td-header {
   direction: rtl;
+}
+
+html[dir="rtl"] .td-header-info {
+  text-align: start;
 }
 
 html[dir="rtl"] .td-badge-row,

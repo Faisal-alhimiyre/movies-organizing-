@@ -96,6 +96,16 @@
     return Boolean(window.WatchlistApp?.isWatched?.(id));
   }
 
+  /** Derived progress state: unwatched | inProgress | watched */
+  function titleProgressState(id) {
+    return window.WatchlistApp?.progressState?.(id)
+      ?? (isWatched(id) ? "watched" : "unwatched");
+  }
+
+  function isTitleFullyWatched(id) {
+    return titleProgressState(id) === "watched";
+  }
+
   function getWatchEntry(id) {
     // app.js returns {} (empty object) for items with no watched entry, which
     // isLegacyComplete({}) incorrectly treats as "fully watched". Return null
@@ -139,8 +149,12 @@
   }
 
   // ─── Poster markup ────────────────────────────────────────────────────────
+  function displayPoster(item) {
+    return item?.cardPoster || item?.poster || "";
+  }
+
   function posterMarkup(item, posterUrl) {
-    const src = posterUrl || item.poster;
+    const src = posterUrl || displayPoster(item);
     const altText = t("detail.posterAlt", { title: item.title || "" });
     if (item.posterBroken && !posterUrl) {
       return `<div class="td-poster td-poster--broken" role="img" aria-label="${esc(altText)}">
@@ -161,30 +175,57 @@
     return t("seasons.seasonNum", { n: num });
   }
 
-  /** Update header poster + season context when the user selects a season. */
-  function updateHeaderSeasonPresentation(season) {
-    if (!_scroll || !season) return;
+  /** Update header poster + season detail block when the user selects a season. */
+  function updateHeaderSeasonPresentation(payload, { progressOnly = false } = {}) {
+    if (!_scroll || !payload?.season) return;
+    const season = payload.season;
     const item = findItem(_activeItemId);
     if (!item || !isTvOrAnime(item)) return;
 
-    const poster = season.poster || item.poster || "";
-    const posterEl = _scroll.querySelector("[data-td-poster]");
-    if (posterEl && poster && posterEl.getAttribute("src") !== poster) {
-      posterEl.setAttribute("src", poster);
-    }
+    const detailEl = _scroll.querySelector("[data-td-season-detail]");
+    const seriesSummaryEl = _scroll.querySelector("[data-td-series-summary]");
 
-    const ctxEl = _scroll.querySelector("[data-td-season-context]");
-    if (ctxEl) {
-      const parts = [formatSeasonLabel(season)];
-      if (season.episodeCount != null) {
-        parts.push(
-          season.episodeCount === 1
-            ? t("seasons.episodeCountOne")
-            : t("seasons.episodeCount", { n: season.episodeCount })
-        );
+    if (!progressOnly) {
+      const poster = season.poster || displayPoster(item) || "";
+      const posterEl = _scroll.querySelector("[data-td-poster]");
+      if (posterEl && posterEl.tagName === "IMG" && poster && posterEl.getAttribute("src") !== poster) {
+        posterEl.setAttribute("src", poster);
       }
-      ctxEl.textContent = parts.join(" · ");
-      ctxEl.hidden = false;
+
+      if (detailEl) {
+        const titleEl = detailEl.querySelector("[data-td-part='season-title']");
+        const metaEl = detailEl.querySelector("[data-td-part='season-meta']");
+
+        if (titleEl) titleEl.textContent = payload.name || formatSeasonLabel(season);
+
+        if (metaEl) {
+          const metaParts = [
+            payload.year || (season.airDate ? season.airDate.slice(0, 4) : ""),
+            season.episodeCount != null
+              ? (season.episodeCount === 1
+                  ? t("seasons.episodeCountOne")
+                  : t("seasons.episodeCount", { n: season.episodeCount }))
+              : null,
+          ].filter(Boolean);
+          metaEl.textContent = metaParts.join(" · ");
+          metaEl.hidden = metaParts.length === 0;
+        }
+
+        const overviewEl = detailEl.querySelector("[data-td-part='season-overview']");
+        if (overviewEl) {
+          if (season.overview) {
+            overviewEl.textContent = season.overview;
+            overviewEl.hidden = false;
+          } else {
+            overviewEl.textContent = "";
+            overviewEl.hidden = true;
+          }
+        }
+
+        detailEl.hidden = false;
+      }
+
+      if (seriesSummaryEl) seriesSummaryEl.hidden = true;
     }
   }
 
@@ -194,60 +235,80 @@
     if (!item) return;
 
     const posterEl = _scroll.querySelector("[data-td-poster]");
-    if (posterEl && item.poster && posterEl.getAttribute("src") !== item.poster) {
-      posterEl.setAttribute("src", item.poster);
+    const poster = displayPoster(item);
+    if (posterEl && posterEl.tagName === "IMG" && poster && posterEl.getAttribute("src") !== poster) {
+      posterEl.setAttribute("src", poster);
     }
 
-    const ctxEl = _scroll.querySelector("[data-td-season-context]");
-    if (ctxEl) {
-      ctxEl.textContent = "";
-      ctxEl.hidden = true;
-    }
+    const detailEl = _scroll.querySelector("[data-td-season-detail]");
+    if (detailEl) detailEl.hidden = true;
+
+    const seriesSummaryEl = _scroll.querySelector("[data-td-series-summary]");
+    if (seriesSummaryEl) seriesSummaryEl.hidden = false;
   }
 
   // ─── My Rating block ──────────────────────────────────────────────────────
   function myRatingMarkup(itemId) {
-    const watched = isWatched(itemId);
+    const state = titleProgressState(itemId);
     const entry = getWatchEntry(itemId);
-    const rated = watched && hasWatchRating(entry);
+    const rated = entry && hasWatchRating(entry);
+    const hasNote = Boolean(String(entry?.note || "").trim());
+    const noteSnippet = hasNote
+      ? `<p class="td-my-rating__note">${esc(entry.note)}</p>` : "";
 
-    const label = `<span class="td-my-rating__label">${esc(t("detail.myRating"))}</span>`;
-
-    if (!watched) {
-      return `<div class="td-my-rating td-my-rating--placeholder">
-        ${label}
-        <span class="td-my-rating__placeholder">${esc(t("detail.myRatingPlaceholder"))}</span>
+    // Unwatched: just the status label, no note interaction
+    if (state === "unwatched") {
+      return `<div class="td-my-rating td-my-rating--status">
+        <span class="td-my-rating__status-badge td-my-rating__status-badge--unwatched">
+          ${esc(t("progress.unwatched"))}
+        </span>
       </div>`;
     }
 
+    // In progress: accent badge + Note button (no "MY RATING" label)
+    if (state === "inProgress") {
+      return `<div class="td-my-rating td-my-rating--status">
+        <span class="td-my-rating__status-badge td-my-rating__status-badge--progress">
+          ${esc(t("progress.inprogress"))}
+        </span>
+        <button type="button" class="btn btn--ghost btn--sm td-my-rating__note-btn"
+          data-td-action="add-note" data-td-id="${esc(itemId)}">
+          ${esc(hasNote ? t("detail.editNote") : t("detail.addNote"))}
+        </button>
+        ${noteSnippet}
+      </div>`;
+    }
+
+    // Watched (fully): show rating controls
+    const label = `<span class="td-my-rating__label">${esc(t("detail.myRating"))}</span>`;
     if (!rated) {
-      return `<button
-        type="button"
-        class="td-my-rating td-my-rating--interactive"
-        data-td-action="rate"
-        data-td-id="${esc(itemId)}"
-        aria-label="${esc(t("detail.rateTitle"))}"
-      >
+      return `<div class="td-my-rating td-my-rating--actionable">
         ${label}
-        <span class="td-my-rating__unrated">${esc(t("detail.myRatingUnrated"))}</span>
-      </button>`;
+        ${noteSnippet}
+        <button
+          type="button"
+          class="btn btn--primary td-my-rating__rate-btn"
+          data-td-action="rate"
+          data-td-id="${esc(itemId)}"
+        >${esc(t("detail.rate"))}</button>
+      </div>`;
     }
 
     const ratingDisplay = formatRating(entry.rating);
-    return `<button
-      type="button"
-      class="td-my-rating td-my-rating--interactive td-my-rating--rated"
-      data-td-action="rate"
-      data-td-id="${esc(itemId)}"
-      aria-label="${esc(t("detail.editRating"))}"
-    >
+    return `<div class="td-my-rating td-my-rating--rated">
       ${label}
       <div class="td-my-rating__value">
         <span class="td-my-rating__score text-num">${esc(ratingDisplay)}</span>
         <span class="td-my-rating__denom text-num">/10</span>
       </div>
-      ${entry.note ? `<p class="td-my-rating__note">${esc(entry.note)}</p>` : ""}
-    </button>`;
+      ${noteSnippet}
+      <button
+        type="button"
+        class="btn btn--ghost btn--sm td-my-rating__edit-btn"
+        data-td-action="rate"
+        data-td-id="${esc(itemId)}"
+      >${esc(t("detail.editRating"))}</button>
+    </div>`;
   }
 
   // ─── Header markup ────────────────────────────────────────────────────────
@@ -269,10 +330,6 @@
     const leadBlock = leads.length
       ? `<p class="td-lead">${esc(leads.join(", "))}</p>` : "";
 
-    const seasonCtx = isTvOrAnime(item)
-      ? `<p class="td-season-context" data-td-season-context hidden></p>`
-      : "";
-
     return `
       <div class="td-header">
         <div class="td-poster-wrap">${posterMarkup(item)}</div>
@@ -286,10 +343,17 @@
             <span class="text-ltr">${esc(ltr(item.title))}</span>
             ${altTitle}
           </h2>
-          ${seasonCtx}
           ${leadBlock}
         </div>
       </div>`;
+  }
+
+  function seasonDetailShell() {
+    return `<div class="td-season-detail" data-td-season-detail hidden>
+      <h3 class="td-season-detail__title" data-td-part="season-title"></h3>
+      <p class="td-season-detail__meta" data-td-part="season-meta" hidden></p>
+      <p class="td-season-detail__overview" data-td-part="season-overview" hidden></p>
+    </div>`;
   }
 
   // ─── Genre badges ──────────────────────────────────────────────────────────
@@ -481,10 +545,12 @@
   function buildScrollContent(item) {
     const scores = scoresMarkup(item);
     const myRating = myRatingMarkup(item.id);
+    const seasonDetail = isTvOrAnime(item) ? seasonDetailShell() : "";
     return `
       ${headerMarkup(item)}
       ${genresMarkup(item)}
-      ${item.summary ? `<p class="td-summary">${esc(item.summary)}</p>` : ""}
+      ${seasonDetail}
+      ${item.summary ? `<p class="td-summary" data-td-series-summary>${esc(item.summary)}</p>` : ""}
       ${scores}
       ${myRating}
       <div class="td-seasons-slot" id="tdSeasonsSlot"></div>
@@ -640,13 +706,17 @@
       saveWatchedEntry: (entry) => window.WatchlistApp?.saveWatchedEntry?.(_activeItemId, entry),
       updateCardInPlace: () => window.WatchlistApp?.updateCardInPlace?.(_activeItemId),
       // Called by title-seasons when a watch state changes — refresh My Rating + menu.
-      updateHeaderWatchState: () => updateMyRating(),
+      updateHeaderWatchState: () => {
+        updateMyRating();
+        const fresh = findItem(_activeItemId);
+        if (fresh) updateDetailActions(fresh);
+      },
       updateDetailActions: () => {
         const fresh = findItem(_activeItemId);
         if (fresh) updateDetailActions(fresh);
         updateMyRating();
       },
-      onSeasonSelected: (season) => updateHeaderSeasonPresentation(season),
+      onSeasonSelected: (payload) => updateHeaderSeasonPresentation(payload),
     });
   }
 
@@ -884,10 +954,10 @@
     // Close menu before acting (except for the menu open button which is handled separately)
     if (action !== "open-menu") closeMenu();
 
-    handleAction(action, id);
+    handleAction(action, id, target);
   }
 
-  async function handleAction(action, itemId) {
+  async function handleAction(action, itemId, target) {
     switch (action) {
       case "toggle-watched": {
         // Suppress MutationObserver so it doesn't trigger a full rebuild.
@@ -906,6 +976,13 @@
       }
 
       case "rate": {
+        if (!isTitleFullyWatched(itemId)) break;
+        triggerCardAction(itemId, "rate");
+        break;
+      }
+
+      case "add-note": {
+        // Open the rating modal in note-only mode (picker hidden by openRatingModal)
         triggerCardAction(itemId, "rate");
         break;
       }

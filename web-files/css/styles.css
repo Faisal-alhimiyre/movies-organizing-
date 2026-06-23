@@ -38,11 +38,13 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: hidden;
   font-family: var(--font);
   font-size: 16px;
   line-height: 1.5;
@@ -2183,6 +2185,22 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   color: var(--text-muted);
 }
 
+.footer__attribution {
+  margin-top: 0.5rem !important;
+  font-size: 0.75rem !important;
+}
+
+.footer__attribution a {
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  opacity: 0.75;
+}
+
+.footer__attribution a:hover {
+  opacity: 1;
+}
+
 /* App dialog (replaces browser alert/confirm) */
 .app-dialog[hidden] {
   display: none;
@@ -2191,7 +2209,7 @@ html[data-theme] .header__toolbar .btn--primary:hover {
 .app-dialog {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: 350;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2266,7 +2284,7 @@ html[data-theme] .header__toolbar .btn--primary:hover {
 .modal {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 230;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2382,11 +2400,28 @@ html[data-theme] .header__toolbar .btn--primary:hover {
 }
 
 .rating-picker {
+  margin-top: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+}
+
+.rating-modal-body {
   margin-top: 0.35rem;
   padding: 1rem 0.85rem 0.85rem;
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border);
+}
+
+.rating-modal-body__note {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  resize: vertical;
+  min-height: 4.5rem;
 }
 
 .rating-picker__value {
@@ -2614,13 +2649,14 @@ html[data-theme] .header__toolbar .btn--primary:hover {
 
 .manage-lists__item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.55rem 0.65rem;
+  padding: 0.65rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-card);
+  flex-wrap: wrap;
 }
 
 .manage-lists__info {
@@ -2657,10 +2693,19 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   white-space: nowrap;
 }
 
+.manage-lists__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  margin-top: 0.1rem;
+}
+
 .manage-lists__actions {
   display: flex;
   flex-shrink: 0;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.35rem;
 }
 

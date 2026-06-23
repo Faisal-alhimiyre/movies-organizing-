@@ -46,7 +46,13 @@
     const episodes = Array.isArray(raw.episodes)
       ? raw.episodes.filter((k) => typeof k === "string" && k.includes(":"))
       : [];
-    return { version: PROGRESS_VERSION, episodes };
+    const result = { version: PROGRESS_VERSION, episodes };
+    // Preserve seasonTotals and completed flag — required for completion detection.
+    if (raw.seasonTotals && typeof raw.seasonTotals === "object") {
+      result.seasonTotals = raw.seasonTotals;
+    }
+    if (raw.completed === true) result.completed = true;
+    return result;
   }
 
   /**
@@ -308,9 +314,16 @@
     const base = entry && entry !== true && typeof entry === "object"
       ? { ...entry }
       : {};
-    // Remove stale progress before replacing.
+    // Read raw progress BEFORE deleting it — parseProgressObject is lossy for extras.
+    const rawProg = base.progress && typeof base.progress === "object" ? base.progress : null;
     delete base.progress;
-    base.progress = { version: PROGRESS_VERSION, episodes };
+    const newProgress = { version: PROGRESS_VERSION, episodes };
+    // Carry forward stored per-season totals so annotateCompletion can evaluate
+    // completion even for seasons that aren't currently loaded in the panel.
+    if (rawProg?.seasonTotals && typeof rawProg.seasonTotals === "object") {
+      newProgress.seasonTotals = { ...rawProg.seasonTotals };
+    }
+    base.progress = newProgress;
     return base;
   }
 

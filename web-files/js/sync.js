@@ -148,6 +148,9 @@
             season_count: entry.seasonCount ? String(entry.seasonCount) : "",
             episode_count: entry.episodeCount ? String(entry.episodeCount) : "",
             year: entry.year || "",
+            card_poster: entry.cardPoster || "",
+            selected_season: entry.lastSelectedSeason != null ? entry.lastSelectedSeason : null,
+            no_specials: entry.noSpecials === true,
             watched: watchMeta.watched,
             watch_rating: watchMeta.rating,
             watch_note: watchMeta.note,
@@ -209,6 +212,9 @@
       if (row.season_count) entry.seasonCount = row.season_count;
       if (row.episode_count) entry.episodeCount = row.episode_count;
       if (row.year) entry.year = row.year;
+      if (row.card_poster) entry.cardPoster = row.card_poster;
+      if (row.selected_season != null) entry.lastSelectedSeason = row.selected_season;
+      if (row.no_specials === true) entry.noSpecials = true;
       const addedMs = parseAddedAtMs(row.added_at);
       if (addedMs != null) entry.addedAt = addedMs;
 
@@ -222,15 +228,14 @@
         Array.isArray(rawProgress.episodes) &&
         rawProgress.episodes.length > 0;
 
-      if (row.watched || hasProgress) {
+      const hasNote = Boolean(row.watch_note);
+      if (row.watched || hasProgress || hasNote) {
         const watchEntry = {};
-        if (row.watched) {
-          if (row.watch_rating != null && row.watch_rating !== "") {
-            const rating = Number(row.watch_rating);
-            if (Number.isFinite(rating)) watchEntry.rating = rating;
-          }
-          if (row.watch_note) watchEntry.note = row.watch_note;
+        if (row.watch_rating != null && row.watch_rating !== "") {
+          const rating = Number(row.watch_rating);
+          if (Number.isFinite(rating)) watchEntry.rating = rating;
         }
+        if (row.watch_note) watchEntry.note = row.watch_note;
         if (hasProgress) {
           watchEntry.progress = {
             version: 1,

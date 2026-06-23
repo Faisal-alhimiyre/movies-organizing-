@@ -463,6 +463,14 @@
     return trimmed;
   }
 
+  function _seasonsBadgeLabel(count) {
+    const lang = window.WatchlistI18n?.getLang?.() || "en";
+    if (lang === "ar") {
+      return `${count} مواسم`;
+    }
+    return `${count} ${count === 1 ? "season" : "seasons"}`;
+  }
+
   function buildTitleMetaBadges(meta = {}, contentType = "") {
     const badges = [];
     const type = meta.contentType || contentType || "";
@@ -486,7 +494,7 @@
       if (seasonCount) {
         badges.push({
           kind: "seasons",
-          label: `${seasonCount} ${seasonCount === 1 ? "season" : "seasons"}`,
+          label: _seasonsBadgeLabel(seasonCount),
         });
       }
       if (episodeDuration) {
@@ -496,7 +504,7 @@
       if (seasonCount) {
         badges.push({
           kind: "seasons",
-          label: `${seasonCount} ${seasonCount === 1 ? "season" : "seasons"}`,
+          label: _seasonsBadgeLabel(seasonCount),
         });
       } else if (episodeCount) {
         badges.push({

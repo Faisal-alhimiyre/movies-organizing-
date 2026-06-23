@@ -124,6 +124,7 @@
     manualLinkPreviewDetails: null,
     ratingItemId: null,
     ratingHadScore: false,
+    ratingNoteOnly: false,
     ratingPickerValue: null,
     ratingPickerChosen: false,
     shareArrival: null,
@@ -1168,6 +1169,12 @@
     if (value.progress && typeof value.progress === "object" &&
         Array.isArray(value.progress.episodes)) {
       entry.progress = { version: 1, episodes: value.progress.episodes };
+      if (value.progress.completed === true) {
+        entry.progress.completed = true;
+      }
+      if (value.progress.seasonTotals && typeof value.progress.seasonTotals === "object") {
+        entry.progress.seasonTotals = { ...value.progress.seasonTotals };
+      }
     }
 
     return entry;
@@ -1276,7 +1283,11 @@
     const submitBtn = els.ratingForm?.querySelector('button[type="submit"]');
     if (!laterBtn || !submitBtn) return;
 
-    if (state.ratingHadScore) {
+    if (state.ratingNoteOnly) {
+      // In-progress note-only mode: no rating terminology
+      laterBtn.textContent = t("btn.cancel");
+      submitBtn.textContent = t("btn.save");
+    } else if (state.ratingHadScore) {
       laterBtn.textContent = t("btn.cancel");
       submitBtn.textContent = t("btn.save");
     } else {
@@ -1313,25 +1324,48 @@
     const item = state.items.find((entry) => entry.id === itemId);
     if (!item || !els.ratingModal) return;
 
+    const isFullyWatched = itemProgressState(itemId) === "watched";
+
     state.ratingItemId = itemId;
+    state.ratingNoteOnly = !isFullyWatched;
     setRatingError("");
 
     const existing = getWatchEntry(itemId);
     state.ratingHadScore = hasWatchRating(existing);
-    els.ratingModalTitle.textContent = t("rating.rateItem", { title: item.title });
+
+    // Title: "Your thoughts" for note-only, "Rate …" for rating mode
+    if (state.ratingNoteOnly) {
+      els.ratingModalTitle.textContent = t("rating.yourThoughts");
+    } else {
+      els.ratingModalTitle.textContent = t("rating.rateItem", { title: item.title });
+    }
 
     if (state.ratingHadScore) {
       resetRatingPicker({ chosen: true, rating: existing.rating });
     } else {
       resetRatingPicker();
     }
+
+    // Pre-fill note; change placeholder to "Thoughts so far" in note-only mode
     els.ratingNote.value = existing?.note || "";
+    if (els.ratingNote) {
+      els.ratingNote.placeholder = state.ratingNoteOnly
+        ? t("rating.thoughtsSoFar")
+        : t("rating.notePlaceholder");
+    }
+
+    // Hide the rating picker when the title isn't fully watched yet
+    if (els.ratingPicker) els.ratingPicker.hidden = !isFullyWatched;
 
     updateRatingModalActions();
     els.ratingModal.hidden = false;
     updateBodyScrollLock();
     closeAllCardMenus();
-    els.ratingPicker?.querySelector('[data-rating-star="5"]')?.focus();
+    if (isFullyWatched) {
+      els.ratingPicker?.querySelector('[data-rating-star="5"]')?.focus();
+    } else {
+      els.ratingNote?.focus();
+    }
   }
 
   function closeRatingModal() {
@@ -1339,8 +1373,11 @@
     els.ratingModal.hidden = true;
     state.ratingItemId = null;
     state.ratingHadScore = false;
+    state.ratingNoteOnly = false;
     setRatingError("");
     if (els.ratingForm) els.ratingForm.reset();
+    if (els.ratingPicker) els.ratingPicker.hidden = false; // restore for next open
+    if (els.ratingNote) els.ratingNote.placeholder = t("rating.notePlaceholder");
     resetRatingPicker();
     updateBodyScrollLock();
   }
@@ -1349,16 +1386,23 @@
     const id = state.ratingItemId;
     if (!id) return false;
 
+    const isFullyWatched = itemProgressState(id) === "watched";
     const parsedRating = parseWatchRating(rating);
-    if (parsedRating == null) {
+
+    // If fully watched, a star rating is required. For other states, allow note-only.
+    if (isFullyWatched && parsedRating == null) {
       setRatingError(t("rating.chooseStarFirst"));
       return false;
     }
 
-    const entry = { rating: parsedRating };
+    const existing = getWatchEntry(id);
+    const entry = { ...existing };
+    if (parsedRating != null) entry.rating = parsedRating;
     const trimmedNote = String(note || "").trim();
     if (trimmedNote) entry.note = trimmedNote;
+    else delete entry.note;
 
+    // Ensure a watch entry exists even for unwatched/in-progress titles with a note
     state.watched[id] = entry;
     saveWatched();
     closeRatingModal();
@@ -1367,7 +1411,8 @@
   }
 
   function dismissRatingModal() {
-    if (state.ratingHadScore) {
+    // In note-only mode (in-progress) or when editing an existing rating, just close
+    if (state.ratingNoteOnly || state.ratingHadScore) {
       closeRatingModal();
       return;
     }
@@ -1488,6 +1533,9 @@
       if (item.secondaryGenres?.length) {
         entry.secondaryGenres = item.secondaryGenres;
       }
+      if (item.cardPoster) entry.cardPoster = item.cardPoster;
+      if (item.lastSelectedSeason != null) entry.lastSelectedSeason = item.lastSelectedSeason;
+      if (item.noSpecials === true) entry.noSpecials = true;
 
       data[item.contentType][item.genre].push(entry);
     }
@@ -1580,8 +1628,10 @@
     if (!P || P.isLegacyComplete(entry)) return "watched";
     const prog = P.getProgress(entry);
     if (!prog || !Array.isArray(prog.episodes)) return "unwatched";
-    if (prog.completed === true) return "watched";      // all episodes annotated complete
-    if (prog.episodes.length > 0) return "inProgress"; // some episodes watched
+    if (prog.completed === true) return "watched";
+    // Exclude specials (season 0) from the in-progress calculation
+    const regularEps = prog.episodes.filter((k) => !k.startsWith("0:"));
+    if (regularEps.length > 0) return "inProgress";
     return "unwatched";
   }
 
@@ -3123,6 +3173,10 @@
     positionLinkPreviewPopover(card);
   }
 
+  function cardDisplayPoster(item) {
+    return item?.cardPoster || item?.poster || "";
+  }
+
   function setCardPoster(card, posterUrl) {
     const slot = card.querySelector(
       "[data-poster-slot], .card__poster--placeholder, .card__poster--broken, .card__poster"
@@ -3192,7 +3246,7 @@
       if (!item?.link || item.posterBroken) continue;
 
       if (item.poster) {
-        setCardPoster(card, item.poster);
+        setCardPoster(card, cardDisplayPoster(item));
         continue;
       }
 
@@ -3342,8 +3396,8 @@
       ? `<div class="card__media">${
           item.posterBroken
             ? posterPlaceholderMarkup(true)
-            : item.poster
-              ? `<img class="card__poster" src="${escapeHtml(item.poster)}" alt="" loading="lazy" />`
+            : cardDisplayPoster(item)
+              ? `<img class="card__poster" src="${escapeHtml(cardDisplayPoster(item))}" alt="" loading="lazy" />`
               : posterPlaceholderMarkup(false)
         }<div class="card__overlay">${overlayBlock}</div></div>`
       : "";
@@ -3430,7 +3484,11 @@
         </button>`
       : "";
 
-    const watchedLabel = isWatched ? t("card.markUnwatched") : t("card.markWatched");
+    // In-progress titles show "Mark watched" so one click completes them,
+    // not "Mark unwatched" which would trash their episode progress.
+    const watchedLabel = progressState === "watched"
+      ? t("card.markUnwatched")
+      : t("card.markWatched");
     const cardProgressClass = progressState === "inProgress" ? " card--in-progress" : "";
 
     return `
@@ -4534,27 +4592,32 @@
     const library = window.WatchlistAuth?.getLibrary() || [];
     const currentId = window.WatchlistAuth?.getProfile();
     const defaultId = window.WatchlistAuth?.getDefaultListId?.();
-    const listIds = window.WatchlistAuth?.discoverListIds() || [];
+    let listIds = window.WatchlistAuth?.discoverListIds() || [];
 
     if (!listIds.length) {
       els.manageListsBody.innerHTML = "";
       return;
     }
 
+    // Put the default list first, then the rest in their original order.
+    if (defaultId && listIds.includes(defaultId)) {
+      listIds = [defaultId, ...listIds.filter((id) => id !== defaultId)];
+    }
+
     els.manageListsBody.innerHTML = listIds
       .map((listId) => {
         const entry = library.find((item) => item.listId === listId);
-        const label = entry?.name || entry?.label || t("manage.unnamedList");
+        // Fall back to the current list's ID-derived label when no name is registered
+        const label = entry?.name || entry?.label
+          || (listId === currentId ? t("manage.myList") : t("manage.unnamedList"));
         const description = entry?.description || "";
         const titleCount = window.WatchlistAuth.getListTitleCount(listId);
         const isCurrent = listId === currentId;
         const isDefault = listId === defaultId;
-        const badge = isCurrent
-          ? `<span class="manage-lists__badge">${escapeHtml(t("manage.signedInNow"))}</span>`
-          : "";
-        const defaultBadge = isDefault
-          ? `<span class="manage-lists__badge manage-lists__badge--default">${escapeHtml(t("manage.defaultList"))}</span>`
-          : "";
+        const badgeRow = [
+          isCurrent ? `<span class="manage-lists__badge">${escapeHtml(t("manage.signedInNow"))}</span>` : "",
+          isDefault ? `<span class="manage-lists__badge manage-lists__badge--default">${escapeHtml(t("manage.defaultList"))}</span>` : "",
+        ].filter(Boolean).join("");
         const meta = `<span class="manage-lists__meta">${escapeHtml(
           window.WatchlistI18n?.titleCountPhrase?.(titleCount) ?? `${titleCount} titles`
         )}</span>`;
@@ -4569,16 +4632,12 @@
               data-action="assign-default-list"
               data-list-id="${escapeHtml(listId)}"
               aria-label="${escapeHtml(t("manage.assignDefault"))}: ${escapeHtml(label)}"
-            >
-              ${escapeHtml(t("manage.assignDefault"))}
-            </button>`;
+            >${escapeHtml(t("manage.assignDefault"))}</button>`;
         return `<li class="manage-lists__item"${isCurrent ? ' aria-current="true"' : ""}>
           <div class="manage-lists__info">
             <span class="manage-lists__name">${escapeHtml(label)}</span>
             ${about}
-            ${meta}
-            ${badge}
-            ${defaultBadge}
+            <div class="manage-lists__badges">${meta}${badgeRow}</div>
           </div>
           <div class="manage-lists__actions">
             ${assignBtn}
@@ -4588,18 +4647,14 @@
               data-action="edit-list"
               data-list-id="${escapeHtml(listId)}"
               aria-label="${escapeHtml(t("manage.editListName", { name: label }))}"
-            >
-              ${escapeHtml(t("card.edit"))}
-            </button>
+            >${escapeHtml(t("card.edit"))}</button>
             <button
               type="button"
               class="btn btn--ghost btn--danger btn--sm"
               data-action="delete-list"
               data-list-id="${escapeHtml(listId)}"
               aria-label="${escapeHtml(t("manage.deleteListName", { name: label }))}"
-            >
-              ${escapeHtml(t("card.delete"))}
-            </button>
+            >${escapeHtml(t("card.delete"))}</button>
           </div>
         </li>`;
       })
@@ -6698,10 +6753,17 @@
       }
 
       if (action === "toggle-watched") {
-        if (isItemWatched(id)) {
+        const progress = itemProgressState(id);
+        if (progress === "watched") {
           await markItemUnwatched(id);
         } else {
-          state.watched[id] = {};
+          // Both "unwatched" and "inProgress" → mark as fully watched.
+          // Preserve any existing rating/note but discard granular episode progress
+          // (the whole title is now considered watched as a unit).
+          const existing = normalizeWatchEntry(state.watched[id]);
+          const entry = existing ? { ...existing } : {};
+          delete entry.progress;
+          state.watched[id] = entry;
           saveWatched();
           render();
           openRatingModal(id);
@@ -6962,6 +7024,20 @@
       const newCard = tmp.firstElementChild;
       if (newCard) card.replaceWith(newCard);
     },
+    patchItem: (id, fields) => {
+      if (!id || !fields || typeof fields !== "object") return;
+      const item = state.items.find((i) => i.id === id);
+      if (!item) return;
+      Object.assign(item, fields);
+      // Keep nested data object in sync so saveData persists the patch
+      const nested = state.data?.[item.contentType]?.[item.genre];
+      if (Array.isArray(nested)) {
+        const stored = nested.find((e) => e.title === item.title);
+        if (stored) Object.assign(stored, fields);
+      }
+      saveData();
+    },
+    cardDisplayPoster,
   };
 
   if (document.getElementById("mainContent")) {

@@ -287,8 +287,8 @@
     overflow: hidden;
     min-width: 0;
     min-height: 0;
-    padding: clamp(0.18rem, 0.8vw, 0.22rem) clamp(0.24rem, 1.1vw, 0.32rem)
-      clamp(0.22rem, 0.9vw, 0.28rem);
+    padding: clamp(0.12rem, 0.6vw, 0.16rem) clamp(0.18rem, 0.9vw, 0.24rem)
+      clamp(0.14rem, 0.7vw, 0.18rem);
   }
 
   .card:has(.card-menu__panel:not([hidden])) .card__body {
@@ -305,13 +305,12 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    flex: 0 1 auto;
+    flex: 1 1 auto;      /* fill available space so no dead gap before the menu icon */
     min-width: 0;
-    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     box-sizing: border-box;
-    padding: 0.22rem 0.55rem;
+    padding: 0.22rem 0.4rem;
     font-size: 0.44rem;
     font-weight: 600;
     line-height: 1;
@@ -319,7 +318,7 @@
     color: var(--text-muted, #9ca3af);
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: 6px;  /* bar style — pill looks odd at full width */
     white-space: nowrap;
   }
 
@@ -393,13 +392,11 @@
     display: flex !important;
     flex-direction: row;
     flex-wrap: nowrap;
-    justify-content: flex-start !important;
+    justify-content: space-between !important; /* IMDb left, AL right — aligns with menu icon */
     align-items: center;
-    align-self: flex-start;
-    gap: 0.14rem;
     width: 100%;
     max-width: 100%;
-    margin: 0;
+    margin: 0 0 0.28rem;
     padding: 0;
     min-height: 0;
     flex-shrink: 0;
@@ -479,7 +476,7 @@
   }
 
   .card__footer .card-menu {
-    margin-inline-start: 0;
+    margin-inline-start: 0.4rem;  /* gap between status badge and menu icon */
     flex: 0 0 auto;
   }
 

@@ -26,8 +26,8 @@
  *   metadata:v6:season:tmdb:<id>:<n>:<locale>         24 hours  (v6 fixes episode stills)
  *   metadata:v5:season:omdb:<imdbId>:<n>              24 hours
  *   metadata:v5:episodes:anilist:<id>                 24 hours
- *   metadata:v7:series:tvdb:<id>:<locale>              7 days   (TheTVDB series+seasons)
- *   metadata:v7:season:tvdb:<id>:<n>:<locale>         24 hours  (TheTVDB episode stills)
+ *   metadata:v8:series:tvdb:<id>:<locale>              7 days   (TheTVDB + locale)
+ *   metadata:v12:season:tvdb:<id>:<n>:<locale>         24 hours  (episode still fix)
  */
 (function () {
   "use strict";
@@ -37,6 +37,16 @@
 
   // ─── API base URLs / constants ────────────────────────────────
   const TMDB_IMAGE = "https://image.tmdb.org/t/p/w500";
+  const TVDB_ART = "https://artworks.thetvdb.com";
+
+  function normalizeArtworkUrl(url) {
+    const s = String(url || "").trim();
+    if (!s) return "";
+    if (s.startsWith("https://")) return s;
+    if (s.startsWith("//")) return `https:${s}`;
+    if (s.startsWith("/")) return `${TVDB_ART}${s}`;
+    return "";
+  }
   const ANILIST_API = "https://graphql.anilist.co";
   const TMDB_API_BASE = "https://api.themoviedb.org/3";
 
@@ -281,7 +291,7 @@
     // ── TheTVDB — primary provider for TV series and anime ───────────────
     // Attempted when a known external ID (IMDb or TMDb) is available.
     // On any failure the existing providers are used as fallback.
-    if (window.WatchlistTvdb && (resolution?.imdbId || resolution?.tmdbId)) {
+    if (window.WatchlistTvdb && (resolution?.imdbId || resolution?.tmdbId || resolution?.anilistId)) {
       try {
         const tvdbId = await resolveTvdbId(resolution);
         if (tvdbId) {
@@ -437,8 +447,8 @@
             return tvdbResult;
           }
         }
-      } catch {
-        // TheTVDB unavailable — fall through to existing providers
+      } catch (err) {
+        console.warn("[series-metadata] TVDB episodes failed:", err?.message || err);
       }
     }
 
@@ -863,9 +873,13 @@
     const payload = cached?.payload;
     if (!payload) return { state: ResultState.UNAVAILABLE };
     const stateStr = forceState || cached.state || ResultState.AVAILABLE;
+    const episodes = (payload.episodes || []).map((ep) => ({
+      ...ep,
+      still: normalizeArtworkUrl(ep.still),
+    }));
     return {
       state: stateStr,
-      episodes: payload.episodes || null,
+      episodes,
       seasonPoster: payload.seasonPoster || null,
       seasonOverview: payload.seasonOverview || null,
       isStale,
@@ -972,6 +986,7 @@
     const imdbId = resolution?.imdbId;
     const tmdbId = resolution?.tmdbId;
 
+    // ── Primary: IMDb → TVDB via Edge Function (no TMDb key required) ───
     if (imdbId) {
       const cacheKey = `metadata:v7:resolve:tvdb:imdb:${imdbId}`;
       const cached = readCached(cacheKey, TTL_RESOLVE);
@@ -980,16 +995,18 @@
       const negKey = `metadata:v7:resolve:tvdb:negative:imdb:${imdbId}`;
       if (isNegativeCacheValid(negKey)) return null;
 
-      const result = await WTvdb.resolveId({ imdbId });
-      if (result?.tvdbId) {
-        writeSeriesCacheEntry(cacheKey, { tvdbId: result.tvdbId }, TTL_RESOLVE);
-        return result.tvdbId;
-      }
+      try {
+        const result = await WTvdb.resolveId({ imdbId });
+        if (result?.tvdbId) {
+          writeSeriesCacheEntry(cacheKey, { tvdbId: result.tvdbId }, TTL_RESOLVE);
+          return result.tvdbId;
+        }
+      } catch { /* fall through */ }
       writeNegativeCache(negKey, TTL_NEGATIVE);
-      return null;
     }
 
-    if (tmdbId) {
+    // ── Optional: TMDb external_ids when a TMDb key is configured ───────
+    if (tmdbId && getTmdbKey()) {
       const cacheKey = `metadata:v7:resolve:tvdb:tmdb:${tmdbId}`;
       const cached = readCached(cacheKey, TTL_RESOLVE);
       if (cached?.tvdbId) return cached.tvdbId;
@@ -997,13 +1014,57 @@
       const negKey = `metadata:v7:resolve:tvdb:negative:tmdb:${tmdbId}`;
       if (isNegativeCacheValid(negKey)) return null;
 
-      const result = await WTvdb.resolveId({ tmdbId });
-      if (result?.tvdbId) {
-        writeSeriesCacheEntry(cacheKey, { tvdbId: result.tvdbId }, TTL_RESOLVE);
-        return result.tvdbId;
-      }
+      try {
+        const json = await fetchTmdb(`tv/${tmdbId}/external_ids`, {});
+        if (json?.tvdb_id) {
+          const tvdbId = Number(json.tvdb_id);
+          if (tvdbId > 0) {
+            writeSeriesCacheEntry(cacheKey, { tvdbId }, TTL_RESOLVE);
+            return tvdbId;
+          }
+        }
+      } catch { /* fall through */ }
+
+      // TMDb external_ids missing — try Edge Function with TMDb remote id
+      try {
+        const result = await WTvdb.resolveId({ tmdbId });
+        if (result?.tvdbId) {
+          writeSeriesCacheEntry(cacheKey, { tvdbId: result.tvdbId }, TTL_RESOLVE);
+          return result.tvdbId;
+        }
+      } catch { /* fall through */ }
       writeNegativeCache(negKey, TTL_NEGATIVE);
-      return null;
+    }
+
+    // ── AniList → IMDb external link → TVDB ─────────────────────────────
+    const anilistId = resolution?.anilistId;
+    if (anilistId) {
+      const cacheKey = `metadata:v7:resolve:tvdb:anilist:${anilistId}`;
+      const cached = readCached(cacheKey, TTL_RESOLVE);
+      if (cached?.tvdbId) return cached.tvdbId;
+
+      try {
+        const data = await anilistQuery(
+          `query ($id: Int) {
+            Media(id: $id, type: ANIME) {
+              externalLinks { site url }
+            }
+          }`,
+          { id: Number(anilistId) }
+        );
+        const WM = window.WatchlistMetadata;
+        const links = data?.Media?.externalLinks || [];
+        for (const link of links) {
+          if (!/^imdb$/i.test(String(link?.site || ""))) continue;
+          const linkedImdb = WM?.extractImdbId?.(link?.url);
+          if (!linkedImdb) continue;
+          const tvdbId = await resolveTvdbId({ imdbId: linkedImdb });
+          if (tvdbId) {
+            writeSeriesCacheEntry(cacheKey, { tvdbId }, TTL_RESOLVE);
+            return tvdbId;
+          }
+        }
+      } catch { /* fall through */ }
     }
 
     return null;
@@ -1019,7 +1080,7 @@
    * @returns {Promise<SeriesMetadataResult>}
    */
   async function fetchTvdbSeriesMetadata(tvdbId, locale, fallbackPoster = "") {
-    const cacheKey = `metadata:v7:series:tvdb:${tvdbId}:${locale}`;
+    const cacheKey = `metadata:v8:series:tvdb:${tvdbId}:${locale}`;
     const cached = readCached(cacheKey, TTL_SERIES);
     if (cached?.payload) {
       return parseCachedSeriesResult(cached, { isStale: isStale(cacheKey, TTL_SERIES) });
@@ -1030,8 +1091,8 @@
 
     try {
       const [seriesData, seasonsData] = await Promise.all([
-        WTvdb.fetchSeries(tvdbId),
-        WTvdb.fetchSeasons(tvdbId),
+        WTvdb.fetchSeries(tvdbId, locale),
+        WTvdb.fetchSeasons(tvdbId, locale),
       ]);
 
       if (!seriesData) {
@@ -1110,7 +1171,7 @@
    */
   async function fetchTvdbSeasonEpisodes(tvdbId, season, locale, fallbackPoster = "") {
     // Use locale-keyed cache so locale switches still work correctly
-    const cacheKey = `metadata:v7:season:tvdb:${tvdbId}:${season}:${locale}`;
+    const cacheKey = `metadata:v12:season:tvdb:${tvdbId}:${season}:${locale}`;
     const cached = readCached(cacheKey, TTL_EPISODES);
     if (cached?.payload) {
       return parseCachedEpisodesResult(cached, { isStale: isStale(cacheKey, TTL_EPISODES) });
@@ -1120,7 +1181,7 @@
     if (!WTvdb) return { state: ResultState.UNAVAILABLE };
 
     try {
-      const raw = await WTvdb.fetchEpisodes(tvdbId, season);
+      const raw = await WTvdb.fetchEpisodes(tvdbId, season, locale);
 
       if (!raw) {
         const stale = readCacheStale(cacheKey);
@@ -1135,15 +1196,22 @@
 
       if (!raw.length) return { state: ResultState.UNAVAILABLE };
 
-      // Duplicate-image guard: if every non-empty still in the season is
-      // identical, treat them as a generic placeholder and clear them so
-      // the renderer shows the neutral film-strip placeholder instead.
-      const nonEmpty = raw.filter((e) => e.still);
+      // Keep only episodes for the requested season (TVDB lang path may return all).
+      const filtered = raw
+        .filter((e) => e.seasonNumber === season)
+        .map((e) => ({ ...e, still: normalizeArtworkUrl(e.still) }));
+
+      // Duplicate-image guard: only clear when every still is the season poster.
+      const seasonPosterUrl = normalizeArtworkUrl(fallbackPoster);
+      const nonEmpty = filtered.filter((e) => e.still);
       const uniqueUrls = new Set(nonEmpty.map((e) => e.still));
-      const isDuplicate = nonEmpty.length >= 2 && uniqueUrls.size === 1;
-      const episodes = isDuplicate
-        ? raw.map((e) => ({ ...e, still: "" }))
-        : raw;
+      const isPosterDup = nonEmpty.length >= 2
+        && uniqueUrls.size === 1
+        && seasonPosterUrl
+        && uniqueUrls.has(seasonPosterUrl);
+      const episodes = isPosterDup
+        ? filtered.map((e) => ({ ...e, still: "" }))
+        : filtered;
 
       const result = { state: ResultState.AVAILABLE, episodes };
       writeSeriesCacheEntry(

@@ -49,6 +49,7 @@
   let _selectedSeason = null;  // currently selected season number (int)
   let _episodesResult = null;  // { state, episodes, seasonNum }
   let _carouselEl     = null;  // .tds-carousel DOM element
+  let _spoilerPosters = false; // hide episode stills behind season poster
   let _dragStartX     = 0;
   let _isDragging     = false;
 
@@ -98,8 +99,76 @@
   }
 
   function saveEntry(newEntry) {
-    _callbacks?.saveWatchedEntry?.(annotateCompletion(newEntry));
+    let entry = newEntry;
+    if (_episodesResult?.episodes?.length && _episodesResult?.seasonNum != null) {
+      entry = rememberSeasonTotals(entry, _episodesResult.seasonNum, _episodesResult.episodes);
+    }
+    const annotated = annotateCompletion(entry);
+    _callbacks?.saveWatchedEntry?.(annotated);
     _callbacks?.updateCardInPlace?.();
+  }
+
+  /** Persist per-season aired episode totals so reopening can derive watched state. */
+  function rememberSeasonTotals(entry, seasonNum, episodes) {
+    // Write directly to entry.progress (raw) — getProgress() returns a parsed copy
+    // that doesn't write back, so mutations via it are silently lost.
+    if (!entry || typeof entry !== "object" || !entry.progress || typeof entry.progress !== "object") return entry;
+    if (!Array.isArray(episodes)) return entry;
+    const rawProg = entry.progress;
+    const seasonEps = episodes.filter((ep) => ep.seasonNumber === seasonNum);
+    const airedCount = seasonEps.filter((ep) => ep.isAired !== false).length;
+    if (!airedCount) return entry;
+    if (!rawProg.seasonTotals) rawProg.seasonTotals = {};
+    rawProg.seasonTotals[String(seasonNum)] = airedCount;
+    if (seasonNum > 0) {
+      const season = getSeasonByNum(seasonNum);
+      if (season) season.episodeCount = airedCount;
+    }
+    return entry;
+  }
+
+  function seasonEpisodeTotal(season, entry) {
+    const num = season.seasonNumber;
+    const fromMeta = season.episodeCount ?? 0;
+    if (fromMeta > 0) return fromMeta;
+    const fromProgress = P()?.getProgress(entry)?.seasonTotals?.[String(num)];
+    if (fromProgress > 0) return fromProgress;
+    const airedEps = airedEpsForSeason(num);
+    if (airedEps !== null) return airedEps.length;
+    return 0;
+  }
+
+  function seasonMarkLabel(ws) {
+    return ws === "watched"
+      ? t("progress.unmarkSeasonWatched")
+      : t("progress.markSeasonWatched");
+  }
+
+  function hydrateSeasonTotalsFromEntry() {
+    const entry = getEntry();
+    // Read seasonTotals directly from the raw progress object — parseProgressObject
+    // used by getProgress() would silently strip the field.
+    const rawProg = entry?.progress && typeof entry.progress === "object" ? entry.progress : null;
+    const totals = rawProg?.seasonTotals;
+    if (!totals || !_seriesResult?.seasons) return;
+
+    // Detect corrupted totals from the TVDB lang-endpoint bug (every season
+    // stored with the same series-wide episode count).
+    const counts = _seriesResult.seasons
+      .map((s) => totals[String(s.seasonNumber)])
+      .filter((c) => c > 0);
+    if (counts.length > 1 && new Set(counts).size === 1) {
+      if (rawProg.seasonTotals) {
+        delete rawProg.seasonTotals;
+        _callbacks?.saveWatchedEntry?.(entry);
+      }
+      return;
+    }
+
+    for (const season of _seriesResult.seasons) {
+      const count = totals[String(season.seasonNumber)];
+      if (count > 0) season.episodeCount = count;
+    }
   }
 
   /**
@@ -132,13 +201,19 @@
    * fully-granular-watched shows without needing episode counts there.
    */
   function annotateCompletion(entry) {
-    const prog = P()?.getProgress(entry);
-    if (!prog) return entry; // legacy-complete — no annotation needed
+    // Must read/write from rawProg (entry.progress directly) — getProgress() returns
+    // a parsed copy; any mutation on it is silently discarded.
+    const rawProg = entry?.progress && typeof entry.progress === "object" ? entry.progress : null;
+    if (!rawProg) return entry; // legacy-complete — no annotation needed
+
+    const prog = P()?.getProgress(entry); // use parsed copy for reading episodes array
+    if (!prog) return entry;
 
     const regularSeasons = (_seriesResult?.seasons || []).filter((s) => s.seasonNumber > 0);
     if (!regularSeasons.length) return entry;
 
     let allDone = true;
+    let canDetermine = false; // true when at least one season has verifiable data
     for (const season of regularSeasons) {
       const sNum = season.seasonNumber;
       // For the currently-loaded season use exact aired keys
@@ -147,23 +222,29 @@
           .filter((ep) => ep.isAired !== false)
           .map((ep) => P()?.episodeKey(ep.seasonNumber, ep.episodeNumber))
           .filter(Boolean);
-        if (airedKeys.length === 0) continue; // no aired eps in this season yet
+        if (airedKeys.length === 0) continue;
+        canDetermine = true;
         const allInEntry = airedKeys.every((k) => prog.episodes.includes(k));
         if (!allInEntry) { allDone = false; break; }
       } else {
-        // Season not loaded — use episodeCount as an upper-bound approximation
-        const count = season.episodeCount ?? 0;
-        if (count === 0) continue;
+        // Season not loaded — use stored total or metadata episode count
+        const count = seasonEpisodeTotal(season, entry);
+        if (count === 0) continue; // unknown — skip but don't count as verified
+        canDetermine = true;
         const watchedInSeason = prog.episodes.filter((k) => k.startsWith(`${sNum}:`)).length;
         if (watchedInSeason < count) { allDone = false; break; }
       }
     }
 
-    // Write or clear the completed flag in-place (progress was already cloned by _buildEntry)
+    // Only update the completed flag when we have enough data to decide.
+    // If no season has verifiable data, preserve the existing flag so that
+    // marking/unmarking specials alone never strips "completed" from a fully-watched title.
+    if (!canDetermine) return entry;
+
     if (allDone) {
-      prog.completed = true;
+      rawProg.completed = true;  // write to raw — not to the parsed copy
     } else {
-      delete prog.completed;
+      delete rawProg.completed;
     }
     return entry;
   }
@@ -194,14 +275,14 @@
   /** Count watched / total for a season using progress keys from local watched entry. */
   function seasonProgressFromEntry(entry, season) {
     const num   = season.seasonNumber;
-    const total = season.episodeCount ?? 0;
-
     const airedEps = airedEpsForSeason(num);
     if (airedEps !== null) {
       const watched = P()?.watchedCountForSeason(entry, num, airedEps) ?? 0;
       const airedTotal = airedEps.length;
       return { watched, total: airedTotal, hasDetail: true };
     }
+
+    const total = seasonEpisodeTotal(season, entry);
 
     // Episode list not loaded yet — never assume watched without a real entry.
     if (!entry) {
@@ -240,7 +321,8 @@
     if (!prog) return "unwatched";
     const watchedCount = (prog.episodes || []).filter((k) => k.startsWith(`${num}:`)).length;
     if (!watchedCount) return "unwatched";
-    if ((season.episodeCount ?? 0) > 0 && watchedCount >= (season.episodeCount ?? 0)) return "watched";
+    const total = seasonEpisodeTotal(season, entry);
+    if (total > 0 && watchedCount >= total) return "watched";
     return "partial";
   }
 
@@ -278,12 +360,19 @@
       season.overview = result.seasonOverview;
       changed = true;
     }
+    if (Array.isArray(result.episodes) && result.episodes.length > 0) {
+      const seasonEps = result.episodes.filter((ep) => ep.seasonNumber === seasonNum);
+      const airedCount = seasonEps.filter((ep) => ep.isAired !== false).length;
+      if (airedCount > 0 && season.episodeCount !== airedCount) {
+        season.episodeCount = airedCount;
+        changed = true;
+      }
+    }
 
     if (changed) {
       refreshSeasonCard(seasonNum);
       if (_selectedSeason === seasonNum) {
-        renderSeasonInfo(seasonNum);
-        _callbacks?.onSeasonSelected?.(season);
+        notifySeasonPresentation(seasonNum, { progressOnly: true });
       }
     }
   }
@@ -292,6 +381,11 @@
 
   function pickInitialSeason(seasons) {
     if (!seasons || seasons.length === 0) return null;
+
+    const saved = _item?.lastSelectedSeason;
+    if (saved != null && seasons.some((s) => s.seasonNumber === saved)) {
+      return saved;
+    }
 
     const regular = seasons.filter((s) => s.seasonNumber > 0);
     const entry   = getEntry();
@@ -348,6 +442,7 @@
     _selectedSeason = null;
     _episodesResult = null;
     _carouselEl     = null;
+    _spoilerPosters = false;
     _isDragging     = false;
   }
 
@@ -379,11 +474,23 @@
               ${chevronSvg("right")}
             </button>
           </div>
-          <div class="tds-season-info" data-tds-part="season-info" hidden></div>
+          <div class="tds-season-actions" data-tds-part="season-actions" hidden>
+            <p class="tds-season-actions__progress" data-tds-part="season-progress"></p>
+            <button type="button" class="tds-season-mark-btn" data-tds-action="mark-season" data-tds-season=""></button>
+          </div>
         </div>
         <div class="tds-episodes-section" data-tds-part="episodes-section" hidden>
           <div class="tds-episodes-header">
             <h3 class="tds-episodes-title" data-tds-label="episodes-title"></h3>
+          </div>
+          <div class="tds-spoiler-row" data-tds-part="spoiler-row" hidden>
+            <button type="button" class="tds-spoiler-toggle" role="switch"
+              aria-checked="false" data-tds-action="toggle-spoiler">
+              <span class="tds-spoiler-toggle__label">${esc(t("seasons.spoilerMode"))}</span>
+              <span class="tds-spoiler-toggle__track" aria-hidden="true">
+                <span class="tds-spoiler-toggle__thumb"></span>
+              </span>
+            </button>
           </div>
           <div class="tds-episodes-status" data-tds-part="episodes-status" hidden></div>
           <div class="tds-episode-list" role="list" aria-live="polite"></div>
@@ -504,19 +611,28 @@
 
     switch (result?.state) {
       case RS.AVAILABLE:
-      case RS.OFFLINE_WITH_CACHE:
-        renderEpisodeList(seasonNum, result.episodes || []);
+      case RS.OFFLINE_WITH_CACHE: {
+        const eps = result.episodes || [];
+        // Season 0 with zero aired episodes → drop it from the carousel silently
+        if (seasonNum === 0) {
+          const airedCount = eps.filter((ep) => ep.isAired !== false).length;
+          if (airedCount === 0) { removeSpecialsFromCarousel(); break; }
+        }
+        renderEpisodeList(seasonNum, eps);
         if (result.state === RS.OFFLINE_WITH_CACHE) showEpisodesStatus(t("seasons.offline"), null);
         // Refresh season card and re-annotate completion now that we have episode data
         refreshSeasonCard(seasonNum);
         reannotateExistingEntry();
         break;
+      }
 
       case RS.OFFLINE_NO_CACHE:
+        if (seasonNum === 0) { removeSpecialsFromCarousel(); break; }
         showEpisodesStatus(t("seasons.offlineNoCache"), "retry-episodes");
         break;
 
       case RS.EPISODE_DETAILS_UNAVAILABLE:
+        if (seasonNum === 0) { removeSpecialsFromCarousel(); break; }
         showEpisodesStatus(t("seasons.episodesUnavailable"), null);
         break;
 
@@ -527,12 +643,37 @@
       case null:
       case undefined:
         // No episode data available yet (e.g. series loaded from OMDb)
+        if (seasonNum === 0) { removeSpecialsFromCarousel(); break; }
         showEpisodesStatus(t("seasons.episodesUnavailable"), null);
         break;
 
       default:
+        if (seasonNum === 0) { removeSpecialsFromCarousel(); break; }
         showEpisodesStatus(t("seasons.episodesError"), "retry-episodes");
         break;
+    }
+  }
+
+  /** Remove the Specials (season 0) card from the carousel and jump to a regular season. */
+  function removeSpecialsFromCarousel() {
+    if (!_seriesResult?.seasons) return;
+    // Drop from the in-memory season list so it won't come back on re-render
+    _seriesResult.seasons = _seriesResult.seasons.filter((s) => s.seasonNumber !== 0);
+    // Remove card from DOM
+    if (_carouselEl) {
+      const card = _carouselEl.querySelector("[data-tds-season='0']");
+      card?.remove();
+    }
+    updateNavButtons(_seriesResult.seasons);
+    // Persist the fact so the filter hides Season 0 immediately on next load
+    if (_item?.id) {
+      window.WatchlistApp?.patchItem?.(_item.id, { noSpecials: true });
+    }
+    // If specials was the selected season, jump to the first regular one
+    if (_selectedSeason === 0) {
+      const first = _seriesResult.seasons.find((s) => s.seasonNumber > 0);
+      if (first) selectSeason(first.seasonNumber, { animate: false });
+      else showEpisodesStatus(t("seasons.episodesUnavailable"), null);
     }
   }
 
@@ -540,7 +681,24 @@
 
   function renderSeasonsSection(result) {
     if (!_slot) return;
-    const seasons = result?.seasons || [];
+    // Exclude Season 0 (Specials) when we have confirmed it is empty.
+    // Confirmed-empty is stored as item.noSpecials=true (persisted via patchItem).
+    // Also filter when episodeCount is explicitly 0.
+    const allSeasons = result?.seasons || [];
+    const seasons = allSeasons.filter((s) => {
+      if (s.seasonNumber !== 0) return true;
+      // Keep if user has watched specials saved (allow them to unmark)
+      const rawProg = getEntry()?.progress;
+      if (rawProg && typeof rawProg === "object") {
+        const watchedSpecials = (rawProg.episodes || []).filter((k) => k.startsWith("0:")).length;
+        if (watchedSpecials > 0) return true;
+      }
+      // Hide if previously confirmed empty (persisted on item)
+      if (_item?.noSpecials === true) return false;
+      // Hide if metadata explicitly says 0 episodes
+      if (s.episodeCount === 0) return false;
+      return true;
+    });
     if (!seasons.length) {
       showError(t("seasons.noSeasons"), null);
       return;
@@ -559,12 +717,49 @@
     const titleEl = _slot.querySelector("[data-tds-label='seasons-title']");
     if (titleEl) titleEl.textContent = t("seasons.sectionTitle");
 
+    hydrateSeasonTotalsFromEntry();
+
     // Render season cards
     renderCarousel(seasons);
+
+    // Silently pre-check Season 0: if episodeCount is unknown, fetch in the background
+    // so we can remove the card before the user ever taps it (no flicker, no error).
+    const specials = seasons.find((s) => s.seasonNumber === 0);
+    if (specials && (specials.episodeCount == null)) {
+      silentlyCheckSpecials();
+    }
 
     // Select initial season
     const initial = pickInitialSeason(seasons);
     if (initial !== null) selectSeason(initial, { animate: false });
+  }
+
+  /** Fetch Season 0 episodes in the background; remove the carousel card if empty/error. */
+  async function silentlyCheckSpecials() {
+    const tok = _token;
+    const meta = window.WatchlistSeriesMetadata;
+    if (!meta || !_item || !_resolution) return;
+    const locale = getLocale();
+    const poster = getItemPoster();
+    const seasonSummary = (_seriesResult?.seasons || []).find((s) => s.seasonNumber === 0) || null;
+    try {
+      const result = await meta.fetchSeasonEpisodes(_resolution, 0, locale, poster, seasonSummary);
+      if (!isValid(tok)) return; // panel was closed while fetching
+      const RS = meta.ResultState;
+      const hasEpisodes =
+        result?.state === RS.AVAILABLE || result?.state === RS.OFFLINE_WITH_CACHE
+          ? (result.episodes || []).filter((ep) => ep.isAired !== false).length > 0
+          : false;
+      if (!hasEpisodes) {
+        // Season 0 is empty — remove it silently before the user sees it
+        removeSpecialsFromCarousel();
+      } else {
+        // Real episodes exist — store the count so the card updates
+        patchSeasonFromEpisodeResult(0, result);
+      }
+    } catch (_) {
+      // Network error — leave the card; removeSpecialsFromCarousel will run if they tap it
+    }
   }
 
   function renderCarousel(seasons) {
@@ -594,9 +789,7 @@
 
     const barPct = prog.total > 0 ? Math.round(prog.watched / prog.total * 100) : 0;
 
-    const markLabel = ws === "watched"
-      ? t("seasons.unmarkSeason", { name })
-      : t("seasons.markSeasonWatched", { name });
+    const markLabel = seasonMarkLabel(ws);
 
     const poster = season.poster || getItemPoster() || "";
     const altTxt = esc(name);
@@ -641,12 +834,9 @@
 
     updateCarouselSelection(seasonNum);
     scrollToSeasonCard(seasonNum, animate);
-    renderSeasonInfo(seasonNum);
+    notifySeasonPresentation(seasonNum);
     loadEpisodes(seasonNum);
     updateNavButtons(_seriesResult?.seasons || []);
-
-    const season = getSeasonByNum(seasonNum);
-    if (season) _callbacks?.onSeasonSelected?.(season);
   }
 
   function updateCarouselSelection(selectedNum) {
@@ -701,89 +891,83 @@
     }
   }
 
-  // ─── Selected season info ──────────────────────────────────────────────────
+  // ─── Header season summary (via title-detail callback) ───────────────────
 
-  function renderSeasonInfo(seasonNum) {
-    if (!_slot) return;
-    const infoEl = getP("season-info");
-    if (!infoEl) return;
-    const seasons = _seriesResult?.seasons || [];
-    const season  = seasons.find((s) => s.seasonNumber === seasonNum);
-    if (!season) { infoEl.hidden = true; return; }
+  function buildSeasonPresentation(season) {
+    const entry = getEntry();
+    const ws = seasonWatchState(entry, season);
+    const prog = seasonProgressFromEntry(entry, season);
+    const name = seasonDisplayName(season);
+    const year = season.airDate ? season.airDate.slice(0, 4) : "";
+    return {
+      season,
+      ws,
+      prog,
+      name,
+      year,
+      markLabel: seasonMarkLabel(ws),
+    };
+  }
+
+  function persistSeasonPoster(season) {
+    if (!_item || !season) return;
+    const poster = season.poster || getItemPoster();
+    if (!poster) return;
+    const seasonNum = season.seasonNumber;
+    const changed = _item.cardPoster !== poster || _item.lastSelectedSeason !== seasonNum;
+    _item.cardPoster = poster;
+    _item.lastSelectedSeason = seasonNum;
+    if (changed) {
+      window.WatchlistApp?.patchItem?.(_item.id, {
+        cardPoster: poster,
+        lastSelectedSeason: seasonNum,
+      });
+      _callbacks?.updateCardInPlace?.();
+    }
+  }
+
+  function notifySeasonPresentation(seasonNum, { progressOnly = false, persistPoster = true } = {}) {
+    const season = getSeasonByNum(seasonNum);
+    if (!season) return;
+    if (!progressOnly) {
+      if (persistPoster) persistSeasonPoster(season);
+      _callbacks?.onSeasonSelected?.(buildSeasonPresentation(season));
+    }
+    updateSeasonActions(seasonNum);
+  }
+
+  function updateSeasonActions(seasonNum) {
+    const actionsEl = getP("season-actions");
+    if (!actionsEl) return;
+    const season = getSeasonByNum(seasonNum);
+    if (!season) {
+      actionsEl.hidden = true;
+      return;
+    }
 
     const entry = getEntry();
-    const ws    = seasonWatchState(entry, season);
-    const prog  = seasonProgressFromEntry(entry, season);
-
-    const name = seasonDisplayName(season);
-
-    const year = season.airDate ? season.airDate.slice(0, 4) : "";
-    const metaParts = [
-      year,
-      season.episodeCount != null
-        ? (season.episodeCount === 1
-            ? t("seasons.episodeCountOne")
-            : t("seasons.episodeCount", { n: season.episodeCount }))
-        : null,
-    ].filter(Boolean);
-
+    const ws = seasonWatchState(entry, season);
+    const prog = seasonProgressFromEntry(entry, season);
     const progStr = prog.total > 0
       ? t("seasons.watchedProgress", { watched: prog.watched, total: prog.total })
       : "";
 
-    const markLabel = ws === "watched"
-      ? t("seasons.unmarkSeason", { name })
-      : t("seasons.markSeasonWatched", { name });
-
-    const overviewHtml = season.overview
-      ? `<p class="tds-season-info-overview" data-tds-part="season-overview">${esc(season.overview)}</p>
-         <button class="tds-overview-toggle" data-tds-action="toggle-overview" aria-expanded="false">
-           ${t("seasons.loading").replace("…", "▾")}
-         </button>`
-      : "";
-
-    infoEl.innerHTML = `
-      <p class="tds-season-info-name">${esc(name)}</p>
-      ${metaParts.length ? `<p class="tds-season-info-meta">${esc(metaParts.join(" · "))}</p>` : ""}
-      ${overviewHtml}
-      <div class="tds-season-info-row">
-        ${progStr ? `<span class="tds-season-info-progress">${esc(progStr)}</span>` : ""}
-        <button class="tds-season-mark-btn${ws === "watched" ? " tds-season-mark-btn--complete" : ""}"
-          data-tds-action="mark-season-info"
-          data-tds-season="${seasonNum}"
-          aria-label="${esc(markLabel)}">${esc(ws === "watched" ? t("seasons.unmarkSeason", { name }) : t("seasons.markSeasonWatched", { name }))}</button>
-      </div>`;
-    infoEl.hidden = false;
+    const progressEl = actionsEl.querySelector("[data-tds-part='season-progress']");
+    const markBtn = actionsEl.querySelector("[data-tds-action='mark-season']");
+    if (progressEl) {
+      progressEl.textContent = progStr;
+      progressEl.hidden = !progStr;
+    }
+    if (markBtn) {
+      markBtn.textContent = seasonMarkLabel(ws);
+      markBtn.dataset.tdsSeason = String(seasonNum);
+      markBtn.classList.toggle("tds-season-mark-btn--complete", ws === "watched");
+    }
+    actionsEl.hidden = false;
   }
 
   function updateSeasonInfoProgress(seasonNum) {
-    if (!_slot) return;
-    const infoEl = getP("season-info");
-    if (!infoEl || infoEl.hidden) return;
-    const seasons = _seriesResult?.seasons || [];
-    const season  = seasons.find((s) => s.seasonNumber === seasonNum);
-    if (!season) return;
-
-    const entry = getEntry();
-    const ws    = seasonWatchState(entry, season);
-    const prog  = seasonProgressFromEntry(entry, season);
-    const name  = seasonDisplayName(season);
-
-    const progRow = infoEl.querySelector(".tds-season-info-row");
-    if (progRow) {
-      const progStr = prog.total > 0
-        ? t("seasons.watchedProgress", { watched: prog.watched, total: prog.total })
-        : "";
-      const markLabel = ws === "watched"
-        ? t("seasons.unmarkSeason", { name })
-        : t("seasons.markSeasonWatched", { name });
-      progRow.innerHTML = `
-        ${progStr ? `<span class="tds-season-info-progress">${esc(progStr)}</span>` : ""}
-        <button class="tds-season-mark-btn${ws === "watched" ? " tds-season-mark-btn--complete" : ""}"
-          data-tds-action="mark-season-info"
-          data-tds-season="${seasonNum}"
-          aria-label="${esc(markLabel)}">${esc(ws === "watched" ? t("seasons.unmarkSeason", { name }) : t("seasons.markSeasonWatched", { name }))}</button>`;
-    }
+    updateSeasonActions(seasonNum);
   }
 
   // ─── Rendering: episode list ───────────────────────────────────────────────
@@ -851,7 +1035,10 @@
 
     // Only use the episode's own unique still — never fall back to season/title
     // poster, which would make every episode without a still show the same image.
-    const still = ep.still || "";
+    const seasonPoster = getSeasonPoster(seasonNum);
+    const still = (_spoilerPosters && seasonPoster)
+      ? seasonPoster
+      : (ep.still || "");
 
     return `<div class="tds-episode${watched ? " tds-episode--watched" : ""}"
       role="listitem"
@@ -892,6 +1079,29 @@
     } else {
       titleEl.textContent = t("seasons.episodesTitle");
     }
+    updateSpoilerRow();
+  }
+
+  function updateSpoilerRow() {
+    const row = getP("spoiler-row");
+    if (!row) return;
+    const sec = getP("episodes-section");
+    const hasEpisodes = Boolean(_episodesResult?.episodes?.length);
+    const show = sec && !sec.hidden && hasEpisodes;
+    row.hidden = !show;
+
+    const btn = row.querySelector("[data-tds-action='toggle-spoiler']");
+    const label = row.querySelector(".tds-spoiler-toggle__label");
+    if (label) label.textContent = t("seasons.spoilerMode");
+    if (btn) {
+      btn.setAttribute("aria-checked", String(_spoilerPosters));
+      btn.classList.toggle("tds-spoiler-toggle--on", _spoilerPosters);
+    }
+  }
+
+  function refreshEpisodeListDisplay() {
+    if (_selectedSeason == null || !_episodesResult?.episodes?.length) return;
+    renderEpisodeList(_selectedSeason, _episodesResult.episodes);
   }
 
   // ─── Error / loading states ───────────────────────────────────────────────
@@ -976,9 +1186,7 @@
     // Update mark button
     const markBtn = card.querySelector(".tds-season-mark-overlay");
     if (markBtn) {
-      const markLabel = ws === "watched"
-        ? t("seasons.unmarkSeason", { name })
-        : t("seasons.markSeasonWatched", { name });
+      const markLabel = seasonMarkLabel(ws);
       markBtn.setAttribute("aria-label", markLabel);
       markBtn.title = markLabel;
       markBtn.innerHTML = checkSvg(ws === "watched");
@@ -1070,7 +1278,7 @@
     refreshSeasonCard(seasonNum);
     // 3. Update selected-season info
     updateSeasonInfoProgress(seasonNum);
-    // 4. Update main detail header watch state
+    // 4. Update main detail header watch state + rating availability
     _callbacks?.updateHeaderWatchState?.();
     // 5. Update detail actions (watched button label may change)
     _callbacks?.updateDetailActions?.();
@@ -1078,36 +1286,80 @@
 
   // ─── Action: mark / unmark whole season ───────────────────────────────────
 
-  function handleMarkSeason(seasonNum) {
+  /**
+   * Expand a legacy-complete entry into a granular one containing episode keys
+   * for all known regular seasons (season > 0).
+   * - For the currently-loaded season: use real aired episode keys.
+   * - For other seasons: use synthetic keys derived from stored episode counts.
+   * Specials (season 0) are never included in the expansion.
+   */
+  function expandLegacyToGranular(entry) {
+    const seasons = _seriesResult?.seasons || [];
+    const allKeys = [];
+    for (const s of seasons) {
+      const sNum = s.seasonNumber;
+      if (sNum === 0) continue; // never expand specials
+      if (_episodesResult?.seasonNum === sNum && _episodesResult?.episodes) {
+        const keys = (_episodesResult.episodes || [])
+          .filter((ep) => ep.isAired !== false)
+          .map((ep) => P()?.episodeKey(ep.seasonNumber, ep.episodeNumber))
+          .filter(Boolean);
+        allKeys.push(...keys);
+      } else {
+        const count = seasonEpisodeTotal(s, entry);
+        for (let i = 1; i <= count; i++) allKeys.push(`${sNum}:${i}`);
+      }
+    }
+    return P()?.markAllWatched(entry, allKeys) || entry;
+  }
+
+  async function handleMarkSeason(seasonNum) {
     const seasons = _seriesResult?.seasons || [];
     const season  = seasons.find((s) => s.seasonNumber === seasonNum);
     if (!season) return;
 
-    const entry    = getEntry();
+    // Ensure episode list is loaded so we know which aired episodes to mark.
+    if (_episodesResult?.seasonNum !== seasonNum || !_episodesResult?.episodes?.length) {
+      if (_selectedSeason !== seasonNum) {
+        _selectedSeason = seasonNum;
+        updateCarouselSelection(seasonNum);
+        notifySeasonPresentation(seasonNum);
+      }
+      await loadEpisodes(seasonNum);
+    }
+
+    let entry = getEntry();
+
+    // If the entry is legacy-complete, expand it to granular BEFORE any season
+    // operation. Without this, marking specials or unmarking a season on a
+    // legacy-complete entry would replace the entire episodes list with only
+    // the current season's keys, losing all other seasons' watched state.
+    if (P()?.isLegacyComplete(entry)) {
+      entry = expandLegacyToGranular(entry);
+    }
+
     const ws       = seasonWatchState(entry, season);
     const airedKeys = airedEpisodeKeysForSeason(seasonNum);
 
     let newEntry;
     if (ws === "watched") {
-      // Unmark all episodes in this season
-      const allAired = airedEpisodeKeysForSeason(seasonNum);
-      newEntry = P()?.unmarkSeasonWatched(entry, seasonNum, allAired);
+      newEntry = P()?.unmarkSeasonWatched(entry, seasonNum, airedKeys);
     } else {
-      // Mark all aired episodes in this season
+      if (!airedKeys.length) return;
       newEntry = P()?.markSeasonWatched(entry, airedKeys);
     }
 
     saveEntry(newEntry);
 
-    // Update all episode rows for this season
     if (_episodesResult?.seasonNum === seasonNum && _episodesResult?.episodes) {
-      const freshEntry = _callbacks?.getWatchEntry?.() ?? null;
+      const freshEntry = getEntry();
       (_episodesResult.episodes || []).forEach((ep) => {
         updateEpisodeRowStateFromEntry(freshEntry, ep.seasonNumber, ep.episodeNumber, ep);
       });
     }
     refreshSeasonCard(seasonNum);
     updateSeasonInfoProgress(seasonNum);
+    _callbacks?.updateHeaderWatchState?.();
     _callbacks?.updateDetailActions?.();
   }
 
@@ -1119,7 +1371,9 @@
     refreshAllEpisodeRows();
     const seasons = _seriesResult?.seasons || [];
     seasons.forEach((s) => refreshSeasonCard(s.seasonNumber));
-    updateSeasonInfoProgress(_selectedSeason);
+    if (_selectedSeason != null) {
+      notifySeasonPresentation(_selectedSeason, { persistPoster: false });
+    }
     // Don't call updateHeaderWatchState here — title-detail.js already did it.
   }
 
@@ -1130,7 +1384,9 @@
     refreshAllEpisodeRows();
     const seasons = _seriesResult?.seasons || [];
     seasons.forEach((s) => refreshSeasonCard(s.seasonNumber));
-    updateSeasonInfoProgress(_selectedSeason);
+    if (_selectedSeason != null) {
+      notifySeasonPresentation(_selectedSeason, { persistPoster: false });
+    }
   }
 
   // ─── Language change ──────────────────────────────────────────────────────
@@ -1143,11 +1399,8 @@
     // Re-render carousel labels (in-place, no scroll reset)
     seasons.forEach((s) => refreshSeasonCard(s.seasonNumber));
     updateNavButtonLabels();
-    updateSeasonInfoProgress(saved);
+    if (saved != null) notifySeasonPresentation(saved, { persistPoster: false });
     updateEpisodesTitle();
-
-    const season = saved != null ? getSeasonByNum(saved) : null;
-    if (season) _callbacks?.onSeasonSelected?.(season);
 
     // Re-render episode list labels if loaded
     if (_episodesResult?.episodes) {
@@ -1192,6 +1445,12 @@
       }
       case "toggle-ep": {
         handleToggleEpisode(target.dataset.tdsEpisode);
+        break;
+      }
+      case "toggle-spoiler": {
+        _spoilerPosters = !_spoilerPosters;
+        updateSpoilerRow();
+        refreshEpisodeListDisplay();
         break;
       }
       case "prev-season": {
@@ -1303,6 +1562,7 @@
     onLangChange,
     onTitleWatchedChanged,
     onExternalRefresh,
+    markSeason: handleMarkSeason,
     getSelectedSeason: () => _selectedSeason,
   };
 })();

@@ -2,3 +2,6 @@
 Thumbs.db
 *.log
 web-files/js/config.js
+
+# Local Supabase Edge Function secrets — real values, never committed
+supabase/functions/.env

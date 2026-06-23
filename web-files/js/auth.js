@@ -209,14 +209,15 @@
 
   function migrateLegacySession() {
     try {
-      const legacy = sessionStorage.getItem(LEGACY_SESSION_KEY);
-      if (!legacy || sessionStorage.getItem(SESSION_KEY)) return;
+      // Migrate from old sessionStorage-based session (pre-persistent-login) to localStorage.
+      const fromSession = sessionStorage.getItem(SESSION_KEY) || sessionStorage.getItem(LEGACY_SESSION_KEY);
+      if (!fromSession || localStorage.getItem(SESSION_KEY)) return;
 
-      const parsed = JSON.parse(legacy);
+      const parsed = JSON.parse(fromSession);
       if (!parsed?.listId) return;
 
       const accountId = parsed.accountId || parsed.listId;
-      sessionStorage.setItem(
+      localStorage.setItem(
         SESSION_KEY,
         JSON.stringify({
           accountId,
@@ -224,6 +225,7 @@
           needsCodeUpgrade: parsed.needsCodeUpgrade,
         })
       );
+      sessionStorage.removeItem(SESSION_KEY);
       sessionStorage.removeItem(LEGACY_SESSION_KEY);
     } catch {
       /* ignore */
@@ -233,7 +235,7 @@
   function getSession() {
     migrateLegacySession();
     try {
-      const raw = sessionStorage.getItem(SESSION_KEY);
+      const raw = localStorage.getItem(SESSION_KEY);
       return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
@@ -241,13 +243,15 @@
   }
 
   function setSession(accountId, listId, extras = {}) {
-    sessionStorage.setItem(
+    localStorage.setItem(
       SESSION_KEY,
       JSON.stringify({ accountId, listId, ...extras })
     );
   }
 
   function clearSession() {
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(LEGACY_SESSION_KEY);
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(LEGACY_SESSION_KEY);
   }

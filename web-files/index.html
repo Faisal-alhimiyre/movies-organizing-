@@ -413,6 +413,13 @@
 
       <footer class="footer">
         <p>Your list is saved on this device. Use Menu → Share to send it to a friend or add theirs.</p>
+        <p class="footer__attribution">
+          Series and episode data provided by
+          <a href="https://www.thetvdb.com" target="_blank" rel="noopener noreferrer">TheTVDB</a>,
+          <a href="https://www.themoviedb.org" target="_blank" rel="noopener noreferrer">TMDb</a>,
+          <a href="https://anilist.co" target="_blank" rel="noopener noreferrer">AniList</a>, and
+          <a href="https://www.omdbapi.com" target="_blank" rel="noopener noreferrer">OMDb</a>.
+        </p>
       </footer>
     </div>
 
@@ -1091,8 +1098,7 @@
         </header>
 
         <form class="modal__form" id="ratingForm" novalidate>
-          <div class="form-field form-field--full">
-            <span class="form-field__label">Your rating (out of 10)</span>
+          <div class="rating-modal-body">
             <div class="rating-picker rating-picker--idle" id="ratingPicker">
               <p class="rating-picker__value" aria-live="polite">
                 <span class="rating-picker__score" id="ratingValueDisplay">—</span>
@@ -1150,17 +1156,13 @@
                 </button>
               </div>
             </div>
-          </div>
-
-          <label class="form-field form-field--full">
-            <span class="form-field__label">Note for yourself</span>
             <textarea
               id="ratingNote"
-              class="form-textarea"
+              class="form-textarea rating-modal-body__note"
               rows="2"
-              placeholder="What stood out? Would you watch again?"
+              placeholder="Your thoughts"
             ></textarea>
-          </label>
+          </div>
 
           <p class="backup-modal__hint" id="ratingError" hidden></p>
 
@@ -1181,6 +1183,7 @@
     <script src="js/dialog.js"></script>
     <script src="js/watch-progress.js"></script>
     <script src="js/metadata.js"></script>
+    <script src="js/tvdb-service.js"></script>
     <script src="js/series-metadata.js"></script>
     <script src="js/auth.js"></script>
     <script src="js/sync.js"></script>
