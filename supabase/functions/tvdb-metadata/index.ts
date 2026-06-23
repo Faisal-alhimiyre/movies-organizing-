@@ -4,7 +4,7 @@
  * Proxies approved TheTVDB v4 operations on behalf of the website client.
  * The API key and bearer token are never returned to the caller.
  *
- * Allowed actions:  resolve | series | seasons | episodes
+ * Allowed actions:  resolve | series | seasons | episodes | episodeTotals
  *
  * Secret env vars read with Deno.env.get():
  *   TVDB_API_KEY   (required)
@@ -12,7 +12,13 @@
  */
 
 const TVDB_BASE = "https://api4.thetvdb.com/v4";
-const ALLOWED_ACTIONS = new Set(["resolve", "series", "seasons", "episodes"]);
+const ALLOWED_ACTIONS = new Set([
+  "resolve",
+  "series",
+  "seasons",
+  "episodes",
+  "episodeTotals",
+]);
 
 // CORS headers — required for browser fetch from the website
 const CORS: Record<string, string> = {
@@ -413,6 +419,61 @@ async function actionEpisodes(
   return { source: "tvdb", tvdbId: id, season, episodes };
 }
 
+// ── Action: episodeTotals ─────────────────────────────────────────────────
+/**
+ * Count regular (non-specials) episodes across all official seasons.
+ * Paginates the series-wide official episode list — one series of calls,
+ * not one call per season.
+ */
+async function actionEpisodeTotals(
+  p: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const id = n(p.tvdbId);
+  if (!id || id <= 0 || !Number.isInteger(id)) return { error: "invalid_tvdb_id" };
+  const lang = tvdbLanguage(p.locale);
+
+  const seasonCounts: Record<string, number> = {};
+  let page = 0;
+  let useLang = true;
+
+  while (true) {
+    let data: any;
+    try {
+      const path = useLang
+        ? `/series/${id}/episodes/official/${lang}?page=${page}`
+        : `/series/${id}/episodes/official?page=${page}`;
+      data = await tvdbGet(path);
+    } catch (err: unknown) {
+      if (useLang && page === 0) {
+        useLang = false;
+        continue;
+      }
+      throw err;
+    }
+
+    const eps: unknown[] = a(data?.data?.episodes);
+    for (const raw of eps) {
+      const ep = raw as Record<string, unknown>;
+      const sn = n(ep.seasonNumber);
+      const epNum = n(ep.number);
+      if (sn == null || sn <= 0 || epNum == null) continue;
+      const key = String(sn);
+      seasonCounts[key] = (seasonCounts[key] || 0) + 1;
+    }
+
+    if (!data?.links?.next) break;
+    page++;
+    if (page > 40) break;
+  }
+
+  let episodeTotal = 0;
+  for (const count of Object.values(seasonCounts)) {
+    episodeTotal += count;
+  }
+
+  return { source: "tvdb", tvdbId: id, episodeTotal, seasonCounts };
+}
+
 // ── Request handler ───────────────────────────────────────────────────────
 Deno.serve(async (req: Request) => {
   // CORS preflight
@@ -454,6 +515,7 @@ Deno.serve(async (req: Request) => {
       case "series":   result = await actionSeries(body);   break;
       case "seasons":  result = await actionSeasons(body);  break;
       case "episodes": result = await actionEpisodes(body); break;
+      case "episodeTotals": result = await actionEpisodeTotals(body); break;
       default:         result = { error: "unsupported_action" };
     }
 

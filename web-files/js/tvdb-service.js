@@ -138,11 +138,38 @@
     }
   }
 
+  /**
+   * Count regular episodes across all official seasons (excludes specials).
+   *
+   * @param {number} tvdbId
+   * @returns {Promise<{ episodeTotal: number, seasonCounts: Record<string, number> } | null>}
+   */
+  async function fetchEpisodeTotals(tvdbId, locale = "en") {
+    if (!tvdbId) return null;
+    try {
+      const result = await callFunction({ action: "episodeTotals", tvdbId, locale });
+      if (!result || result.error) return null;
+      const episodeTotal = Number(result.episodeTotal);
+      if (!Number.isFinite(episodeTotal) || episodeTotal <= 0) return null;
+      return {
+        episodeTotal,
+        seasonCounts:
+          result.seasonCounts && typeof result.seasonCounts === "object"
+            ? result.seasonCounts
+            : {},
+      };
+    } catch (err) {
+      console.warn("[tvdb-service] fetchEpisodeTotals failed:", err.message);
+      return null;
+    }
+  }
+
   // ── Expose ────────────────────────────────────────────────────────────
   window.WatchlistTvdb = {
     resolveId,
     fetchSeries,
     fetchSeasons,
     fetchEpisodes,
+    fetchEpisodeTotals,
   };
 })();

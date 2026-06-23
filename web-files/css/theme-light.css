@@ -209,6 +209,11 @@ html[data-theme="light"] .app-dialog__panel {
   background: #fff;
 }
 
+html[data-theme="light"] .rating-picker__star-icon {
+  color: transparent;
+  -webkit-text-stroke: 1px rgba(28, 28, 32, 0.35);
+}
+
 html[data-theme="light"] .add-mode-tabs {
   background: rgba(0, 0, 0, 0.05);
 }

@@ -67,17 +67,7 @@
         ? null
         : Number(String(ratingRaw).replace(",", "."));
 
-    let progress = null;
-    if (entry.progress && typeof entry.progress === "object" &&
-        Array.isArray(entry.progress.episodes)) {
-      // Preserve the completed flag so the DB row accurately reflects state
-      // and the client can restore it on next load without needing episode data.
-      progress = {
-        version: 1,
-        episodes: entry.progress.episodes,
-        ...(entry.progress.completed === true ? { completed: true } : {}),
-      };
-    }
+    const progress = window.WatchlistProgress?.exportProgressObject?.(entry.progress) ?? null;
 
     // `watched` in the DB means "legacy-complete or fully-granular-complete".
     // In-progress entries (granular progress without completed=true) store
@@ -150,6 +140,7 @@
             year: entry.year || "",
             card_poster: entry.cardPoster || "",
             selected_season: entry.lastSelectedSeason != null ? entry.lastSelectedSeason : null,
+            selected_season_name: entry.cardSeasonName || "",
             no_specials: entry.noSpecials === true,
             watched: watchMeta.watched,
             watch_rating: watchMeta.rating,
@@ -214,6 +205,7 @@
       if (row.year) entry.year = row.year;
       if (row.card_poster) entry.cardPoster = row.card_poster;
       if (row.selected_season != null) entry.lastSelectedSeason = row.selected_season;
+      if (row.selected_season_name) entry.cardSeasonName = row.selected_season_name;
       if (row.no_specials === true) entry.noSpecials = true;
       const addedMs = parseAddedAtMs(row.added_at);
       if (addedMs != null) entry.addedAt = addedMs;
@@ -221,28 +213,18 @@
       watchlist[contentType][genre].push(entry);
 
       // Rows with granular progress but !watched are also tracked (in-progress state).
-      const rawProgress = row.watch_progress;
-      const hasProgress =
-        rawProgress &&
-        typeof rawProgress === "object" &&
-        Array.isArray(rawProgress.episodes) &&
-        rawProgress.episodes.length > 0;
+      const exportedProgress =
+        window.WatchlistProgress?.exportProgressObject?.(row.watch_progress) ?? null;
 
       const hasNote = Boolean(row.watch_note);
-      if (row.watched || hasProgress || hasNote) {
+      if (row.watched || exportedProgress || hasNote) {
         const watchEntry = {};
         if (row.watch_rating != null && row.watch_rating !== "") {
           const rating = Number(row.watch_rating);
           if (Number.isFinite(rating)) watchEntry.rating = rating;
         }
         if (row.watch_note) watchEntry.note = row.watch_note;
-        if (hasProgress) {
-          watchEntry.progress = {
-            version: 1,
-            episodes: rawProgress.episodes,
-            ...(rawProgress.completed === true ? { completed: true } : {}),
-          };
-        }
+        if (exportedProgress) watchEntry.progress = exportedProgress;
         watched[row.item_id] = watchEntry;
       }
     }
@@ -300,7 +282,7 @@
 
     const { data, error } = await sb
       .from(LISTS_TABLE)
-      .select("list_id, name, description, title_count, watched_count, updated_at")
+      .select("list_id, name, description, title_count, watched_count, updated_at, ui_prefs")
       .eq("account_id", accountId)
       .order("updated_at", { ascending: true });
 
@@ -320,7 +302,7 @@
       await Promise.all([
         sb
           .from(LISTS_TABLE)
-          .select("account_id, name, description, updated_at")
+          .select("account_id, name, description, updated_at, ui_prefs")
           .eq("list_id", listId)
           .maybeSingle(),
         sb.from(ITEMS_TABLE).select("*").eq("list_id", listId),
@@ -361,6 +343,7 @@
       watched: converted.watched,
       name: listRow?.name || "My list",
       description: listRow?.description || "",
+      uiPrefs: listRow?.ui_prefs && typeof listRow.ui_prefs === "object" ? listRow.ui_prefs : null,
       account_id: listRow?.account_id || null,
       updated_at: listRow?.updated_at || null,
     };
@@ -403,6 +386,7 @@
         account_id: accountId,
         name: meta.name || "My list",
         description: meta.description || "",
+        ...(meta.uiPrefs && typeof meta.uiPrefs === "object" ? { ui_prefs: meta.uiPrefs } : {}),
         updated_at: now,
       },
       { onConflict: "list_id" }

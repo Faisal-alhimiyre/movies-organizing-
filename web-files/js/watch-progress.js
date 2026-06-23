@@ -52,7 +52,34 @@
       result.seasonTotals = raw.seasonTotals;
     }
     if (raw.completed === true) result.completed = true;
+    if (raw.episodeRatings && typeof raw.episodeRatings === "object") {
+      const cleaned = {};
+      for (const [k, v] of Object.entries(raw.episodeRatings)) {
+        if (typeof k !== "string" || !k.includes(":")) continue;
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0 || n > 10) continue;
+        cleaned[k] = Math.round(n * 10) / 10;
+      }
+      if (Object.keys(cleaned).length) result.episodeRatings = cleaned;
+    }
     return result;
+  }
+
+  /**
+   * Normalise raw progress for persistence (localStorage / Supabase).
+   * Returns null when there is nothing meaningful to store.
+   */
+  function exportProgressObject(raw) {
+    const parsed = parseProgressObject(raw);
+    if (parsed.episodes.length > 0) return parsed;
+    if (parsed.episodeRatings && Object.keys(parsed.episodeRatings).length > 0) {
+      return parsed;
+    }
+    if (parsed.seasonTotals && Object.keys(parsed.seasonTotals).length > 0) {
+      return parsed;
+    }
+    if (parsed.completed === true) return parsed;
+    return null;
   }
 
   /**
@@ -323,8 +350,54 @@
     if (rawProg?.seasonTotals && typeof rawProg.seasonTotals === "object") {
       newProgress.seasonTotals = { ...rawProg.seasonTotals };
     }
+    if (rawProg?.episodeRatings && typeof rawProg.episodeRatings === "object") {
+      newProgress.episodeRatings = { ...rawProg.episodeRatings };
+    }
+    if (rawProg?.completed === true) {
+      newProgress.completed = true;
+    }
     base.progress = newProgress;
     return base;
+  }
+
+  function getEpisodeRating(entry, seasonNum, episodeNum) {
+    const prog = getProgress(entry);
+    if (!prog?.episodeRatings) return null;
+    const val = prog.episodeRatings[episodeKey(seasonNum, episodeNum)];
+    const num = Number(val);
+    if (!Number.isFinite(num) || num < 0 || num > 10) return null;
+    return Math.round(num * 10) / 10;
+  }
+
+  function setEpisodeRating(entry, seasonNum, episodeNum, rating) {
+    const num = Number(rating);
+    if (!Number.isFinite(num) || num < 0 || num > 10) return entry;
+    const key = episodeKey(seasonNum, episodeNum);
+    let episodes = getProgress(entry)?.episodes;
+    if (!Array.isArray(episodes)) episodes = [];
+    else episodes = [...episodes];
+    if (!episodes.includes(key)) episodes.push(key);
+    const next = _buildEntry(entry, episodes);
+    if (!next.progress.episodeRatings || typeof next.progress.episodeRatings !== "object") {
+      next.progress.episodeRatings = {};
+    }
+    next.progress.episodeRatings[key] = Math.round(num * 10) / 10;
+    return next;
+  }
+
+  function clearEpisodeRating(entry, seasonNum, episodeNum) {
+    const key = episodeKey(seasonNum, episodeNum);
+    const prog = getProgress(entry);
+    if (!prog?.episodeRatings || !(key in prog.episodeRatings)) return entry;
+    const next = _buildEntry(entry, prog.episodes || []);
+    if (!next.progress.episodeRatings || typeof next.progress.episodeRatings !== "object") {
+      return next;
+    }
+    delete next.progress.episodeRatings[key];
+    if (Object.keys(next.progress.episodeRatings).length === 0) {
+      delete next.progress.episodeRatings;
+    }
+    return next;
   }
 
   // ─── export ───────────────────────────────────────────────────────────────────
@@ -332,6 +405,7 @@
   window.WatchlistProgress = {
     episodeKey,
     parseProgressObject,
+    exportProgressObject,
     getProgress,
     hasGranularProgress,
     isLegacyComplete,
@@ -346,6 +420,9 @@
     unmarkSeasonWatched,
     markAllWatched,
     clearAllProgress,
+    getEpisodeRating,
+    setEpisodeRating,
+    clearEpisodeRating,
     isAiredEpisode,
     airedEpisodeKeys,
   };

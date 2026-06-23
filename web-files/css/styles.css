@@ -1463,6 +1463,14 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   text-transform: none;
 }
 
+.badge--episodes {
+  color: #86efac;
+  background: rgba(134, 239, 172, 0.1);
+  border: 1px solid rgba(134, 239, 172, 0.32);
+  font-weight: 700;
+  text-transform: none;
+}
+
 .card__meta-badges {
   display: flex;
   flex-wrap: wrap;

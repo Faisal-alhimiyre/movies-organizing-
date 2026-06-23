@@ -3,7 +3,8 @@ window.WATCHLIST_CONFIG = {
   // OMDB — free key: https://www.omdbapi.com/apikey.aspx
   omdbApiKey: "your_key_here",
 
-  // TMDB — free key: https://www.themoviedb.org/settings/api (optional; fallback when OMDb has no match)
+  // TMDB — free key: https://www.themoviedb.org/settings/api
+  // Optional in the browser; episode ratings also work via the tmdb-metadata edge function.
   tmdbApiKey: "",
 
   // Supabase — Project Settings → API

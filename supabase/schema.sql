@@ -32,6 +32,7 @@ create table if not exists public.lists (
   account_id text not null references public.accounts (account_id) on delete cascade,
   name text not null default 'My list',
   description text not null default '',
+  ui_prefs jsonb not null default '{}'::jsonb,
   title_count integer not null default 0 check (title_count >= 0),
   watched_count integer not null default 0 check (watched_count >= 0),
   in_progress_count integer not null default 0 check (in_progress_count >= 0),

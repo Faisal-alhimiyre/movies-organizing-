@@ -471,6 +471,15 @@
     return `${count} ${count === 1 ? "season" : "seasons"}`;
   }
 
+  function _episodesBadgeLabel(count) {
+    const i18n = window.WatchlistI18n;
+    const one = i18n?.t?.("seasons.episodeCountOne");
+    const many = i18n?.t?.("seasons.episodeCount", { n: count });
+    if (count === 1 && one && one !== "seasons.episodeCountOne") return one;
+    if (many && many !== "seasons.episodeCount") return many;
+    return `${count} ${count === 1 ? "episode" : "episodes"}`;
+  }
+
   function buildTitleMetaBadges(meta = {}, contentType = "") {
     const badges = [];
     const type = meta.contentType || contentType || "";
@@ -491,6 +500,12 @@
     if (type === "movies") {
       if (runtime) badges.push({ kind: "duration", label: runtime });
     } else if (type === "tvSeries") {
+      if (episodeCount) {
+        badges.push({
+          kind: "episodes",
+          label: _episodesBadgeLabel(episodeCount),
+        });
+      }
       if (seasonCount) {
         badges.push({
           kind: "seasons",
@@ -501,15 +516,16 @@
         badges.push({ kind: "duration", label: episodeDuration });
       }
     } else if (type === "anime") {
+      if (episodeCount) {
+        badges.push({
+          kind: "episodes",
+          label: _episodesBadgeLabel(episodeCount),
+        });
+      }
       if (seasonCount) {
         badges.push({
           kind: "seasons",
           label: _seasonsBadgeLabel(seasonCount),
-        });
-      } else if (episodeCount) {
-        badges.push({
-          kind: "seasons",
-          label: `${episodeCount} ${episodeCount === 1 ? "episode" : "episodes"}`,
         });
       }
       if (episodeDuration) {

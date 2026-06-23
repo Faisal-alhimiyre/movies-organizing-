@@ -402,7 +402,7 @@
 /* ── External scores ────────────────────────────────────────────────────── */
 
 .td-scores {
-  padding: 0.55rem 1rem 0;
+  padding: 0.25rem 0 0;
 }
 
 .td-scores .card__rating-badges {

@@ -50,6 +50,9 @@
   let _episodesResult = null;  // { state, episodes, seasonNum }
   let _carouselEl     = null;  // .tds-carousel DOM element
   let _spoilerPosters = false; // hide episode stills behind season poster
+  let _hideEpisodeRatings = false;
+  let _activeEpisodeKey = null;
+  let _episodeModalEditing = false;
   let _dragStartX     = 0;
   let _isDragging     = false;
 
@@ -171,6 +174,22 @@
     }
   }
 
+  function regularEpisodeTotalFromSeasons() {
+    return window.WatchlistSeriesMetadata?.regularEpisodeTotalFromSeasons?.(
+      _seriesResult?.seasons || []
+    ) ?? null;
+  }
+
+  function persistRegularEpisodeTotal() {
+    if (!_item?.id) return;
+    const total = regularEpisodeTotalFromSeasons();
+    if (!total) return;
+    const previous = Number(_item.episodeCount);
+    if (Number.isFinite(previous) && previous === total) return;
+    _item.episodeCount = total;
+    window.WatchlistApp?.patchItem?.(_item.id, { episodeCount: total });
+  }
+
   /**
    * After episode data loads for a season, re-check whether an existing
    * granular entry should be marked completed. Saves and refreshes the card
@@ -262,6 +281,37 @@
       .filter((ep) => ep.isAired !== false)
       .map((ep) => P()?.episodeKey(ep.seasonNumber, ep.episodeNumber))
       .filter(Boolean);
+  }
+
+  /** Aired episode keys from episode 1 through epNum (inclusive) in the loaded season. */
+  function airedEpisodeKeysUpTo(seasonNum, epNum) {
+    if (_episodesResult?.seasonNum !== seasonNum || !_episodesResult?.episodes) return [];
+    return (_episodesResult.episodes || [])
+      .filter((ep) => ep.isAired !== false && ep.episodeNumber <= epNum)
+      .map((ep) => P()?.episodeKey(ep.seasonNumber, ep.episodeNumber))
+      .filter(Boolean);
+  }
+
+  /** True when marking epNum watched would skip earlier unwatched aired episodes. */
+  function hasUnwatchedPriorEpisodes(entry, seasonNum, epNum) {
+    if (_episodesResult?.seasonNum !== seasonNum || !_episodesResult?.episodes) return false;
+    return (_episodesResult.episodes || []).some((ep) => {
+      if (ep.isAired === false || ep.episodeNumber >= epNum) return false;
+      return !(P()?.isEpisodeWatched(entry, seasonNum, ep.episodeNumber) ?? false);
+    });
+  }
+
+  function refreshEpisodeWatchUi(seasonNum) {
+    if (_episodesResult?.seasonNum === seasonNum && _episodesResult?.episodes) {
+      const freshEntry = getEntry();
+      (_episodesResult.episodes || []).forEach((ep) => {
+        updateEpisodeRowStateFromEntry(freshEntry, ep.seasonNumber, ep.episodeNumber, ep);
+      });
+    }
+    refreshSeasonCard(seasonNum);
+    updateSeasonInfoProgress(seasonNum);
+    _callbacks?.updateHeaderWatchState?.();
+    _callbacks?.updateDetailActions?.();
   }
 
   /** Collect aired episode objects for a season (for watched-count purposes). */
@@ -370,6 +420,7 @@
     }
 
     if (changed) {
+      persistRegularEpisodeTotal();
       refreshSeasonCard(seasonNum);
       if (_selectedSeason === seasonNum) {
         notifySeasonPresentation(seasonNum, { progressOnly: true });
@@ -443,6 +494,8 @@
     _episodesResult = null;
     _carouselEl     = null;
     _spoilerPosters = false;
+    _hideEpisodeRatings = false;
+    _activeEpisodeKey = null;
     _isDragging     = false;
   }
 
@@ -475,7 +528,10 @@
             </button>
           </div>
           <div class="tds-season-actions" data-tds-part="season-actions" hidden>
-            <p class="tds-season-actions__progress" data-tds-part="season-progress"></p>
+            <div class="tds-season-actions__stats">
+              <p class="tds-season-actions__progress" data-tds-part="season-progress"></p>
+              <p class="tds-season-actions__avg" data-tds-part="season-avg" hidden></p>
+            </div>
             <button type="button" class="tds-season-mark-btn" data-tds-action="mark-season" data-tds-season=""></button>
           </div>
         </div>
@@ -491,9 +547,38 @@
                 <span class="tds-spoiler-toggle__thumb"></span>
               </span>
             </button>
+            <button type="button" class="tds-spoiler-toggle" role="switch"
+              aria-checked="false" data-tds-action="toggle-hide-ratings">
+              <span class="tds-spoiler-toggle__label">${esc(t("seasons.hideEpisodeRatings"))}</span>
+              <span class="tds-spoiler-toggle__track" aria-hidden="true">
+                <span class="tds-spoiler-toggle__thumb"></span>
+              </span>
+            </button>
           </div>
           <div class="tds-episodes-status" data-tds-part="episodes-status" hidden></div>
           <div class="tds-episode-list" role="list" aria-live="polite"></div>
+        </div>
+        <div class="tds-episode-modal" data-tds-part="episode-modal" hidden>
+          <div class="tds-episode-modal__backdrop" data-tds-action="close-episode-modal"></div>
+          <div class="tds-episode-modal__panel" role="dialog" aria-modal="true" aria-labelledby="tdsEpisodeModalTitle">
+            <button type="button" class="tds-episode-modal__close" data-tds-action="close-episode-modal" aria-label="${esc(t("btn.close"))}">✕</button>
+            <div class="tds-episode-modal__media" data-tds-part="episode-modal-media"></div>
+            <h4 class="tds-episode-modal__title" id="tdsEpisodeModalTitle" data-tds-part="episode-modal-title"></h4>
+            <p class="tds-episode-modal__meta" data-tds-part="episode-modal-meta"></p>
+            <p class="tds-episode-modal__overview" data-tds-part="episode-modal-overview" hidden></p>
+            <div class="tds-episode-modal__ratings">
+              <span class="tds-rating-chip tds-rating-chip--source" data-tds-part="episode-modal-source" hidden></span>
+              <span class="tds-rating-chip tds-rating-chip--user" data-tds-part="episode-modal-user" hidden></span>
+            </div>
+            <div class="tds-episode-modal__form">
+              <label class="tds-episode-modal__label" data-tds-part="episode-modal-label" for="tdsEpisodeRatingInput">${esc(t("seasons.yourEpisodeRating"))}</label>
+              <input id="tdsEpisodeRatingInput" data-tds-part="episode-modal-input" type="number" min="0" max="10" step="0.1" placeholder="8.5" />
+              <div class="tds-episode-modal__actions">
+                <button type="button" class="tds-modal-btn tds-modal-btn--ghost" data-tds-action="close-episode-modal">${esc(t("btn.cancel"))}</button>
+                <button type="button" class="tds-modal-btn" data-tds-action="save-episode-rating">${esc(t("btn.save"))}</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>`;
   }
@@ -537,13 +622,24 @@
     if (!isValid(tok)) return;
 
     _resolution = resolution;
+    const WM = window.WatchlistMetadata;
+    const linkImdb = WM?.extractImdbId?.(_item?.link);
+    if (linkImdb && !_resolution.imdbId) {
+      _resolution = { ..._resolution, imdbId: linkImdb };
+    }
 
     const locale = getLocale();
     const poster = getItemPoster();
-    const result = await meta.fetchSeriesMetadata(resolution, locale, poster);
+    const result = await meta.fetchSeriesMetadata(_resolution, locale, poster);
     if (!isValid(tok)) return;
 
+    const seriesImdb = result?.series?.imdbId;
+    if (seriesImdb && !_resolution.imdbId) {
+      _resolution = { ..._resolution, imdbId: seriesImdb };
+    }
+
     _seriesResult = result;
+    persistRegularEpisodeTotal();
     const RS = meta.ResultState;
 
     switch (result?.state) {
@@ -600,7 +696,7 @@
       (s) => s.seasonNumber === seasonNum
     ) || null;
     const result = await meta.fetchSeasonEpisodes(
-      _resolution, seasonNum, locale, poster, seasonSummary
+      _resolution, seasonNum, locale, poster, seasonSummary, _item
     );
     if (!isValid(tok) || _selectedSeason !== seasonNum) return;
 
@@ -659,6 +755,7 @@
     if (!_seriesResult?.seasons) return;
     // Drop from the in-memory season list so it won't come back on re-render
     _seriesResult.seasons = _seriesResult.seasons.filter((s) => s.seasonNumber !== 0);
+    persistRegularEpisodeTotal();
     // Remove card from DOM
     if (_carouselEl) {
       const card = _carouselEl.querySelector("[data-tds-season='0']");
@@ -718,6 +815,7 @@
     if (titleEl) titleEl.textContent = t("seasons.sectionTitle");
 
     hydrateSeasonTotalsFromEntry();
+    persistRegularEpisodeTotal();
 
     // Render season cards
     renderCarousel(seasons);
@@ -743,7 +841,9 @@
     const poster = getItemPoster();
     const seasonSummary = (_seriesResult?.seasons || []).find((s) => s.seasonNumber === 0) || null;
     try {
-      const result = await meta.fetchSeasonEpisodes(_resolution, 0, locale, poster, seasonSummary);
+      const result = await meta.fetchSeasonEpisodes(
+        _resolution, 0, locale, poster, seasonSummary, _item
+      );
       if (!isValid(tok)) return; // panel was closed while fetching
       const RS = meta.ResultState;
       const hasEpisodes =
@@ -830,6 +930,7 @@
 
   function selectSeason(seasonNum, { animate = true } = {}) {
     if (_selectedSeason === seasonNum && animate) return;
+    closeEpisodeModal();
     _selectedSeason = seasonNum;
 
     updateCarouselSelection(seasonNum);
@@ -911,17 +1012,23 @@
 
   function persistSeasonPoster(season) {
     if (!_item || !season) return;
-    const poster = season.poster || getItemPoster();
-    if (!poster) return;
+    const poster = season.poster || getItemPoster() || "";
     const seasonNum = season.seasonNumber;
-    const changed = _item.cardPoster !== poster || _item.lastSelectedSeason !== seasonNum;
-    _item.cardPoster = poster;
+    const seasonName = seasonDisplayName(season);
+    const changed =
+      (poster && _item.cardPoster !== poster) ||
+      _item.lastSelectedSeason !== seasonNum ||
+      _item.cardSeasonName !== seasonName;
+    if (poster) _item.cardPoster = poster;
     _item.lastSelectedSeason = seasonNum;
+    _item.cardSeasonName = seasonName;
     if (changed) {
-      window.WatchlistApp?.patchItem?.(_item.id, {
-        cardPoster: poster,
+      const patch = {
         lastSelectedSeason: seasonNum,
-      });
+        cardSeasonName: seasonName,
+      };
+      if (poster) patch.cardPoster = poster;
+      window.WatchlistApp?.patchItem?.(_item.id, patch);
       _callbacks?.updateCardInPlace?.();
     }
   }
@@ -953,6 +1060,7 @@
       : "";
 
     const progressEl = actionsEl.querySelector("[data-tds-part='season-progress']");
+    const avgEl = actionsEl.querySelector("[data-tds-part='season-avg']");
     const markBtn = actionsEl.querySelector("[data-tds-action='mark-season']");
     if (progressEl) {
       progressEl.textContent = progStr;
@@ -962,6 +1070,20 @@
       markBtn.textContent = seasonMarkLabel(ws);
       markBtn.dataset.tdsSeason = String(seasonNum);
       markBtn.classList.toggle("tds-season-mark-btn--complete", ws === "watched");
+    }
+    if (avgEl) {
+      const seasonEpisodes = (_episodesResult?.seasonNum === seasonNum && Array.isArray(_episodesResult?.episodes))
+        ? _episodesResult.episodes
+        : [];
+      const sourceAvg = seasonAverageExternalRating(seasonEpisodes);
+      const avgSource = episodeExternalRatingSource(seasonEpisodes);
+      avgEl.textContent = sourceAvg != null
+        ? (avgSource === "imdb"
+            ? t("seasons.seasonAvgOmdb", { rating: formatRatingValue(sourceAvg) })
+            : t("seasons.seasonAvgSource", { rating: formatRatingValue(sourceAvg) }))
+        : "";
+      avgEl.classList.toggle("tds-season-avg-badge", sourceAvg != null);
+      avgEl.hidden = sourceAvg == null;
     }
     actionsEl.hidden = false;
   }
@@ -1016,6 +1138,55 @@
     const entry = getEntry();
     listEl.innerHTML = episodes.map((ep) => episodeRowHtml(ep, entry)).join("");
     updateEpisodesTitle();
+    updateSeasonActions(seasonNum);
+  }
+
+  function formatRatingValue(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "";
+    return num % 1 === 0 ? String(num) : num.toFixed(1);
+  }
+
+  function episodeExternalRating(ep) {
+    const source = String(ep?.episodeRatingSource || "");
+    // IMDb/OMDb ratings (preferred) and TMDB vote_average as fallback.
+    if (source !== "imdb" && source !== "tmdb") return null;
+    const num = Number(ep?.episodeRating);
+    if (!Number.isFinite(num) || num <= 0 || num > 10) return null;
+    return Math.round(num * 10) / 10;
+  }
+
+  function episodeExternalRatingSource(episodes) {
+    for (const ep of episodes || []) {
+      if (episodeExternalRating(ep) == null) continue;
+      const source = String(ep?.episodeRatingSource || "");
+      if (source === "imdb" || source === "tmdb") return source;
+    }
+    return null;
+  }
+
+  function episodeUserRating(entry, seasonNum, epNum) {
+    const num = Number(P()?.getEpisodeRating?.(entry, seasonNum, epNum));
+    if (!Number.isFinite(num) || num <= 0 || num > 10) return null;
+    return Math.round(num * 10) / 10;
+  }
+
+  function seasonAverageExternalRating(episodes) {
+    const vals = (episodes || [])
+      .filter((ep) => ep.isAired !== false)
+      .map((ep) => episodeExternalRating(ep))
+      .filter((v) => v != null);
+    if (!vals.length) return null;
+    return vals.reduce((sum, n) => sum + n, 0) / vals.length;
+  }
+
+  function seasonAverageUserRating(entry, episodes) {
+    const vals = (episodes || [])
+      .filter((ep) => ep.isAired !== false)
+      .map((ep) => episodeUserRating(entry, ep.seasonNumber, ep.episodeNumber))
+      .filter((v) => v != null);
+    if (!vals.length) return null;
+    return vals.reduce((sum, n) => sum + n, 0) / vals.length;
   }
 
   function episodeRowHtml(ep, entry) {
@@ -1032,6 +1203,8 @@
     const checkLabel = watched
       ? t("seasons.episodeUnwatch", { title })
       : t("seasons.episodeWatched", { title });
+    const sourceRating = episodeExternalRating(ep);
+    const yourRating = episodeUserRating(entry, seasonNum, epNum);
 
     // Only use the episode's own unique still — never fall back to season/title
     // poster, which would make every episode without a still show the same image.
@@ -1042,7 +1215,8 @@
 
     return `<div class="tds-episode${watched ? " tds-episode--watched" : ""}"
       role="listitem"
-      data-tds-episode="${esc(`${seasonNum}:${epNum}`)}">
+      data-tds-episode="${esc(`${seasonNum}:${epNum}`)}"
+      data-tds-action="open-episode">
       <div class="tds-ep-still-wrap">
         ${still
           ? `<img class="tds-ep-still" src="${esc(still)}" alt=""
@@ -1055,9 +1229,15 @@
         <div class="tds-ep-header">
           <span class="tds-ep-num">E${esc(String(epNum))}</span>
           <h4 class="tds-ep-title${isPlaceholder ? " tds-ep-title--placeholder" : ""}">${esc(title)}</h4>
+          ${sourceRating != null
+            ? `<span class="tds-ep-source-rating" title="${esc(t("seasons.episodeRatingSource", { rating: formatRatingValue(sourceRating) }))}">${esc(formatRatingValue(sourceRating))}<span class="tds-ep-source-rating__max">/10</span></span>`
+            : ""}
         </div>
         ${ep.overview ? `<p class="tds-ep-overview">${esc(ep.overview)}</p>` : ""}
         ${metaParts.length ? `<p class="tds-ep-meta">${esc(metaParts.join(" · "))}</p>` : ""}
+        <div class="tds-ep-ratings"${yourRating != null ? "" : " hidden"}>
+          ${yourRating != null ? `<span class="tds-rating-chip tds-rating-chip--user">${esc(t("seasons.episodeRatingYours", { rating: formatRatingValue(yourRating) }))}</span>` : ""}
+        </div>
       </div>
       <button class="tds-ep-check${watched ? " tds-ep-check--watched" : ""}"
         role="checkbox"
@@ -1090,18 +1270,160 @@
     const show = sec && !sec.hidden && hasEpisodes;
     row.hidden = !show;
 
-    const btn = row.querySelector("[data-tds-action='toggle-spoiler']");
-    const label = row.querySelector(".tds-spoiler-toggle__label");
-    if (label) label.textContent = t("seasons.spoilerMode");
-    if (btn) {
-      btn.setAttribute("aria-checked", String(_spoilerPosters));
-      btn.classList.toggle("tds-spoiler-toggle--on", _spoilerPosters);
+    const spoilerBtn = row.querySelector("[data-tds-action='toggle-spoiler']");
+    const spoilerLabel = spoilerBtn?.querySelector(".tds-spoiler-toggle__label");
+    if (spoilerLabel) spoilerLabel.textContent = t("seasons.spoilerMode");
+    if (spoilerBtn) {
+      spoilerBtn.setAttribute("aria-checked", String(_spoilerPosters));
+      spoilerBtn.classList.toggle("tds-spoiler-toggle--on", _spoilerPosters);
+    }
+
+    const ratingsBtn = row.querySelector("[data-tds-action='toggle-hide-ratings']");
+    const ratingsLabel = ratingsBtn?.querySelector(".tds-spoiler-toggle__label");
+    if (ratingsLabel) ratingsLabel.textContent = t("seasons.hideEpisodeRatings");
+    if (ratingsBtn) {
+      ratingsBtn.setAttribute("aria-checked", String(_hideEpisodeRatings));
+      ratingsBtn.classList.toggle("tds-spoiler-toggle--on", _hideEpisodeRatings);
+    }
+
+    if (sec) {
+      sec.classList.toggle("tds-hide-source-ratings", _hideEpisodeRatings);
     }
   }
 
   function refreshEpisodeListDisplay() {
     if (_selectedSeason == null || !_episodesResult?.episodes?.length) return;
     renderEpisodeList(_selectedSeason, _episodesResult.episodes);
+  }
+
+  function findEpisodeByKey(epKey) {
+    if (!epKey || !_episodesResult?.episodes?.length) return null;
+    return _episodesResult.episodes.find((ep) => `${ep.seasonNumber}:${ep.episodeNumber}` === epKey) || null;
+  }
+
+  function openEpisodeModal(epKey) {
+    const modal = getP("episode-modal");
+    const ep = findEpisodeByKey(epKey);
+    if (!modal || !ep) return;
+    _activeEpisodeKey = epKey;
+    const entry = getEntry();
+    const sourceRating = episodeExternalRating(ep);
+    const yourRating = episodeUserRating(entry, ep.seasonNumber, ep.episodeNumber);
+
+    const media = getP("episode-modal-media");
+    const titleEl = getP("episode-modal-title");
+    const metaEl = getP("episode-modal-meta");
+    const overviewEl = getP("episode-modal-overview");
+    const sourceEl = getP("episode-modal-source");
+    const userEl = getP("episode-modal-user");
+    const labelEl = getP("episode-modal-label");
+    const inputEl = getP("episode-modal-input");
+    const saveBtn = _slot?.querySelector("[data-tds-action='save-episode-rating']");
+
+    if (media) {
+      media.innerHTML = ep.still
+        ? `<img class="tds-episode-modal__still" src="${esc(ep.still)}" alt="" />`
+        : `<div class="tds-episode-modal__still-placeholder" aria-hidden="true"></div>`;
+    }
+    if (titleEl) titleEl.textContent = `${t("seasons.episodeNum", { n: ep.episodeNumber })} · ${ep.title || t("seasons.episodeNum", { n: ep.episodeNumber })}`;
+    if (metaEl) {
+      const meta = [];
+      if (ep.runtimeMinutes) meta.push(t("seasons.epRuntime", { n: ep.runtimeMinutes }));
+      if (ep.airDate) meta.push(t("seasons.epAiredOn", { date: ep.airDate.slice(0, 10) }));
+      metaEl.textContent = meta.join(" · ");
+    }
+    if (overviewEl) {
+      if (ep.overview) {
+        overviewEl.textContent = ep.overview;
+        overviewEl.hidden = false;
+      } else {
+        overviewEl.hidden = true;
+      }
+    }
+    if (sourceEl) {
+      if (sourceRating != null) {
+        sourceEl.textContent = t("seasons.episodeRatingSource", { rating: formatRatingValue(sourceRating) });
+        sourceEl.hidden = false;
+      } else {
+        sourceEl.hidden = true;
+      }
+    }
+    if (userEl) {
+      if (yourRating != null) {
+        userEl.textContent = t("seasons.episodeRatingYours", { rating: formatRatingValue(yourRating) });
+        userEl.hidden = false;
+      } else {
+        userEl.hidden = true;
+      }
+    }
+    if (labelEl) labelEl.hidden = (yourRating != null && !_episodeModalEditing);
+    if (inputEl) {
+      inputEl.hidden = (yourRating != null && !_episodeModalEditing);
+      inputEl.value = yourRating != null ? String(yourRating) : "";
+    }
+    if (saveBtn) {
+      saveBtn.textContent =
+        (yourRating != null && !_episodeModalEditing)
+          ? t("seasons.editEpisodeRating")
+          : t("btn.save");
+    }
+
+    modal.hidden = false;
+    if (inputEl && !inputEl.hidden) inputEl.focus();
+  }
+
+  function closeEpisodeModal() {
+    const modal = getP("episode-modal");
+    if (!modal) return;
+    modal.hidden = true;
+    _activeEpisodeKey = null;
+    _episodeModalEditing = false;
+  }
+
+  function saveEpisodeRatingFromModal({ clear = false } = {}) {
+    if (!_activeEpisodeKey) return;
+    const ep = findEpisodeByKey(_activeEpisodeKey);
+    if (!ep) return;
+    const inputEl = getP("episode-modal-input");
+    const entered = clear ? "" : String(inputEl?.value || "").trim();
+    const parsed = entered === "" ? null : Number(entered.replace(",", "."));
+    if (parsed != null && (!Number.isFinite(parsed) || parsed < 0 || parsed > 10)) return;
+
+    const [sStr, eStr] = _activeEpisodeKey.split(":");
+    const seasonNum = Number(sStr);
+    const epNum = Number(eStr);
+    if (!Number.isFinite(seasonNum) || !Number.isFinite(epNum)) return;
+
+    let entry = getEntry();
+    const existingRating = episodeUserRating(entry, seasonNum, epNum);
+    if (!clear && existingRating != null && !_episodeModalEditing) {
+      _episodeModalEditing = true;
+      openEpisodeModal(_activeEpisodeKey);
+      return;
+    }
+
+    const airedKeys = airedEpisodeKeysForSeason(seasonNum);
+    const epKey = P()?.episodeKey(seasonNum, epNum);
+    const hasGranular = Boolean(P()?.getProgress(entry));
+    if (!hasGranular) {
+      // Legacy-complete title: start granular progress for this episode only.
+      entry = P()?.markEpisodeWatched(entry, seasonNum, epNum, epKey ? [epKey] : airedKeys);
+    } else if (!(P()?.isEpisodeWatched(entry, seasonNum, epNum) ?? false)) {
+      entry = P()?.markEpisodeWatched(entry, seasonNum, epNum, airedKeys);
+    }
+    const normalized = (parsed != null && parsed > 0) ? parsed : null;
+    entry = (clear || normalized == null)
+      ? P()?.clearEpisodeRating?.(entry, seasonNum, epNum)
+      : P()?.setEpisodeRating?.(entry, seasonNum, epNum, normalized);
+
+    saveEntry(entry);
+    updateEpisodeRowState(seasonNum, epNum);
+    refreshSeasonCard(seasonNum);
+    updateSeasonInfoProgress(seasonNum);
+    _callbacks?.updateHeaderWatchState?.();
+    _callbacks?.updateDetailActions?.();
+    _episodeModalEditing = false;
+    openEpisodeModal(_activeEpisodeKey);
   }
 
   // ─── Error / loading states ───────────────────────────────────────────────
@@ -1206,6 +1528,7 @@
       (e) => e.seasonNumber === seasonNum && e.episodeNumber === epNum
     );
     const title = ep?.title || t("seasons.episodeNum", { n: epNum });
+    const yourRating = episodeUserRating(entry, seasonNum, epNum);
 
     row.classList.toggle("tds-episode--watched", watched);
 
@@ -1222,6 +1545,14 @@
       checkBtn.setAttribute("aria-label", label);
       checkBtn.innerHTML = checkSvg(watched);
     }
+
+    const ratingsWrap = row.querySelector(".tds-ep-ratings");
+    if (ratingsWrap) {
+      ratingsWrap.innerHTML = yourRating != null
+        ? `<span class="tds-rating-chip tds-rating-chip--user">${esc(t("seasons.episodeRatingYours", { rating: formatRatingValue(yourRating) }))}</span>`
+        : "";
+      ratingsWrap.hidden = yourRating == null;
+    }
   }
 
   function refreshAllEpisodeRows() {
@@ -1237,6 +1568,7 @@
     if (!row) return;
     const watched = P()?.isEpisodeWatched(entry, seasonNum, epNum) ?? false;
     const title = ep?.title || t("seasons.episodeNum", { n: epNum });
+    const yourRating = episodeUserRating(entry, seasonNum, epNum);
     row.classList.toggle("tds-episode--watched", watched);
     const checkBtn = row.querySelector(".tds-ep-check");
     if (checkBtn) {
@@ -1248,11 +1580,19 @@
       checkBtn.setAttribute("aria-label", label);
       checkBtn.innerHTML = checkSvg(watched);
     }
+
+    const ratingsWrap = row.querySelector(".tds-ep-ratings");
+    if (ratingsWrap) {
+      ratingsWrap.innerHTML = yourRating != null
+        ? `<span class="tds-rating-chip tds-rating-chip--user">${esc(t("seasons.episodeRatingYours", { rating: formatRatingValue(yourRating) }))}</span>`
+        : "";
+      ratingsWrap.hidden = yourRating == null;
+    }
   }
 
   // ─── Action: toggle single episode ────────────────────────────────────────
 
-  function handleToggleEpisode(epKey) {
+  async function handleToggleEpisode(epKey) {
     const [sStr, eStr] = epKey.split(":");
     const seasonNum    = parseInt(sStr, 10);
     const epNum        = parseInt(eStr, 10);
@@ -1265,23 +1605,30 @@
     let newEntry;
     if (watched) {
       newEntry = P()?.unmarkEpisodeWatched(entry, seasonNum, epNum, allAired);
+    } else if (
+      hasUnwatchedPriorEpisodes(entry, seasonNum, epNum) &&
+      window.WatchlistDialog?.confirm
+    ) {
+      const markAll = await window.WatchlistDialog.confirm(
+        t("seasons.gapPromptMessage"),
+        {
+          title: t("seasons.gapPromptTitle"),
+          confirmLabel: t("seasons.gapMarkAll"),
+          cancelLabel: t("seasons.gapNo") || "No",
+        }
+      );
+      if (markAll) {
+        const keys = airedEpisodeKeysUpTo(seasonNum, epNum);
+        newEntry = P()?.markSeasonWatched(entry, keys);
+      } else {
+        newEntry = P()?.markEpisodeWatched(entry, seasonNum, epNum, allAired);
+      }
     } else {
       newEntry = P()?.markEpisodeWatched(entry, seasonNum, epNum, allAired);
     }
 
-    // Save locally (no network request, no full re-render)
     saveEntry(newEntry);
-
-    // 1. Update this episode row
-    updateEpisodeRowState(seasonNum, epNum);
-    // 2. Update season card in carousel
-    refreshSeasonCard(seasonNum);
-    // 3. Update selected-season info
-    updateSeasonInfoProgress(seasonNum);
-    // 4. Update main detail header watch state + rating availability
-    _callbacks?.updateHeaderWatchState?.();
-    // 5. Update detail actions (watched button label may change)
-    _callbacks?.updateDetailActions?.();
+    refreshEpisodeWatchUi(seasonNum);
   }
 
   // ─── Action: mark / unmark whole season ───────────────────────────────────
@@ -1340,9 +1687,10 @@
 
     const ws       = seasonWatchState(entry, season);
     const airedKeys = airedEpisodeKeysForSeason(seasonNum);
+    const wasWatched = ws === "watched";
 
     let newEntry;
-    if (ws === "watched") {
+    if (wasWatched) {
       newEntry = P()?.unmarkSeasonWatched(entry, seasonNum, airedKeys);
     } else {
       if (!airedKeys.length) return;
@@ -1350,17 +1698,13 @@
     }
 
     saveEntry(newEntry);
+    refreshEpisodeWatchUi(seasonNum);
 
-    if (_episodesResult?.seasonNum === seasonNum && _episodesResult?.episodes) {
-      const freshEntry = getEntry();
-      (_episodesResult.episodes || []).forEach((ep) => {
-        updateEpisodeRowStateFromEntry(freshEntry, ep.seasonNumber, ep.episodeNumber, ep);
-      });
+    if (!wasWatched) {
+      const seasons = _seriesResult?.seasons || [];
+      const next = seasons.find((s) => s.seasonNumber > seasonNum);
+      if (next) selectSeason(next.seasonNumber);
     }
-    refreshSeasonCard(seasonNum);
-    updateSeasonInfoProgress(seasonNum);
-    _callbacks?.updateHeaderWatchState?.();
-    _callbacks?.updateDetailActions?.();
   }
 
   // ─── Callback: title-level watched changed (from detail actions bar) ──────
@@ -1406,6 +1750,9 @@
     if (_episodesResult?.episodes) {
       refreshAllEpisodeRows();
     }
+    if (_activeEpisodeKey) {
+      openEpisodeModal(_activeEpisodeKey);
+    }
   }
 
   function updateNavButtonLabels() {
@@ -1447,10 +1794,29 @@
         handleToggleEpisode(target.dataset.tdsEpisode);
         break;
       }
+      case "open-episode": {
+        if (target.classList.contains("tds-episode")) {
+          openEpisodeModal(target.dataset.tdsEpisode);
+        }
+        break;
+      }
+      case "close-episode-modal": {
+        closeEpisodeModal();
+        break;
+      }
+      case "save-episode-rating": {
+        saveEpisodeRatingFromModal();
+        break;
+      }
       case "toggle-spoiler": {
         _spoilerPosters = !_spoilerPosters;
         updateSpoilerRow();
         refreshEpisodeListDisplay();
+        break;
+      }
+      case "toggle-hide-ratings": {
+        _hideEpisodeRatings = !_hideEpisodeRatings;
+        updateSpoilerRow();
         break;
       }
       case "prev-season": {
@@ -1490,6 +1856,11 @@
   }
 
   function onSlotKeydown(event) {
+    if (event.key === "Escape" && !getP("episode-modal")?.hidden) {
+      event.preventDefault();
+      closeEpisodeModal();
+      return;
+    }
     // Carousel keyboard navigation (Left/Right arrows when carousel or a card is focused)
     const activeEl = document.activeElement;
     const inCarousel = _carouselEl?.contains(activeEl);

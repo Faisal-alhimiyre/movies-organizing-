@@ -317,7 +317,7 @@
         <div class="mobile-card-focus__thumb">${poster}</div>
         <div class="mobile-card-focus__header-main">
           <h2 class="mobile-card-focus__title" id="mobileCardFocusTitle">
-            <span class="text-ltr">${escapeHtml(ltr(item.title))}</span>
+            <span class="text-ltr">${escapeHtml(ltr(window.WatchlistApp?.cardDisplayTitle?.(item) || item.title))}</span>
             ${altTitle}
           </h2>
           ${leadBlock}

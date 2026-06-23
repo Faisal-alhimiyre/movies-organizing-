@@ -40,8 +40,8 @@
 
     titleEl = root.querySelector(".app-dialog__title");
     messageEl = root.querySelector(".app-dialog__message");
-    cancelBtn = root.querySelector('[data-action="cancel"]');
-    confirmBtn = root.querySelector('[data-action="confirm"]');
+    cancelBtn = root.querySelector(".app-dialog__actions [data-action='cancel']");
+    confirmBtn = root.querySelector(".app-dialog__actions [data-action='confirm']");
 
     root.addEventListener("click", (event) => {
       const action = event.target.closest("[data-action]")?.dataset.action;
@@ -82,7 +82,7 @@
   }
 
   function refreshDialogLabels() {
-    if (!cancelBtn || !confirmBtn) return;
+    if (!cancelBtn || !confirmBtn || settle) return;
     cancelBtn.textContent = window.WatchlistI18n?.t("btn.cancel") || "Cancel";
     if (!confirmBtn.hidden) {
       confirmBtn.textContent = window.WatchlistI18n?.t("btn.ok") || "OK";

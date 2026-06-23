@@ -329,6 +329,7 @@
     const leads = (item.leads || []).filter(Boolean);
     const leadBlock = leads.length
       ? `<p class="td-lead">${esc(leads.join(", "))}</p>` : "";
+    const scores = scoresMarkup(item);
 
     return `
       <div class="td-header">
@@ -344,6 +345,7 @@
             ${altTitle}
           </h2>
           ${leadBlock}
+          ${scores}
         </div>
       </div>`;
   }
@@ -543,7 +545,6 @@
 
   // ─── Full scroll content ───────────────────────────────────────────────────
   function buildScrollContent(item) {
-    const scores = scoresMarkup(item);
     const myRating = myRatingMarkup(item.id);
     const seasonDetail = isTvOrAnime(item) ? seasonDetailShell() : "";
     return `
@@ -551,7 +552,6 @@
       ${genresMarkup(item)}
       ${seasonDetail}
       ${item.summary ? `<p class="td-summary" data-td-series-summary>${esc(item.summary)}</p>` : ""}
-      ${scores}
       ${myRating}
       <div class="td-seasons-slot" id="tdSeasonsSlot"></div>
     `;

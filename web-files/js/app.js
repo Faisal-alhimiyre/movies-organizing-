@@ -78,6 +78,7 @@
   const CARD_LAYOUT_KEY = "watchlist-card-layout-v2";
   const CARD_LAYOUTS = ["hover", "poster"];
   const SYNC_META_PREFIX = "watchlist-sync-meta-";
+  const UI_PREFS_PREFIX = "watchlist-ui-prefs-";
 
   let pendingImportPayload = null;
   const PENDING_SHARE_KEY = "watchlist-pending-share";
@@ -90,6 +91,7 @@
   let searchConfirmReturnFocus = null;
   let ratingsBackfillRunning = false;
   let titleMetaBackfillRunning = false;
+  let episodeTotalsBackfillRunning = false;
   let yearsBackfillRunning = false;
 
   const state = {
@@ -142,6 +144,7 @@
   function stopBackgroundListWrites() {
     ratingsBackfillRunning = false;
     titleMetaBackfillRunning = false;
+    episodeTotalsBackfillRunning = false;
     yearsBackfillRunning = false;
     window.WatchlistSync?.cancelScheduledPush();
   }
@@ -174,12 +177,11 @@
 
     updateHeaderTitle();
     renderListSwitcher();
-    updateGenreOptions();
+    applyUiPrefs(readUiPrefs(nextListId) || {}, { renderNow: false });
     if (els.ratingFilter?.value === "rt-best" || els.ratingFilter?.value === "rt-worst") {
       els.ratingFilter.value = "all";
       applyRatingFilter("all");
     }
-    updateRatingFilterOptions();
     updateStats();
     updateAppBanners();
     render();
@@ -499,12 +501,103 @@
     );
   }
 
+  function uiPrefsKey(listId) {
+    return `${UI_PREFS_PREFIX}${listId}`;
+  }
+
+  function normalizeUiPrefs(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const type =
+      raw.type === "all" || raw.type === "movies" || raw.type === "tvSeries" || raw.type === "anime"
+        ? raw.type
+        : "all";
+    const watchedFilter =
+      raw.watchedFilter === "all" ||
+      raw.watchedFilter === "watched" ||
+      raw.watchedFilter === "inProgress" ||
+      raw.watchedFilter === "unwatched"
+        ? raw.watchedFilter
+        : "all";
+    const ratingFilterSource = String(raw.ratingFilterSource || "all");
+    const ratingFilterSort = raw.ratingFilterSort === "oldest" || raw.ratingFilterSort === "worst"
+      ? raw.ratingFilterSort
+      : (raw.ratingFilterSort === "newest" || raw.ratingFilterSort === "best" ? raw.ratingFilterSort : "default");
+    const selectedGenres = Array.isArray(raw.selectedGenres)
+      ? [...new Set(raw.selectedGenres.map((g) => normalizeGenre(String(g || "").trim())).filter(Boolean))]
+      : [];
+    return {
+      type,
+      watchedFilter,
+      ratingFilterSource,
+      ratingFilterSort,
+      selectedGenres: selectedGenres.filter((g) => STANDARD_GENRES.includes(g)),
+    };
+  }
+
+  function readUiPrefs(listId) {
+    return normalizeUiPrefs(loadJson(uiPrefsKey(listId), null));
+  }
+
+  function writeUiPrefs(listId, prefs) {
+    const normalized = normalizeUiPrefs(prefs);
+    if (!listId || !normalized) return;
+    localStorage.setItem(uiPrefsKey(listId), JSON.stringify(normalized));
+  }
+
+  function collectUiPrefs() {
+    return normalizeUiPrefs({
+      type: state.type,
+      watchedFilter: state.watchedFilter,
+      ratingFilterSource: state.ratingFilterSource,
+      ratingFilterSort: state.ratingFilterSort,
+      selectedGenres: state.selectedGenres,
+    }) || {
+      type: "all",
+      watchedFilter: "all",
+      ratingFilterSource: "all",
+      ratingFilterSort: "default",
+      selectedGenres: [],
+    };
+  }
+
+  function applyUiPrefs(prefs, { renderNow = false } = {}) {
+    const normalized = normalizeUiPrefs(prefs);
+    if (!normalized) return;
+    state.type = normalized.type;
+    state.watchedFilter = normalized.watchedFilter;
+    state.selectedGenres = normalized.selectedGenres;
+    state.ratingFilterSource = normalized.ratingFilterSource;
+    state.ratingFilterSort = normalized.ratingFilterSort;
+
+    els.typeTabs.forEach((tab) => {
+      const active = tab.dataset.type === state.type;
+      tab.classList.toggle("type-tab--active", active);
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
+    });
+    if (els.watchedFilter) {
+      els.watchedFilter.value = state.watchedFilter;
+    }
+    updateGenreOptions();
+    updateRatingFilterOptions();
+    updateClearFiltersButton();
+    if (renderNow) render();
+  }
+
+  function saveUiPrefs() {
+    const listId = state.activeListId;
+    if (!listId || !canPersistActiveList(listId)) return;
+    writeUiPrefs(listId, collectUiPrefs());
+    queueCloudSync();
+  }
+
   function listSyncMeta(listId) {
     const id = listId || window.WatchlistAuth?.getProfile();
     return {
       accountId: window.WatchlistAuth?.getAccountId(),
       name: window.WatchlistAuth?.getListLabel(id),
       description: window.WatchlistAuth?.getListDescription(id),
+      uiPrefs: collectUiPrefs(),
     };
   }
 
@@ -676,6 +769,13 @@
     const localHasData = !window.WatchlistAuth.isWatchlistEmpty(state.data);
     const remoteHasData = !window.WatchlistAuth.isWatchlistEmpty(remote.watchlist);
     const localStamp = Math.max(meta.localUpdated, meta.syncedAt);
+    const remoteUiPrefs = normalizeUiPrefs(remote.uiPrefs);
+    const localUiPrefs = readUiPrefs(listId);
+
+    if (remoteUiPrefs && (remoteUpdated > localStamp || !localUiPrefs)) {
+      applyUiPrefs(remoteUiPrefs, { renderNow: false });
+      writeUiPrefs(listId, remoteUiPrefs);
+    }
 
     if (
       remoteHasData &&
@@ -707,6 +807,10 @@
           name: remote.name,
           description: remote.description || "",
         });
+      }
+      if (remoteUiPrefs) {
+        applyUiPrefs(remoteUiPrefs, { renderNow: false });
+        writeUiPrefs(listId, remoteUiPrefs);
       }
       writeSyncMeta(listId, { syncedAt: remoteUpdated, localUpdated: remoteUpdated });
       state.syncStatus = "saved";
@@ -943,6 +1047,19 @@
       return;
     }
 
+    const contentType = normalizeContentType(meta.contentType || els.formType?.value);
+    if (
+      (contentType === "tvSeries" || contentType === "anime") &&
+      !Number.isFinite(parseInt(String(meta.episodeCount || "").trim(), 10))
+    ) {
+      const locale = window.WatchlistI18n?.getLang?.() || "en";
+      const total = await window.WatchlistSeriesMetadata?.fetchTitleEpisodeTotal?.(
+        { contentType, link },
+        locale
+      );
+      if (total > 0) meta.episodeCount = total;
+    }
+
     applyMetadataToManualForm(meta);
     setFormLinkStatus("");
     setFormLinkPreview(meta);
@@ -1165,17 +1282,9 @@
     if (rating != null) entry.rating = rating;
     if (value.note) entry.note = String(value.note).trim();
 
-    // Preserve granular progress when present.
-    if (value.progress && typeof value.progress === "object" &&
-        Array.isArray(value.progress.episodes)) {
-      entry.progress = { version: 1, episodes: value.progress.episodes };
-      if (value.progress.completed === true) {
-        entry.progress.completed = true;
-      }
-      if (value.progress.seasonTotals && typeof value.progress.seasonTotals === "object") {
-        entry.progress.seasonTotals = { ...value.progress.seasonTotals };
-      }
-    }
+    // Preserve granular progress (episodes, per-episode ratings, season totals).
+    const progress = window.WatchlistProgress?.exportProgressObject?.(value.progress);
+    if (progress) entry.progress = progress;
 
     return entry;
   }
@@ -1535,6 +1644,7 @@
       }
       if (item.cardPoster) entry.cardPoster = item.cardPoster;
       if (item.lastSelectedSeason != null) entry.lastSelectedSeason = item.lastSelectedSeason;
+      if (item.cardSeasonName) entry.cardSeasonName = item.cardSeasonName;
       if (item.noSpecials === true) entry.noSpecials = true;
 
       data[item.contentType][item.genre].push(entry);
@@ -1670,6 +1780,20 @@
     return raw > 10 ? raw : raw * 10;
   }
 
+  function parseRuntimeMinutes(runtime) {
+    const raw = String(runtime || "").trim();
+    if (!raw) return null;
+    const match = raw.match(/(\d{1,4})/);
+    if (!match) return null;
+    const minutes = parseInt(match[1], 10);
+    return Number.isFinite(minutes) && minutes > 0 ? minutes : null;
+  }
+
+  function parseEpisodeCount(item) {
+    const value = parseInt(String(item?.episodeCount || "").trim(), 10);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+
   function getRatingSortScore(item) {
     const source = state.ratingFilterSource;
     if (!source || source === "all") return null;
@@ -1677,6 +1801,11 @@
     if (source === "anilist") return getItemAnilistSortScore(item);
     if (source === "personal") return getItemPersonalScore(item);
     if (source === "age") return window.WatchlistMetadata?.ageRatingSortRank?.(item.ageRating) ?? null;
+    if (source === "duration") return parseRuntimeMinutes(item?.runtime);
+    if (source === "episodes") {
+      if (item?.contentType !== "tvSeries" && item?.contentType !== "anime") return null;
+      return parseEpisodeCount(item);
+    }
     return null;
   }
 
@@ -1752,7 +1881,14 @@
   }
 
   function isRatingSortSource(source) {
-    return source === "imdb" || source === "anilist" || source === "personal" || source === "age";
+    return (
+      source === "imdb" ||
+      source === "anilist" ||
+      source === "personal" ||
+      source === "age" ||
+      source === "duration" ||
+      source === "episodes"
+    );
   }
 
   function isReleaseSortActive() {
@@ -1877,7 +2013,7 @@
   }
 
   function ratingFilterOptions() {
-    return [
+    const options = [
       { value: "all", labelKey: "filter.ratingOptionAll" },
       { value: "added", labelKey: "filter.ratingOptionAdded" },
       { value: "release", labelKey: "filter.ratingOptionRelease" },
@@ -1886,6 +2022,12 @@
       { value: "anilist", labelKey: "filter.ratingOptionAnilist" },
       { value: "personal", labelKey: "filter.ratingOptionPersonal" },
     ];
+    if (state.type === "movies") {
+      options.splice(4, 0, { value: "duration", labelKey: "filter.ratingOptionDuration" });
+    } else if (state.type === "tvSeries" || state.type === "anime") {
+      options.splice(4, 0, { value: "episodes", labelKey: "filter.ratingOptionEpisodes" });
+    }
+    return options;
   }
 
   function parseRatingFilter(value) {
@@ -1901,7 +2043,14 @@
     if (value === "release") {
       return { source: "release", sort: "newest" };
     }
-    if (value === "imdb" || value === "anilist" || value === "personal" || value === "age") {
+    if (
+      value === "imdb" ||
+      value === "anilist" ||
+      value === "personal" ||
+      value === "age" ||
+      value === "duration" ||
+      value === "episodes"
+    ) {
       return { source: value, sort: "best" };
     }
     const [source, sort] = String(value).split("-");
@@ -2224,6 +2373,7 @@
     updateGenreOptions();
     updateRatingFilterOptions();
     updateClearFiltersButton();
+    saveUiPrefs();
     render();
   }
 
@@ -2350,24 +2500,12 @@
     return `
       <div class="empty-state">
         <p class="empty-state__title">${escapeHtml(t("empty.firstTitle"))}</p>
-        <p class="empty-state__subtitle">${escapeHtml(t("empty.firstSubtitle"))}</p>
-        <ul class="empty-state__hints">
-          <li>${escapeHtml(t("empty.hintSearch"))}</li>
-          <li>${escapeHtml(t("empty.hintLink"))}</li>
-          <li>${escapeHtml(t("empty.hintBulk"))}</li>
-        </ul>
         <div class="empty-state__actions">
           <button type="button" class="btn btn--primary empty-state__btn" data-action="add">
             ${escapeHtml(t("btn.addTitle"))}
           </button>
-          <button type="button" class="btn btn--ghost empty-state__btn" data-action="open-add-search">
-            ${escapeHtml(t("empty.ctaSearch"))}
-          </button>
           <button type="button" class="btn btn--ghost empty-state__btn" data-action="open-add-bulk">
             ${escapeHtml(t("empty.ctaBulk"))}
-          </button>
-          <button type="button" class="btn btn--ghost empty-state__btn" data-action="share">
-            ${escapeHtml(t("empty.ctaImport"))}
           </button>
         </div>
       </div>
@@ -2991,16 +3129,124 @@
     }
   }
 
+  function itemNeedsEpisodeTotalBackfill(item) {
+    if (item?.contentType !== "tvSeries" && item?.contentType !== "anime") {
+      return false;
+    }
+    const episodes = parseInt(String(item?.episodeCount || "").trim(), 10);
+    if (Number.isFinite(episodes) && episodes > 0) return false;
+    return Boolean(
+      getImdbId(item) ||
+        (item?.link && window.WatchlistMetadata?.isSupportedLink?.(item.link))
+    );
+  }
+
+  function applyBadgePatches(item, patches) {
+    if (!item || !patches) return false;
+    let changed = false;
+    for (const [key, value] of Object.entries(patches)) {
+      if (value == null || value === "") continue;
+      if (key === "episodeCount" || key === "seasonCount") {
+        const n = parseInt(String(value).trim(), 10);
+        if (!Number.isFinite(n) || n <= 0) continue;
+        if (Number(item[key]) === n) continue;
+        item[key] = n;
+        changed = true;
+        continue;
+      }
+      if (item[key] !== value) {
+        item[key] = value;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  async function enrichItemBadges(itemId) {
+    const listId = state.activeListId;
+    if (!listId || !itemId) return;
+
+    const item = state.items.find((i) => i.id === itemId);
+    if (!item) return;
+    if (item.contentType !== "tvSeries" && item.contentType !== "anime") return;
+
+    const episodes = parseInt(String(item.episodeCount || "").trim(), 10);
+    if (Number.isFinite(episodes) && episodes > 0 && itemHasTitleMeta(item)) return;
+
+    try {
+      const locale = window.WatchlistI18n?.getLang?.() || "en";
+      const patches = await window.WatchlistSeriesMetadata?.fetchTitleBadgeMeta?.(
+        item,
+        locale
+      );
+      if (!patches || !canPersistActiveList(listId)) return;
+
+      const live = state.items.find((i) => i.id === itemId);
+      if (!live || !applyBadgePatches(live, patches)) return;
+
+      state.data = itemsToNested(state.items);
+      saveData();
+      render();
+    } catch (error) {
+      console.warn("[badge-enrich] failed:", error);
+    }
+  }
+
+  function queueItemBadgeEnrichment(itemId) {
+    if (!itemId) return;
+    void enrichItemBadges(itemId);
+  }
+
+  async function backfillEpisodeTotals() {
+    if (episodeTotalsBackfillRunning) return;
+
+    const queue = state.items.filter(itemNeedsEpisodeTotalBackfill);
+    if (!queue.length) return;
+
+    const listId = state.activeListId;
+    if (!listId) return;
+
+    episodeTotalsBackfillRunning = true;
+    let updated = 0;
+    const locale = window.WatchlistI18n?.getLang?.() || "en";
+
+    for (const item of queue) {
+      if (!episodeTotalsBackfillRunning || !canPersistActiveList(listId)) break;
+      try {
+        const patches = await window.WatchlistSeriesMetadata?.fetchTitleBadgeMeta?.(
+          item,
+          locale
+        );
+        if (patches && applyBadgePatches(item, patches)) {
+          updated += 1;
+        }
+      } catch (error) {
+        console.warn("[episode-total] backfill failed:", item.title, error);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+
+    episodeTotalsBackfillRunning = false;
+
+    if (updated > 0) {
+      state.data = itemsToNested(state.items);
+      saveData();
+      render();
+    }
+  }
+
   async function runMetadataBackfill() {
     if (isReleaseSortActive()) {
       await backfillMissingYears();
       await backfillMissingRatings();
       await backfillTitleMeta();
+      await backfillEpisodeTotals();
       return;
     }
     await backfillMissingRatings();
     await backfillMissingYears();
     await backfillTitleMeta();
+    await backfillEpisodeTotals();
   }
 
   function loadCardLayout() {
@@ -3177,6 +3423,28 @@
     return item?.cardPoster || item?.poster || "";
   }
 
+  function cardDisplayTitle(item) {
+    if (!item) return "";
+    const showTitle = String(item.title || "").trim();
+    if (item.cardSeasonName) {
+      const seasonName = String(item.cardSeasonName).trim();
+      if (!showTitle) return seasonName;
+      if (seasonName.toLowerCase().startsWith(showTitle.toLowerCase())) return seasonName;
+      return `${showTitle}: ${seasonName}`;
+    }
+    const seasonNum = Number(item.lastSelectedSeason);
+    if (
+      (item.contentType === "tvSeries" || item.contentType === "anime") &&
+      Number.isFinite(seasonNum) &&
+      seasonNum > 0
+    ) {
+      const seasonLabel = t("seasons.seasonNum", { n: seasonNum });
+      if (showTitle) return `${showTitle}: ${seasonLabel}`;
+      return seasonLabel;
+    }
+    return showTitle;
+  }
+
   function setCardPoster(card, posterUrl) {
     const slot = card.querySelector(
       "[data-poster-slot], .card__poster--placeholder, .card__poster--broken, .card__poster"
@@ -3346,11 +3614,12 @@
     const hasLink = Boolean(item.link);
     const titleMetaBadges = renderTitleMetaBadges(item);
     const genreBadges = `${mainGenreBadge}${secondaryBadges}`;
+    const displayTitle = cardDisplayTitle(item);
     const titleBlock = `
       <div class="card__top">
         ${progressState === "watched" ? renderWatchedCheck() : ""}
         <h3 class="card__title">
-          <span class="text-ltr">${escapeHtml(ltr(item.title))}</span>
+          <span class="text-ltr">${escapeHtml(ltr(displayTitle))}</span>
           ${altTitle}
         </h3>
       </div>
@@ -4273,6 +4542,7 @@
       closeModal();
       updateGenreOptions();
       render();
+      queueItemBadgeEnrichment(item.id);
     } finally {
       addSaveInFlight = false;
       setButtonLoading(els.searchConfirmAdd, false);
@@ -5382,11 +5652,15 @@
     setButtonLoading(saveBtn, true, { loadingKey: "btn.saving" });
 
     try {
+      const wasEdit = Boolean(state.editingId);
       saveItem(item);
       state.manualLinkMeta = null;
       closeModal();
       updateGenreOptions();
       render();
+      if (!wasEdit) {
+        queueItemBadgeEnrichment(item.id);
+      }
     } finally {
       addSaveInFlight = false;
       setButtonLoading(saveBtn, false);
@@ -5425,6 +5699,8 @@
       tab.tabIndex = active ? 0 : -1;
     });
     updateGenreOptions();
+    updateRatingFilterOptions();
+    saveUiPrefs();
     render();
   }
 
@@ -5610,40 +5886,24 @@
 
     pendingImportPayload = payload;
     const listName = payload.listName || "Shared list";
-    const listDescription = String(payload.listDescription || "").trim();
     const titleCount = countTitles(payload.watchlist);
     const currentCount = state.items.length;
     const currentListName = window.WatchlistAuth?.getListLabel() || "My list";
 
-    const summaryLine = listDescription
-      ? t("import.summaryWithDescription", { description: listDescription })
-      : "";
-
     if (currentCount > 0) {
-      els.importShareModalText.textContent = [
-        t("import.summaryWithCurrent", {
-          listName,
-          count: titleCount,
-          currentName: currentListName,
-          currentCount,
-        }),
-        summaryLine,
-      ]
-        .filter(Boolean)
-        .join(" ");
+      els.importShareModalText.textContent = t("import.summarySimpleWithCurrent", {
+        listName,
+        count: titleCount,
+        currentName: currentListName,
+      });
       if (els.importShareModalHint) {
         els.importShareModalHint.textContent = t("import.hint");
       }
     } else {
-      els.importShareModalText.textContent = [
-        t("import.summaryEmpty", {
-          listName,
-          count: titleCount,
-        }),
-        summaryLine,
-      ]
-        .filter(Boolean)
-        .join(" ");
+      els.importShareModalText.textContent = t("import.summarySimpleEmpty", {
+        listName,
+        count: titleCount,
+      });
       if (els.importShareModalHint) {
         els.importShareModalHint.textContent = t("import.hintEmpty");
       }
@@ -6113,6 +6373,7 @@
       } else {
         addGenreFilter(genre);
       }
+      saveUiPrefs();
       render();
     });
 
@@ -6120,16 +6381,19 @@
       const btn = event.target.closest("[data-action='remove-filter-genre']");
       if (!btn) return;
       removeGenreFilter(btn.dataset.genre);
+      saveUiPrefs();
       render();
     });
 
     els.watchedFilter?.addEventListener("change", () => {
       state.watchedFilter = els.watchedFilter.value || "all";
+      saveUiPrefs();
       render();
     });
 
     els.ratingFilter?.addEventListener("change", () => {
       applyRatingFilter(els.ratingFilter.value || "all");
+      saveUiPrefs();
       if (isReleaseSortActive()) {
         void backfillMissingYears();
       }
@@ -6138,6 +6402,7 @@
 
     els.sortDirectionBtn?.addEventListener("click", () => {
       toggleSortDirection();
+      saveUiPrefs();
     });
 
     els.clearFiltersBtn?.addEventListener("click", () => {
@@ -6927,7 +7192,7 @@
       name: window.WatchlistAuth.getListLabel(),
       description: window.WatchlistAuth.getListDescription(),
     });
-    updateGenreOptions();
+    applyUiPrefs(readUiPrefs(state.activeListId || window.WatchlistAuth?.getProfile()) || {}, { renderNow: false });
     bindEvents();
     bindOfflineSyncListeners();
     syncContentTypePicker(els.formTypePicker, els.formType, els.formType?.value || "movies");
@@ -6936,7 +7201,6 @@
       els.ratingFilter.value = "all";
       applyRatingFilter("all");
     }
-    updateRatingFilterOptions();
     updateStats();
     updateAppBanners();
     render();
@@ -7038,6 +7302,7 @@
       saveData();
     },
     cardDisplayPoster,
+    cardDisplayTitle,
   };
 
   if (document.getElementById("mainContent")) {

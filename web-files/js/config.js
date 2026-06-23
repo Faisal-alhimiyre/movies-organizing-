@@ -3,7 +3,7 @@ window.WATCHLIST_CONFIG = {
   omdbApiKey: "thewdb",
 
   // TMDB — free key: https://www.themoviedb.org/settings/api (optional; improves search when OMDb has no match)
-  tmdbApiKey: "",
+
 
   // Supabase — paste from Project Settings → API (leave empty to use local-only mode)
   supabaseUrl: "https://btjvdoufugfosqhqfuir.supabase.co",
