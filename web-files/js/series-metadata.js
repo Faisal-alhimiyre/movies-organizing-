@@ -278,6 +278,16 @@
       return { source: "none", isNegative: true };
     }
 
+    // ── TMDb link (direct from search when no IMDb ID) ─────────
+    const tmdbLink = WM?.extractTmdbId?.(link);
+    if (tmdbLink?.mediaType === "tv" && tmdbLink.tmdbId) {
+      return {
+        source: "tmdb",
+        tmdbId: tmdbLink.tmdbId,
+        isNegative: false,
+      };
+    }
+
     // ── AniList ────────────────────────────────────────────────
     const anilistId = WM?.extractAnilistId?.(link);
     if (anilistId) {
@@ -1149,18 +1159,31 @@
 
   async function fetchTmdb(path, params = {}) {
     const key = getTmdbKey();
-    if (!key) return null;
-    try {
-      const url = new URL(`${TMDB_API_BASE}/${path}`);
-      Object.entries({ ...params, api_key: key }).forEach(([k, v]) =>
-        url.searchParams.set(k, String(v))
-      );
-      const res = await fetch(url.toString());
-      if (res.status === 429 || !res.ok) return null;
-      return await res.json();
-    } catch {
-      return null;
+    if (key) {
+      try {
+        const url = new URL(`${TMDB_API_BASE}/${path}`);
+        Object.entries({ ...params, api_key: key }).forEach(([k, v]) =>
+          url.searchParams.set(k, String(v))
+        );
+        const res = await fetch(url.toString());
+        if (res.status === 429 || !res.ok) return null;
+        return await res.json();
+      } catch {
+        return null;
+      }
     }
+
+    if (path.startsWith("tv/") && window.WatchlistTmdb?.fetchTv) {
+      const match = path.match(/^tv\/(\d+)(?:\/season\/(\d+))?$/);
+      if (match) {
+        const tmdbId = Number(match[1]);
+        const season = match[2] != null ? Number(match[2]) : null;
+        const locale = String(params.language || "").startsWith("ar") ? "ar" : "en";
+        return await window.WatchlistTmdb.fetchTv(tmdbId, { season, locale });
+      }
+    }
+
+    return null;
   }
 
   async function anilistQuery(query, variables) {

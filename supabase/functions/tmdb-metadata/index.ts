@@ -4,14 +4,20 @@
  * Proxies a small allowlisted subset of TMDB v3 calls so the browser never
  * needs a client-side TMDB API key for per-episode ratings.
  *
- * Allowed actions: resolve | seasonRatings | search | details
+ * Allowed actions: resolve | seasonRatings | search | details | tvFetch
  *
  * Secret env vars:
  *   TMDB_API_KEY   (required)
  */
 
 const TMDB_BASE = "https://api.themoviedb.org/3";
-const ALLOWED_ACTIONS = new Set(["resolve", "seasonRatings", "search", "details"]);
+const ALLOWED_ACTIONS = new Set([
+  "resolve",
+  "seasonRatings",
+  "search",
+  "details",
+  "tvFetch",
+]);
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -202,7 +208,9 @@ async function actionDetails(
 
   const lang = tmdbLanguage(resolveTitleLocale(p));
   const appendTo =
-    mediaType === "tv" ? "credits,content_ratings" : "credits,release_dates";
+    mediaType === "tv"
+      ? "credits,content_ratings,external_ids"
+      : "credits,release_dates,external_ids";
 
   const json = await tmdbGet(`${mediaType}/${tmdbId}`, {
     language: lang,
@@ -258,7 +266,9 @@ async function actionDetails(
     .map((g) => s(g.name))
     .filter(Boolean);
 
-  const imdbId = s(json.imdb_id) || null;
+  const externalIds = json.external_ids as Record<string, unknown> | undefined;
+  const imdbId =
+    s(externalIds?.imdb_id) || s(json.imdb_id) || null;
 
   // Age rating
   let ageRating = "";
@@ -306,6 +316,10 @@ async function actionDetails(
   const episodeCount =
     mediaType === "tv" ? (n(json.number_of_episodes) ?? null) : null;
 
+  const link = imdbId
+    ? `https://www.imdb.com/title/${imdbId}/`
+    : `https://www.themoviedb.org/${mediaType}/${tmdbId}`;
+
   return {
     ok: true,
     details: {
@@ -313,6 +327,7 @@ async function actionDetails(
       imdbId,
       tmdbType: mediaType,
       tmdbId,
+      link,
       title,
       year,
       plot,
@@ -328,6 +343,25 @@ async function actionDetails(
       episodeCount,
     },
   };
+}
+
+/** Raw TMDB TV show or season JSON — used when no client-side TMDB key */
+async function actionTvFetch(
+  p: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const tmdbId = n(p.tmdbId);
+  const season = n(p.season);
+  if (!tmdbId || tmdbId <= 0) return { error: "missing_params" };
+
+  const lang = tmdbLanguage(resolveTitleLocale(p));
+  const path =
+    season != null && season >= 0
+      ? `tv/${tmdbId}/season/${season}`
+      : `tv/${tmdbId}`;
+
+  const json = await tmdbGet(path, { language: lang });
+  if (!json) return { error: "api_failure" };
+  return { ok: true, data: json };
 }
 
 /** Multi/movie/TV title text search — returns normalized result rows */
@@ -487,6 +521,9 @@ Deno.serve(async (req: Request) => {
         break;
       case "search":
         result = await actionSearch(body);
+        break;
+      case "tvFetch":
+        result = await actionTvFetch(body);
         break;
       default:
         result = { error: "unsupported_action" };

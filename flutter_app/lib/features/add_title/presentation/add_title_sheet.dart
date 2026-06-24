@@ -137,7 +137,11 @@ class _AddTitleSheetState extends ConsumerState<AddTitleSheet>
     });
 
     final service = ref.read(metadataServiceProvider);
-    final response = await service.searchTitles(query, type: _searchType);
+    final response = await service.searchTitles(
+      query,
+      type: _searchType,
+      locale: titleLocaleFromQuery(query),
+    );
 
     if (!mounted) return;
 

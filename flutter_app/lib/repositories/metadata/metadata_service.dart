@@ -18,6 +18,13 @@ const _tmdbImage = 'https://image.tmdb.org/t/p/w500';
 const _tmdbImageSm = 'https://image.tmdb.org/t/p/w92';
 const _cachePrefix = 'metadata:v4:';
 
+final _arabicScript = RegExp(r'[\u0600-\u06FF]');
+
+/// Title language follows the search query script, not the app UI language.
+String titleLocaleFromQuery(String query) {
+  return _arabicScript.hasMatch(query) ? 'ar' : 'en';
+}
+
 final metadataServiceProvider = Provider<MetadataService>((ref) {
   return MetadataService(
     config: ref.watch(appConfigProvider),
@@ -47,12 +54,14 @@ class MetadataService {
     String query, {
     String type = 'all',
     int page = 1,
-    String locale = 'en',
+    String? locale,
   }) async {
     final q = query.trim();
     if (q.length < 2) {
       return const TitleSearchResponse(ok: true, results: []);
     }
+
+    final titleLocale = locale ?? titleLocaleFromQuery(q);
 
     final tasks = <Future<List<TitleSearchResult>>>[];
 
@@ -61,7 +70,7 @@ class MetadataService {
     } else {
       // Prefer edge function: supports Arabic, partial matches, no API key exposure
       if (_config.isSupabaseConfigured) {
-        tasks.add(_searchViaTmdbEdge(q, type, page, locale));
+        tasks.add(_searchViaTmdbEdge(q, type, page, titleLocale));
       } else {
         // Fall back to direct calls when Supabase is not configured
         if (_config.hasOmdbKey) {
@@ -306,8 +315,8 @@ class MetadataService {
     // Try direct TMDB API first (requires client-side key)
     final json = await _fetchTmdb('$mediaType/$tmdbId', {
       'append_to_response': mediaType == 'tv'
-          ? 'credits,content_ratings'
-          : 'credits,release_dates',
+          ? 'credits,content_ratings,external_ids'
+          : 'credits,release_dates,external_ids',
     });
     if (json != null) {
       final payload = _normalizeTmdbDetail(json, mediaType);
@@ -382,6 +391,28 @@ class MetadataService {
   static String? extractImdbId(String url) {
     final match = RegExp(r'tt\d{7,8}', caseSensitive: false).firstMatch(url);
     return match?.group(0)?.toLowerCase();
+  }
+
+  /// Parses `themoviedb.org/tv/{id}` or `/movie/{id}` links from search picks.
+  static ({String mediaType, int id})? parseTmdbLink(String url) {
+    try {
+      final uri = Uri.parse(url.trim());
+      final host = uri.host.replaceFirst(RegExp(r'^www\.'), '');
+      if (!host.contains('themoviedb.org')) return null;
+
+      final parts = uri.pathSegments.where((p) => p.isNotEmpty).toList();
+      if (parts.length < 2) return null;
+
+      final mediaType = parts[0];
+      if (mediaType != 'tv' && mediaType != 'movie') return null;
+
+      final id = int.tryParse(parts[1]);
+      if (id == null || id <= 0) return null;
+
+      return (mediaType: mediaType, id: id);
+    } catch (_) {
+      return null;
+    }
   }
 
   static bool isAnilistLink(String url) => parseAnilistId(url) != null;
@@ -825,7 +856,7 @@ class MetadataService {
 
     return _buildDetailPayload(
       source: 'tmdb',
-      imdbId: item['imdb_id']?.toString(),
+      imdbId: _pickTmdbImdbId(item),
       tmdbType: mediaType,
       tmdbId: item['id'] as int?,
       title: title,
@@ -923,17 +954,17 @@ class MetadataService {
     final genreList = parseGenreList(genres);
     final contentType = inferContentType(
         mediaType.isNotEmpty ? mediaType : omdbType, genreList);
-    final resolvedLink = link.isNotEmpty
-        ? link
-        : defaultLinkForDetails(
-            MetadataDetail(
-              source: source,
-              title: title,
-              imdbId: imdbId,
-              anilistId: anilistId,
-              link: link,
-            ),
-          );
+    final resolvedLink = defaultLinkForDetails(
+      MetadataDetail(
+        source: source,
+        title: title,
+        imdbId: imdbId,
+        anilistId: anilistId,
+        tmdbType: tmdbType,
+        tmdbId: tmdbId,
+        link: link,
+      ),
+    );
 
     return MetadataDetail(
       source: source,
@@ -1008,6 +1039,18 @@ class MetadataService {
 
   void _writeCache(String key, MetadataDetail detail) {
     _cache.put('$_cachePrefix$key', detail.toCacheJson());
+  }
+
+  static String? _pickTmdbImdbId(Map<String, dynamic> item) {
+    final direct = item['imdb_id']?.toString().trim();
+    if (direct != null && direct.isNotEmpty) return direct.toLowerCase();
+
+    final externalIds = item['external_ids'];
+    if (externalIds is Map) {
+      final fromExt = externalIds['imdb_id']?.toString().trim();
+      if (fromExt != null && fromExt.isNotEmpty) return fromExt.toLowerCase();
+    }
+    return null;
   }
 
   static String _na(dynamic value) {

@@ -69,6 +69,24 @@
     return match ? match[0].toLowerCase() : null;
   }
 
+  /** Parses themoviedb.org/tv/{id} or /movie/{id} from search-pick links. */
+  function extractTmdbId(url) {
+    try {
+      const uri = new URL(String(url || "").trim());
+      const host = uri.hostname.replace(/^www\./i, "");
+      if (!host.includes("themoviedb.org")) return null;
+      const parts = uri.pathname.split("/").filter(Boolean);
+      if (parts.length < 2) return null;
+      const mediaType = parts[0];
+      if (mediaType !== "tv" && mediaType !== "movie") return null;
+      const tmdbId = Number(parts[1]);
+      if (!Number.isFinite(tmdbId) || tmdbId <= 0) return null;
+      return { mediaType, tmdbId };
+    } catch {
+      return null;
+    }
+  }
+
   function extractAnilistId(url) {
     const parsed = parseAnilistLink(url);
     return parsed?.anilistId ? String(parsed.anilistId) : null;
@@ -278,14 +296,28 @@
   }
 
   function defaultLinkForDetails(details) {
-    if (details?.link) return details.link;
-    if (details?.imdbId) return `https://www.imdb.com/title/${details.imdbId}/`;
-    if (details?.anilistId) return `https://anilist.co/anime/${details.anilistId}/`;
-    // TMDB fallback — allows the season sheet to resolve without an IMDb ID
+    if (details?.imdbId) {
+      return `https://www.imdb.com/title/${details.imdbId}/`;
+    }
+    if (details?.anilistId) {
+      return `https://anilist.co/anime/${details.anilistId}/`;
+    }
+    const existing = String(details?.link || "").trim();
+    if (existing) return existing;
+    // TMDB fallback when TMDB has no IMDb mapping (common for some Arabic titles)
     if (details?.tmdbType && details?.tmdbId) {
       return `https://www.themoviedb.org/${details.tmdbType}/${details.tmdbId}`;
     }
     return "";
+  }
+
+  function pickTmdbImdbId(item) {
+    if (!item) return null;
+    const direct = item.imdb_id;
+    if (direct) return String(direct).toLowerCase();
+    const ext = item.external_ids?.imdb_id;
+    if (ext) return String(ext).toLowerCase();
+    return null;
   }
 
   function buildDetailPayload(base) {
@@ -296,7 +328,7 @@
       anilistId: base.anilistId || null,
       tmdbType: base.tmdbType || null,
       tmdbId: base.tmdbId || null,
-      link: base.link || defaultLinkForDetails(base),
+      link: defaultLinkForDetails(base),
       poster: base.poster || "",
       rating: base.rating || "",
       anilistRating: base.anilistRating || "",
@@ -907,7 +939,7 @@
 
     return buildDetailPayload({
       source: "tmdb",
-      imdbId: item.imdb_id || null,
+      imdbId: pickTmdbImdbId(item),
       tmdbType: mediaType,
       tmdbId: item.id,
       title,
@@ -964,7 +996,9 @@
     const json = await fetchTmdb(`${mediaType}/${tmdbId}`, {
       language: lang,
       append_to_response:
-        mediaType === "tv" ? "credits,content_ratings" : "credits,release_dates",
+        mediaType === "tv"
+          ? "credits,content_ratings,external_ids"
+          : "credits,release_dates,external_ids",
     });
 
     if (json) {
@@ -973,7 +1007,9 @@
         const enJson = await fetchTmdb(`${mediaType}/${tmdbId}`, {
           language: "en-US",
           append_to_response:
-            mediaType === "tv" ? "credits,content_ratings" : "credits,release_dates",
+            mediaType === "tv"
+              ? "credits,content_ratings,external_ids"
+              : "credits,release_dates,external_ids",
         });
         if (enJson) {
           const enPayload = normalizeTmdbDetail(enJson, mediaType);
@@ -988,8 +1024,14 @@
     if (window.WatchlistTmdb?.isAvailable()) {
       const details = await window.WatchlistTmdb.getDetails(mediaType, tmdbId, locale);
       if (details?.title) {
-        writeCacheEntry(cacheKey, details);
-        return details;
+        const payload = buildDetailPayload({
+          ...details,
+          source: details.source || "tmdb",
+          tmdbType: details.tmdbType || mediaType,
+          tmdbId: details.tmdbId || tmdbId,
+        });
+        writeCacheEntry(cacheKey, payload);
+        return payload;
       }
     }
 
@@ -1295,6 +1337,7 @@
 
   window.WatchlistMetadata = {
     extractImdbId,
+    extractTmdbId,
     extractAnilistId,
     extractMalId,
     getMetadata,

@@ -137,6 +137,27 @@
     }
   }
 
+  /**
+   * Fetch raw TMDB TV show or season JSON via the edge function.
+   * Used for season lists/episodes when no client-side TMDB API key is set.
+   */
+  async function fetchTv(tmdbId, { season = null, locale = "en" } = {}) {
+    if (!tmdbId) return null;
+    try {
+      const result = await callFunction({
+        action: "tvFetch",
+        tmdbId,
+        ...(season != null ? { season } : {}),
+        locale,
+      });
+      if (!result || result.error || !result.data) return null;
+      return result.data;
+    } catch (err) {
+      console.warn("[tmdb-service] fetchTv failed:", err.message);
+      return null;
+    }
+  }
+
   /** True when Supabase is configured so the edge function is reachable. */
   function isAvailable() {
     return !!getFunctionUrl();
@@ -147,6 +168,7 @@
     fetchSeasonRatings,
     search,
     getDetails,
+    fetchTv,
     isAvailable,
   };
 })();

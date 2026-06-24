@@ -889,6 +889,26 @@ void main() {
       expect(res.source, 'anilist');
       expect(res.anilistId, 15125);
     });
+
+    test('TMDb TV link → tmdb resolution', () async {
+      final svc = SeriesMetadataService(
+        config: _testConfig,
+        cache: _FakeBox(),
+        client: MockClient((_) async => _jsonResponse({})),
+      );
+      const item = WatchlistItem(
+        id: 'tvSeries::Drama::Shameless',
+        contentType: 'tvSeries',
+        genre: 'Drama',
+        title: 'Shameless',
+        link: 'https://www.themoviedb.org/tv/34307',
+      );
+
+      final res = await svc.resolveSeriesId(item);
+      expect(res.source, 'tmdb');
+      expect(res.tmdbId, 34307);
+      expect(res.hasUsableSource, true);
+    });
   });
 
   // ── mightHaveSeasons ─────────────────────────────────────────

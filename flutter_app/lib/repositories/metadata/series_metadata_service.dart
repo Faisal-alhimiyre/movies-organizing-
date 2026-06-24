@@ -145,6 +145,12 @@ class SeriesMetadataService {
       return SeriesIdResolution.none();
     }
 
+    // ── TMDb link (direct from search when no IMDb ID) ───────
+    final tmdbLink = MetadataService.parseTmdbLink(link);
+    if (tmdbLink != null && tmdbLink.mediaType == 'tv') {
+      return SeriesIdResolution.tmdb(tmdbLink.id);
+    }
+
     // ── AniList ──────────────────────────────────────────────
     final anilistId = MetadataService.parseAnilistId(link);
     if (anilistId != null) {
@@ -917,33 +923,103 @@ class SeriesMetadataService {
     String path,
     Map<String, String> params,
   ) async {
-    if (!_config.hasTmdbKey) return null;
-    final query = {...params, 'api_key': _config.tmdbApiKey};
-    final uri = Uri.https('api.themoviedb.org', '/3/$path', query);
+    if (_config.hasTmdbKey) {
+      final query = {...params, 'api_key': _config.tmdbApiKey};
+      final uri = Uri.https('api.themoviedb.org', '/3/$path', query);
+      try {
+        final response = await _client.get(uri);
+        if (response.statusCode == 429) return null;
+        if (response.statusCode != 200) return null;
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      } on SocketException {
+        return null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    if (path.startsWith('tv/')) {
+      return _fetchTmdbViaEdge(path, params);
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> _fetchTmdbViaEdge(
+    String path,
+    Map<String, String> params,
+  ) async {
+    if (!_config.isSupabaseConfigured) return null;
+
+    final match = RegExp(r'^tv/(\d+)(?:/season/(\d+))?$').firstMatch(path);
+    if (match == null) return null;
+
+    final tmdbId = int.tryParse(match.group(1)!);
+    if (tmdbId == null) return null;
+    final season = match.group(2) != null ? int.tryParse(match.group(2)!) : null;
+    final language = params['language'] ?? 'en-US';
+    final locale = language.startsWith('ar') ? 'ar' : 'en';
+
+    final baseUrl = _config.supabaseUrl.replaceAll(RegExp(r'/$'), '');
+    final functionUrl = '$baseUrl/functions/v1/tmdb-metadata';
+
     try {
-      final response = await _client.get(uri);
-      if (response.statusCode == 429) return null;
+      final response = await _client.post(
+        Uri.parse(functionUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${_config.supabaseAnonKey}',
+          'apikey': _config.supabaseAnonKey,
+        },
+        body: jsonEncode({
+          'action': 'tvFetch',
+          'tmdbId': tmdbId,
+          if (season != null) 'season': season,
+          'locale': locale,
+        }),
+      );
       if (response.statusCode != 200) return null;
-      return jsonDecode(response.body) as Map<String, dynamic>;
-    } on SocketException {
-      return null;
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      if (json['error'] != null || json['data'] == null) return null;
+      return Map<String, dynamic>.from(json['data'] as Map);
     } catch (_) {
       return null;
     }
   }
 
   Future<int?> _resolveTmdbIdByImdb(String imdbId) async {
-    if (!_config.hasTmdbKey) return null;
-    final json =
-        await _fetchTmdb('find/$imdbId', {'external_source': 'imdb_id'});
-    if (json == null) return null;
+    if (_config.hasTmdbKey) {
+      final json =
+          await _fetchTmdb('find/$imdbId', {'external_source': 'imdb_id'});
+      if (json == null) return null;
 
-    final tvResults =
-        (json['tv_results'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-    if (tvResults.isNotEmpty) return tvResults.first['id'] as int?;
+      final tvResults =
+          (json['tv_results'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+      if (tvResults.isNotEmpty) return tvResults.first['id'] as int?;
+      return null;
+    }
 
-    // Movie results → not a TV series.
-    return null;
+    if (!_config.isSupabaseConfigured) return null;
+
+    final baseUrl = _config.supabaseUrl.replaceAll(RegExp(r'/$'), '');
+    final functionUrl = '$baseUrl/functions/v1/tmdb-metadata';
+    try {
+      final response = await _client.post(
+        Uri.parse(functionUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${_config.supabaseAnonKey}',
+          'apikey': _config.supabaseAnonKey,
+        },
+        body: jsonEncode({'action': 'resolve', 'imdbId': imdbId}),
+      );
+      if (response.statusCode != 200) return null;
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final tmdbId = json['tmdbId'];
+      if (tmdbId is int && tmdbId > 0) return tmdbId;
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<int?> _resolveMalToAnilist(int malId) async {

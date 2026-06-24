@@ -123,14 +123,15 @@ String inferContentType(String mediaType, List<String> genres) {
 }
 
 String defaultLinkForDetails(MetadataDetail details) {
-  if (details.link.isNotEmpty) return details.link;
   if (details.imdbId != null && details.imdbId!.isNotEmpty) {
     return 'https://www.imdb.com/title/${details.imdbId}/';
   }
   if (details.anilistId != null) {
     return 'https://anilist.co/anime/${details.anilistId}/';
   }
-  // TMDB fallback when no IMDb ID — lets the season sheet resolve without IMDb
+  final existing = details.link.trim();
+  if (existing.isNotEmpty) return existing;
+  // TMDB fallback when TMDB has no IMDb mapping (common for some Arabic titles)
   if (details.tmdbType != null && details.tmdbId != null) {
     return 'https://www.themoviedb.org/${details.tmdbType}/${details.tmdbId}';
   }
