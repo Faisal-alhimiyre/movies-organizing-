@@ -82,8 +82,71 @@
     }
   }
 
+  /**
+   * Search for titles via TMDB multi-search.
+   * @param {string} query
+   * @param {string} [type]  "multi" | "movie" | "tv"
+   * @param {number} [page]
+   * @param {string} [locale]  "en" | "ar"
+   * @returns {Promise<{ ok: boolean, results: Array, total: number }>}
+   */
+  async function search(query, type = "multi", page = 1, locale = "en") {
+    if (!query || query.trim().length < 2) {
+      return { ok: false, error: "query_too_short", results: [] };
+    }
+    try {
+      const result = await callFunction({
+        action: "search",
+        query: query.trim(),
+        type,
+        page,
+        locale,
+      });
+      if (!result || result.error) {
+        return { ok: false, error: result?.error || "api_failure", results: [] };
+      }
+      return { ok: true, results: result.results || [], total: result.total || 0 };
+    } catch (err) {
+      console.warn("[tmdb-service] search failed:", err.message);
+      return { ok: false, error: err.message, results: [] };
+    }
+  }
+
+  /**
+   * Fetch full details for a single title via the edge function.
+   * Used when no client-side TMDB API key is configured.
+   * @param {string} mediaType  "movie" | "tv"
+   * @param {number} tmdbId
+   * @param {string} [locale]
+   * @returns {Promise<object|null>}  normalized detail object or null
+   */
+  async function getDetails(mediaType, tmdbId, locale = "en") {
+    if (!mediaType || !tmdbId) return null;
+    try {
+      const result = await callFunction({
+        action: "details",
+        mediaType,
+        tmdbId,
+        locale,
+      });
+      if (!result || result.error || !result.details) return null;
+      return result.details;
+    } catch (err) {
+      console.warn("[tmdb-service] getDetails failed:", err.message);
+      return null;
+    }
+  }
+
+  /** True when Supabase is configured so the edge function is reachable. */
+  function isAvailable() {
+    return !!getFunctionUrl();
+  }
+
   window.WatchlistTmdb = {
     resolveByImdb,
     fetchSeasonRatings,
+    search,
+    getDetails,
+    isAvailable,
   };
 })();

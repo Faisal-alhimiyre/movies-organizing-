@@ -281,6 +281,10 @@
     if (details?.link) return details.link;
     if (details?.imdbId) return `https://www.imdb.com/title/${details.imdbId}/`;
     if (details?.anilistId) return `https://anilist.co/anime/${details.anilistId}/`;
+    // TMDB fallback — allows the season sheet to resolve without an IMDb ID
+    if (details?.tmdbType && details?.tmdbId) {
+      return `https://www.themoviedb.org/${details.tmdbType}/${details.tmdbId}`;
+    }
     return "";
   }
 
@@ -318,7 +322,53 @@
 
   function formatRuntimeMinutes(minutes) {
     const value = parsePositiveInt(minutes);
-    return value ? `${value} min` : "";
+    if (!value) return "";
+    const i18n = window.WatchlistI18n;
+    const lang =
+      i18n?.getLang?.() ||
+      (document.documentElement.lang?.startsWith("ar") ? "ar" : "en");
+    if (lang === "ar") return `${value} دقيقة`;
+    const localized = i18n?.t?.("seasons.epRuntime", { n: value });
+    if (localized && localized !== "seasons.epRuntime") return localized;
+    return `${value} min`;
+  }
+
+  function localizeRuntimeLabel(runtime) {
+    const trimmed = String(runtime || "").trim();
+    if (!trimmed) return "";
+    const direct = parsePositiveInt(trimmed);
+    if (direct) return formatRuntimeMinutes(direct);
+    const match = trimmed.match(
+      /(\d+)\s*(?:min(?:ute)?s?|mins?|m\b|د(?:قي)?(?:قة?|قائق)?)/iu
+    );
+    if (match) return formatRuntimeMinutes(match[1]);
+    return trimmed;
+  }
+
+  function detectQueryTitleLocale(query) {
+    return /[\u0600-\u06FF]/.test(String(query || "")) ? "ar" : "en";
+  }
+
+  function pickTmdbDisplayTitle(item, titleLocale = "en") {
+    if (!item) return "";
+    const localizedTitle = String(item.title || item.name || "").trim();
+    const originalTitle = String(
+      item.original_title || item.original_name || ""
+    ).trim();
+    const originalLang = String(item.original_language || "").trim();
+    if (titleLocale === "ar") {
+      if (/[\u0600-\u06FF]/.test(localizedTitle)) return localizedTitle;
+      if (/[\u0600-\u06FF]/.test(originalTitle)) return originalTitle;
+      if (originalLang === "ar" && originalTitle) return originalTitle;
+      return localizedTitle || originalTitle;
+    }
+    if (localizedTitle && !/[\u0600-\u06FF]/.test(localizedTitle)) {
+      return localizedTitle;
+    }
+    if (originalTitle && !/[\u0600-\u06FF]/.test(originalTitle)) {
+      return originalTitle;
+    }
+    return localizedTitle || originalTitle;
   }
 
   function pickTmdbAgeRating(item, mediaType) {
@@ -361,7 +411,12 @@
     }
     const match = trimmed.match(/(\d+)/);
     const minutes = match ? parsePositiveInt(match[1]) : null;
-    if (minutes) return `~${minutes} min/ep`;
+    if (minutes) {
+      const i18n = window.WatchlistI18n;
+      const lang = i18n?.getLang?.() || "en";
+      if (lang === "ar") return `~${minutes} دقيقة/ح`;
+      return `~${minutes} min/ep`;
+    }
     return `~${trimmed}/ep`;
   }
 
@@ -498,7 +553,7 @@
     }
 
     if (type === "movies") {
-      if (runtime) badges.push({ kind: "duration", label: runtime });
+      if (runtime) badges.push({ kind: "duration", label: localizeRuntimeLabel(runtime) });
     } else if (type === "tvSeries") {
       if (episodeCount) {
         badges.push({
@@ -838,7 +893,7 @@
   function normalizeTmdbDetail(item, mediaType) {
     if (!item) return null;
 
-    const title = item.title || item.name || "";
+    const title = pickTmdbDisplayTitle(item);
     const year = (item.release_date || item.first_air_date || "").slice(0, 4);
     const genres = (item.genres || []).map((g) => g.name);
     const actors = (item.credits?.cast || [])
@@ -873,18 +928,72 @@
     });
   }
 
-  async function fetchTmdbDetails(mediaType, tmdbId) {
-    const cacheKey = `tmdb:${mediaType}:${tmdbId}`;
+  function mergeDetailLocales(localPayload, enPayload) {
+    if (!localPayload || !enPayload) return localPayload || enPayload;
+    const pickTitle = (local, en) => {
+      const l = String(local || "").trim();
+      const e = String(en || "").trim();
+      if (/[\u0600-\u06FF]/.test(l)) return l;
+      return l || e;
+    };
+    const pickText = (local, en) => {
+      const l = String(local || "").trim();
+      const e = String(en || "").trim();
+      return l || e;
+    };
+    return {
+      ...localPayload,
+      title: pickTitle(localPayload.title, enPayload.title),
+      plot: pickText(localPayload.plot, enPayload.plot),
+      runtime: localizeRuntimeLabel(
+        pickText(localPayload.runtime, enPayload.runtime) ||
+          localPayload.runtime ||
+          enPayload.runtime
+      ),
+    };
+  }
+
+  async function fetchTmdbDetails(mediaType, tmdbId, titleLocale = "en") {
+    const locale = titleLocale === "ar" ? "ar" : "en";
+    const lang = locale === "ar" ? "ar-SA" : "en-US";
+    const cacheKey = `tmdb:${mediaType}:${tmdbId}:${locale}`;
     const cached = readCached(cacheKey);
     if (cached) return cached;
 
+    // Try direct API first (fast, only works if client has a TMDB key)
     const json = await fetchTmdb(`${mediaType}/${tmdbId}`, {
+      language: lang,
       append_to_response:
         mediaType === "tv" ? "credits,content_ratings" : "credits,release_dates",
     });
-    const payload = normalizeTmdbDetail(json, mediaType);
-    if (payload) writeCacheEntry(cacheKey, payload);
-    return payload;
+
+    if (json) {
+      let payload = normalizeTmdbDetail(json, mediaType);
+      if (locale === "ar") {
+        const enJson = await fetchTmdb(`${mediaType}/${tmdbId}`, {
+          language: "en-US",
+          append_to_response:
+            mediaType === "tv" ? "credits,content_ratings" : "credits,release_dates",
+        });
+        if (enJson) {
+          const enPayload = normalizeTmdbDetail(enJson, mediaType);
+          payload = mergeDetailLocales(payload, enPayload);
+        }
+      }
+      if (payload) writeCacheEntry(cacheKey, payload);
+      return payload;
+    }
+
+    // Fallback: use edge function when no client-side TMDB key
+    if (window.WatchlistTmdb?.isAvailable()) {
+      const details = await window.WatchlistTmdb.getDetails(mediaType, tmdbId, locale);
+      if (details?.title) {
+        writeCacheEntry(cacheKey, details);
+        return details;
+      }
+    }
+
+    return null;
   }
 
   async function fetchTmdbByImdbId(imdbId) {
@@ -919,10 +1028,12 @@
   }
 
   async function searchTmdb(query, type, page = 1) {
+    const titleLocale = detectQueryTitleLocale(query);
+    const lang = titleLocale === "ar" ? "ar-SA" : "en-US";
     const results = [];
 
     if (type === "all" || type === "movie") {
-      const movies = await fetchTmdb("search/movie", { query, page });
+      const movies = await fetchTmdb("search/movie", { query, page, language: lang });
       for (const item of movies?.results || []) {
         results.push({
           source: "tmdb",
@@ -930,7 +1041,7 @@
           tmdbId: item.id,
           imdbId: null,
           anilistId: null,
-          title: item.title || "",
+          title: pickTmdbDisplayTitle(item, titleLocale),
           year: (item.release_date || "").slice(0, 4),
           type: "movie",
           poster: item.poster_path ? `${TMDB_IMAGE_SM}${item.poster_path}` : "",
@@ -939,7 +1050,7 @@
     }
 
     if (type === "all" || type === "series") {
-      const shows = await fetchTmdb("search/tv", { query, page });
+      const shows = await fetchTmdb("search/tv", { query, page, language: lang });
       for (const item of shows?.results || []) {
         results.push({
           source: "tmdb",
@@ -947,7 +1058,7 @@
           tmdbId: item.id,
           imdbId: null,
           anilistId: null,
-          title: item.name || "",
+          title: pickTmdbDisplayTitle(item, titleLocale),
           year: (item.first_air_date || "").slice(0, 4),
           type: "series",
           poster: item.poster_path ? `${TMDB_IMAGE_SM}${item.poster_path}` : "",
@@ -1033,15 +1144,17 @@
     return data;
   }
 
-  async function getDetailsForPick(pick) {
+  async function getDetailsForPick(pick, options = {}) {
     if (!pick) return null;
+
+    const titleLocale = detectQueryTitleLocale(options.searchQuery || "");
 
     if (pick.anilistId) {
       return fetchAnilistById(pick.anilistId);
     }
 
     if (pick.tmdbType && pick.tmdbId) {
-      return fetchTmdbDetails(pick.tmdbType, pick.tmdbId);
+      return fetchTmdbDetails(pick.tmdbType, pick.tmdbId, titleLocale);
     }
 
     if (pick.imdbId) {
@@ -1076,6 +1189,23 @@
     return (json.Search || []).map(normalizeOmdbSearchResult).filter(Boolean);
   }
 
+  /**
+   * Search via the TMDB edge function if Supabase is configured.
+   * Falls back to direct API calls when not available.
+   */
+  async function searchViaTmdbEdge(query, type, page) {
+    if (typeof window.WatchlistTmdb?.search !== "function") return null;
+    if (!window.WatchlistTmdb.isAvailable()) return null;
+
+    const tmdbType =
+      type === "series" ? "tv" : type === "movie" ? "movie" : "multi";
+    const titleLocale = detectQueryTitleLocale(query);
+
+    const result = await window.WatchlistTmdb.search(query, tmdbType, page, titleLocale);
+    if (!result?.ok) return null;
+    return result.results || [];
+  }
+
   async function searchTitles(query, options = {}) {
     const q = String(query || "").trim();
     if (q.length < 2) {
@@ -1093,14 +1223,20 @@
     if (type === "anime") {
       tasks.push(searchAnilist(q, page));
     } else {
-      if (hasOmdbKey()) {
-        tasks.push(searchOmdb(q, { type, page }));
-      }
-
-      if (hasTmdbKey()) {
-        const tmdbType =
-          type === "series" ? "series" : type === "movie" ? "movie" : "all";
-        tasks.push(searchTmdb(q, tmdbType, page));
+      // Prefer edge function search: supports Arabic, partial matches, no key exposure
+      const edgeResults = await searchViaTmdbEdge(q, type, page);
+      if (edgeResults !== null) {
+        tasks.push(Promise.resolve(edgeResults));
+      } else {
+        // Fall back to direct API calls when edge is unavailable
+        if (hasOmdbKey()) {
+          tasks.push(searchOmdb(q, { type, page }));
+        }
+        if (hasTmdbKey()) {
+          const tmdbType =
+            type === "series" ? "series" : type === "movie" ? "movie" : "all";
+          tasks.push(searchTmdb(q, tmdbType, page));
+        }
       }
 
       if (type === "all") {
@@ -1143,6 +1279,20 @@
     return null;
   }
 
+  function preferLocalizedTitle(searchTitle, detailsTitle, searchQuery = "") {
+    const titleLocale = detectQueryTitleLocale(searchQuery);
+    const a = String(searchTitle || "").trim();
+    const b = String(detailsTitle || "").trim();
+    if (titleLocale === "ar") {
+      if (/[\u0600-\u06FF]/.test(a)) return a;
+      if (/[\u0600-\u06FF]/.test(b)) return b;
+      return a || b;
+    }
+    if (b && !/[\u0600-\u06FF]/.test(b)) return b;
+    if (a && !/[\u0600-\u06FF]/.test(a)) return a;
+    return b || a;
+  }
+
   window.WatchlistMetadata = {
     extractImdbId,
     extractAnilistId,
@@ -1171,6 +1321,7 @@
     hasOmdbKey,
     hasTmdbKey,
     hasSearchConfigured,
+    preferLocalizedTitle,
     getApiKey: getOmdbKey,
   };
 })();

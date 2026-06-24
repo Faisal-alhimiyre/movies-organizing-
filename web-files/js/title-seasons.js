@@ -557,7 +557,7 @@
             </button>
             <div class="tds-carousel" role="listbox"
               aria-label="${esc(t("seasons.loading"))}"
-              tabindex="0" dir="ltr"></div>
+              tabindex="0"></div>
             <button class="tds-nav-btn tds-nav-btn--next" data-tds-action="next-season" hidden
               aria-label="${esc(t("seasons.nextSeason"))}">
               ${chevronSvg("right")}
@@ -994,18 +994,12 @@
     if (!_carouselEl) return;
     const card = _carouselEl.querySelector(`[data-tds-season="${seasonNum}"]`);
     if (!card) return;
-
-    const carouselRect = _carouselEl.getBoundingClientRect();
-    const cardRect     = card.getBoundingClientRect();
-    const scrollLeft   = _carouselEl.scrollLeft
-      + (cardRect.left - carouselRect.left)
-      - (carouselRect.width / 2 - cardRect.width / 2);
-
-    if (animate) {
-      _carouselEl.scrollTo({ left: scrollLeft, behavior: "smooth" });
-    } else {
-      _carouselEl.scrollLeft = scrollLeft;
-    }
+    // scrollIntoView with inline:'center' handles both LTR and RTL scroll containers
+    card.scrollIntoView({
+      inline: "center",
+      block: "nearest",
+      behavior: animate ? "smooth" : "instant",
+    });
   }
 
   function updateNavButtons(seasons) {
@@ -1225,20 +1219,28 @@
     return vals.reduce((sum, n) => sum + n, 0) / vals.length;
   }
 
+  function isGenericEpisodeTitle(title, epNum) {
+    const text = String(title || "").trim();
+    if (!text) return true;
+    if (/^episode \d+$/i.test(text)) return true;
+    if (new RegExp(`^الحلقة\\s*${epNum}$`, "u").test(text)) return true;
+    return false;
+  }
+
   function episodeRowHtml(ep, entry) {
     const seasonNum = ep.seasonNumber;
     const epNum     = ep.episodeNumber;
     const watched   = P()?.isEpisodeWatched(entry, seasonNum, epNum) ?? false;
-    const isPlaceholder = !ep.title || /^episode \d+$/i.test(ep.title);
-    const title = ep.title || t("seasons.episodeNum", { n: epNum });
+    const isPlaceholder = isGenericEpisodeTitle(ep.title, epNum);
+    const displayTitle = isPlaceholder ? "" : ep.title;
 
     const metaParts = [];
     if (ep.runtimeMinutes) metaParts.push(t("seasons.epRuntime", { n: ep.runtimeMinutes }));
     if (ep.airDate) metaParts.push(t("seasons.epAiredOn", { date: ep.airDate.slice(0, 10) }));
 
     const checkLabel = watched
-      ? t("seasons.episodeUnwatch", { title })
-      : t("seasons.episodeWatched", { title });
+      ? t("seasons.episodeUnwatch", { title: displayTitle || t("seasons.episodeNum", { n: epNum }) })
+      : t("seasons.episodeWatched", { title: displayTitle || t("seasons.episodeNum", { n: epNum }) });
     const sourceRating = episodeExternalRating(ep);
     const yourRating = episodeUserRating(entry, seasonNum, epNum);
 
@@ -1263,8 +1265,8 @@
       </div>
       <div class="tds-ep-content">
         <div class="tds-ep-header">
-          <span class="tds-ep-num">E${esc(String(epNum))}</span>
-          <h4 class="tds-ep-title${isPlaceholder ? " tds-ep-title--placeholder" : ""}">${esc(title)}</h4>
+          <span class="tds-ep-num">${esc(t("seasons.episodeNum", { n: epNum }))}</span>
+          ${displayTitle ? `<h4 class="tds-ep-title">${esc(displayTitle)}</h4>` : ""}
           ${sourceRating != null
             ? `<span class="tds-ep-source-rating" title="${esc(t("seasons.episodeRatingSource", { rating: formatRatingValue(sourceRating) }))}">${esc(formatRatingValue(sourceRating))}<span class="tds-ep-source-rating__max">/10</span></span>`
             : ""}
@@ -1361,7 +1363,12 @@
         ? `<img class="tds-episode-modal__still" src="${esc(ep.still)}" alt="" />`
         : `<div class="tds-episode-modal__still-placeholder" aria-hidden="true"></div>`;
     }
-    if (titleEl) titleEl.textContent = `${t("seasons.episodeNum", { n: ep.episodeNumber })} · ${ep.title || t("seasons.episodeNum", { n: ep.episodeNumber })}`;
+    if (titleEl) {
+      const displayTitle = isGenericEpisodeTitle(ep.title, ep.episodeNumber)
+        ? t("seasons.episodeNum", { n: ep.episodeNumber })
+        : (ep.title || t("seasons.episodeNum", { n: ep.episodeNumber }));
+      titleEl.textContent = `${t("seasons.episodeNum", { n: ep.episodeNumber })} · ${displayTitle}`;
+    }
     if (metaEl) {
       const meta = [];
       if (ep.runtimeMinutes) meta.push(t("seasons.epRuntime", { n: ep.runtimeMinutes }));

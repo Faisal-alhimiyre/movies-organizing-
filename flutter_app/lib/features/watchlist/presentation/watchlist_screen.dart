@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../../core/utils/clipboard_copy.dart';
 import '../../../core/utils/pending_share.dart';
+import '../../../core/utils/import_file.dart';
 import '../../../core/utils/watchlist_import.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -499,6 +500,33 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
     }
   }
 
+  Future<void> _importFromFile() async {
+    final l10n = ref.read(l10nProvider);
+    final result = await pickImportPayloadFromFile();
+
+    if (!mounted) return;
+
+    if (result.cancelled) return;
+
+    if (result.invalid || result.payload == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.importInvalidFile)),
+      );
+      return;
+    }
+
+    final session = ref.read(sessionProvider);
+    final auth = ref.read(authRepositoryProvider);
+    final listName =
+        auth.listLabel(session?.listId, session?.accountId) ?? l10n.appTitle;
+    final snapshot = ref.read(watchlistControllerProvider).value;
+    await _openImportOptions(
+      payload: result.payload!,
+      listName: listName,
+      currentCount: snapshot?.items.length ?? 0,
+    );
+  }
+
   Future<void> _exportBackupFile(
     ShareSnapshotPayload payload,
     L10n l10n,
@@ -539,6 +567,7 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
     Widget buildHeader({
       int total = 0,
       int watchedCount = 0,
+      int inProgressCount = 0,
       SyncDisplayStatus syncStatus = SyncDisplayStatus.local,
       VoidCallback? onAdd,
     }) =>
@@ -546,6 +575,7 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
           listName: listName ?? l10n.appTitle,
           total: total,
           watchedCount: watchedCount,
+          inProgressCount: inProgressCount,
           syncStatus: syncStatus,
           cloudConfigured: cloud,
           sharePublishing: _sharePublishing,
@@ -553,6 +583,7 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
           onAdd: onAdd,
           onShare: _shareList,
           onManageLists: () => showManageListsSheet(context, ref, l10n: l10n),
+          onImportFile: _importFromFile,
           onChangeCode: _changeCode,
           onDeleteAccount: _deleteAccount,
           onSignOut: _signOut,
@@ -580,6 +611,7 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
                 data: (s) => buildHeader(
                   total: s.total,
                   watchedCount: s.watchedCount,
+                  inProgressCount: s.inProgressCount,
                   syncStatus: s.syncStatus,
                   onAdd: () => _openAddForm(context, ref, l10n, typeFilter, s),
                 ),
@@ -720,6 +752,10 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
           snapshot,
           TitleCardAction.delete,
         );
+      case ItemDetailAction.openSeasons:
+        // Season sheet is opened directly from item_detail_sheet.dart;
+        // this case is never returned but must be handled for exhaustiveness.
+        break;
     }
   }
 

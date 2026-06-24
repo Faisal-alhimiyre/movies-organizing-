@@ -91,6 +91,24 @@ WatchlistConvertResult rowsToWatchlist(List<Map<String, dynamic>> rows) {
     final poster = row['poster']?.toString() ?? '';
     if (poster.isNotEmpty) entry['poster'] = poster;
 
+    final cardPoster = row['card_poster']?.toString() ?? '';
+    if (cardPoster.isNotEmpty) entry['cardPoster'] = cardPoster;
+
+    final selectedSeason = row['selected_season'];
+    if (selectedSeason != null) {
+      final n = selectedSeason is int
+          ? selectedSeason
+          : int.tryParse(selectedSeason.toString());
+      if (n != null) entry['selectedSeason'] = n;
+    }
+
+    final selectedSeasonName = row['selected_season_name']?.toString() ?? '';
+    if (selectedSeasonName.isNotEmpty) {
+      entry['selectedSeasonName'] = selectedSeasonName;
+    }
+
+    if (row['no_specials'] == true) entry['noSpecials'] = true;
+
     final imdbRating = row['imdb_rating']?.toString() ?? '';
     if (imdbRating.isNotEmpty) entry['imdbRating'] = imdbRating;
 
@@ -123,7 +141,9 @@ WatchlistConvertResult rowsToWatchlist(List<Map<String, dynamic>> rows) {
     // Rows with granular progress but !watched are still tracked (in-progress).
     final isWatched = row['watched'] == true;
     final rawProgress = row['watch_progress'];
-    final hasProgress = rawProgress is Map && rawProgress.isNotEmpty;
+    final progressMap =
+        rawProgress is Map && rawProgress.isNotEmpty ? rawProgress : null;
+    final hasProgress = progressMap != null;
 
     if (isWatched || hasProgress) {
       final watchEntry = <String, dynamic>{};
@@ -143,8 +163,8 @@ WatchlistConvertResult rowsToWatchlist(List<Map<String, dynamic>> rows) {
       }
 
       // Attach granular progress when present.
-      if (hasProgress) {
-        watchEntry['progress'] = Map<String, dynamic>.from(rawProgress as Map);
+      if (progressMap != null) {
+        watchEntry['progress'] = Map<String, dynamic>.from(progressMap);
       }
 
       watched[itemId] = watchEntry;
@@ -190,7 +210,7 @@ List<Map<String, dynamic>> watchlistToRows(
         final itemId = makeItemId(contentType, genre, title);
         final watchMeta = _watchMetaForRow(watched[itemId]);
 
-        rows.add({
+        final row = <String, dynamic>{
           'list_id': listId,
           'item_id': itemId,
           'content_type': contentType,
@@ -222,7 +242,22 @@ List<Map<String, dynamic>> watchlistToRows(
               <String, dynamic>{'version': 1, 'episodes': <String>[]},
           'added_at': resolveAddedAtIso(map, itemId, existingAddedAt),
           'updated_at': now,
-        });
+        };
+
+        final cardPoster = map['cardPoster']?.toString() ?? '';
+        if (cardPoster.isNotEmpty) row['card_poster'] = cardPoster;
+
+        final selectedSeason = map['selectedSeason'];
+        if (selectedSeason != null) row['selected_season'] = selectedSeason;
+
+        final selectedSeasonName = map['selectedSeasonName']?.toString() ?? '';
+        if (selectedSeasonName.isNotEmpty) {
+          row['selected_season_name'] = selectedSeasonName;
+        }
+
+        if (map['noSpecials'] == true) row['no_specials'] = true;
+
+        rows.add(row);
       }
     }
   }
@@ -250,6 +285,7 @@ List<String> _parseLeadsForRow(Map<String, dynamic> map) {
 ({bool watched, Object? rating, String note, Map<String, dynamic>? progress})
     _watchMetaForRow(dynamic raw) {
   if (raw == null) return (watched: false, rating: null, note: '', progress: null);
+  // Legacy format: bare `true` → fully watched (no episode tracking).
   if (raw == true) return (watched: true, rating: null, note: '', progress: null);
   if (raw is! Map) return (watched: false, rating: null, note: '', progress: null);
 
@@ -267,8 +303,16 @@ List<String> _parseLeadsForRow(Map<String, dynamic> map) {
     progress = Map<String, dynamic>.from(rawProg);
   }
 
+  // `watched` DB column is TRUE only when the title is *fully* watched:
+  //  - Legacy-complete: no `progress` key → fully watched.
+  //  - Granular: `progress.completed == true` → fully watched.
+  //  - In-progress (has episodes but not complete) → watched: false.
+  final isLegacyComplete = progress == null;
+  final isCompleted = progress != null && progress['completed'] == true;
+  final isFullyWatched = isLegacyComplete || isCompleted;
+
   return (
-    watched: true,
+    watched: isFullyWatched,
     rating: rating,
     note: map['note']?.toString().trim() ?? '',
     progress: progress,

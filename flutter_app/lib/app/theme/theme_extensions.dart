@@ -36,6 +36,7 @@ class AppTypeColors extends ThemeExtension<AppTypeColors> {
     required this.franchise,
     required this.franchiseDim,
     required this.watched,
+    this.inProgress = const Color(0xFFF59E0B),
     required this.textMuted,
     required this.titleAccent,
     required this.lead,
@@ -71,6 +72,10 @@ class AppTypeColors extends ThemeExtension<AppTypeColors> {
   final Color franchise;
   final Color franchiseDim;
   final Color watched;
+
+  /// Orange accent for in-progress state — matches CSS `.card--in-progress`.
+  final Color inProgress;
+
   final Color textMuted;
 
   /// Matches CSS `--title-accent` — used for page/section headings.
@@ -153,6 +158,7 @@ class AppTypeColors extends ThemeExtension<AppTypeColors> {
     Color? franchise,
     Color? franchiseDim,
     Color? watched,
+    Color? inProgress,
     Color? textMuted,
     Color? titleAccent,
     Color? lead,
@@ -188,6 +194,7 @@ class AppTypeColors extends ThemeExtension<AppTypeColors> {
         franchise: franchise ?? this.franchise,
         franchiseDim: franchiseDim ?? this.franchiseDim,
         watched: watched ?? this.watched,
+        inProgress: inProgress ?? this.inProgress,
         textMuted: textMuted ?? this.textMuted,
         titleAccent: titleAccent ?? this.titleAccent,
         lead: lead ?? this.lead,
@@ -232,6 +239,7 @@ class AppTypeColors extends ThemeExtension<AppTypeColors> {
       franchise: Color.lerp(franchise, other.franchise, t)!,
       franchiseDim: Color.lerp(franchiseDim, other.franchiseDim, t)!,
       watched: Color.lerp(watched, other.watched, t)!,
+      inProgress: Color.lerp(inProgress, other.inProgress, t)!,
       textMuted: Color.lerp(textMuted, other.textMuted, t)!,
       titleAccent: Color.lerp(titleAccent, other.titleAccent, t)!,
       lead: Color.lerp(lead, other.lead, t)!,

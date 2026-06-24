@@ -2,7 +2,7 @@ import '../../../core/utils/watchlist_parser.dart';
 import '../../../core/utils/title_meta_format.dart';
 import '../../../models/watchlist_item.dart';
 
-enum WatchedFilter { all, watched, unwatched }
+enum WatchedFilter { all, watched, unwatched, inProgress }
 
 class WatchlistFilterState {
   const WatchlistFilterState({
@@ -187,10 +187,23 @@ bool itemMatchesWatchedFilter(
   Map<String, WatchEntry> watched,
 ) {
   return switch (filter) {
-    WatchedFilter.watched => isItemWatched(item.id, watched),
-    WatchedFilter.unwatched => !isItemWatched(item.id, watched),
     WatchedFilter.all => true,
+    WatchedFilter.unwatched => !isItemWatched(item.id, watched),
+    WatchedFilter.watched => _isItemFullyWatched(item.id, watched),
+    WatchedFilter.inProgress => _isItemInProgress(item.id, watched),
   };
+}
+
+bool _isItemFullyWatched(String id, Map<String, WatchEntry> watched) {
+  final entry = watched[id];
+  if (entry == null) return false;
+  return entry.isFullyWatched;
+}
+
+bool _isItemInProgress(String id, Map<String, WatchEntry> watched) {
+  final entry = watched[id];
+  if (entry == null) return false;
+  return entry.isInProgress;
 }
 
 bool itemMatchesRatingFilter(

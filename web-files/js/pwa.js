@@ -47,12 +47,8 @@
   }
 
   function mountIconNote() {
-    if (!isIOS()) return;
-    try {
-      if (localStorage.getItem(ICON_NOTE_KEY)) return;
-    } catch (_error) {
-      return;
-    }
+    // Extension/icon reinstall reminder has been removed — always no-op.
+    return;
 
     const main = document.getElementById("mainContent");
     if (!main?.parentElement) return;

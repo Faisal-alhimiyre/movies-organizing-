@@ -80,6 +80,53 @@
     return locale === "ar" ? "ar-SA" : "en-US";
   }
 
+  function isGenericEpisodeTitle(title, epNum) {
+    const text = String(title || "").trim();
+    if (!text) return true;
+    if (/^episode \d+$/i.test(text)) return true;
+    if (new RegExp(`^الحلقة\\s*${epNum}$`, "u").test(text)) return true;
+    return false;
+  }
+
+  function pickLocalizedEpisodeText(localText, enText, epNum) {
+    const local = String(localText || "").trim();
+    const en = String(enText || "").trim();
+    if (local && !isGenericEpisodeTitle(local, epNum)) return local;
+    if (en) return en;
+    if (local) return local;
+    return "";
+  }
+
+  function pickLocalizedOverview(localText, enText) {
+    const local = String(localText || "").trim();
+    const en = String(enText || "").trim();
+    return local || en;
+  }
+
+  function mergeEpisodeLocaleResults(localResult, enResult) {
+    if (!localResult?.episodes?.length) return enResult || localResult;
+    if (!enResult?.episodes?.length) return localResult;
+    const enByKey = new Map(
+      enResult.episodes.map((ep) => [ep.progressKey || `${ep.seasonNumber}:${ep.episodeNumber}`, ep])
+    );
+    return {
+      ...localResult,
+      seasonOverview: pickLocalizedOverview(localResult.seasonOverview, enResult.seasonOverview),
+      episodes: localResult.episodes.map((ep) => {
+        const key = ep.progressKey || `${ep.seasonNumber}:${ep.episodeNumber}`;
+        const enEp = enByKey.get(key);
+        if (!enEp) return ep;
+        const epNum = ep.episodeNumber;
+        return {
+          ...ep,
+          title: pickLocalizedEpisodeText(ep.title, enEp.title, epNum)
+            || `Episode ${epNum}`,
+          overview: pickLocalizedOverview(ep.overview, enEp.overview),
+        };
+      }),
+    };
+  }
+
   function getLocale() {
     return window.WatchlistI18n?.getLang?.() || "en";
   }
@@ -729,8 +776,8 @@
 
   async function fetchTmdbSeasonEpisodes(tmdbId, season, locale, fallbackPoster = "") {
     const lang = tmdbLanguage(locale);
-    // v6 cache key: invalidates old entries that stored repeated poster stills
-    const cacheKey = `metadata:v6:season:tmdb:${tmdbId}:${season}:${locale}`;
+    // v7: merges localized episode text with English fallbacks per field
+    const cacheKey = `metadata:v7:season:tmdb:${tmdbId}:${season}:${locale}`;
     const cached = readCached(cacheKey, TTL_EPISODES);
     if (cached?.payload) {
       return parseCachedEpisodesResult(cached, { isStale: isStale(cacheKey, TTL_EPISODES) });
@@ -738,13 +785,20 @@
 
     const json = await fetchTmdb(`tv/${tmdbId}/season/${season}`, { language: lang });
     if (json) {
-      const result = normalizeTmdbSeasonEpisodes(json, tmdbId, season, fallbackPoster);
+      let result = normalizeTmdbSeasonEpisodes(json, tmdbId, season, fallbackPoster);
+      if (locale !== "en") {
+        const enJson = await fetchTmdb(`tv/${tmdbId}/season/${season}`, { language: "en-US" });
+        if (enJson) {
+          const enResult = normalizeTmdbSeasonEpisodes(enJson, tmdbId, season, fallbackPoster);
+          result = mergeEpisodeLocaleResults(result, enResult);
+        }
+      }
       writeSeriesCacheEntry(cacheKey, { payload: episodesResultPayload(result), state: result.state }, TTL_EPISODES);
       return result;
     }
 
     if (locale !== "en") {
-      const enKey = `metadata:v6:season:tmdb:${tmdbId}:${season}:en`;
+      const enKey = `metadata:v7:season:tmdb:${tmdbId}:${season}:en`;
       const enCached = readCached(enKey, TTL_EPISODES);
       if (enCached?.payload) return parseCachedEpisodesResult(enCached, { isStale: true });
       const enJson = await fetchTmdb(`tv/${tmdbId}/season/${season}`, { language: "en-US" });
@@ -1471,8 +1525,8 @@
    * @returns {Promise<EpisodesResult>}
    */
   async function fetchTvdbSeasonEpisodes(tvdbId, season, locale, fallbackPoster = "") {
-    // Use locale-keyed cache so locale switches still work correctly
-    const cacheKey = `metadata:v12:season:tvdb:${tvdbId}:${season}:${locale}`;
+    // v13: merges localized episode text with English fallbacks per field
+    const cacheKey = `metadata:v13:season:tvdb:${tvdbId}:${season}:${locale}`;
     const cached = readCached(cacheKey, TTL_EPISODES);
     if (cached?.payload) {
       return parseCachedEpisodesResult(cached, { isStale: isStale(cacheKey, TTL_EPISODES) });
@@ -1483,6 +1537,10 @@
 
     try {
       const raw = await WTvdb.fetchEpisodes(tvdbId, season, locale);
+      let enRaw = null;
+      if (locale !== "en") {
+        enRaw = await WTvdb.fetchEpisodes(tvdbId, season, "en");
+      }
 
       if (!raw) {
         const stale = readCacheStale(cacheKey);
@@ -1510,9 +1568,30 @@
         && uniqueUrls.size === 1
         && seasonPosterUrl
         && uniqueUrls.has(seasonPosterUrl);
-      const episodes = isPosterDup
+      let episodes = isPosterDup
         ? filtered.map((e) => ({ ...e, still: "" }))
         : filtered;
+
+      if (locale !== "en" && enRaw?.length) {
+        const enFiltered = enRaw
+          .filter((e) => e.seasonNumber === season)
+          .map((e) => ({ ...e, still: normalizeArtworkUrl(e.still) }));
+        const enByKey = new Map(
+          enFiltered.map((ep) => [ep.progressKey || `${ep.seasonNumber}:${ep.episodeNumber}`, ep])
+        );
+        episodes = episodes.map((ep) => {
+          const key = ep.progressKey || `${ep.seasonNumber}:${ep.episodeNumber}`;
+          const enEp = enByKey.get(key);
+          if (!enEp) return ep;
+          const epNum = ep.episodeNumber;
+          return {
+            ...ep,
+            title: pickLocalizedEpisodeText(ep.title, enEp.title, epNum)
+              || `Episode ${epNum}`,
+            overview: pickLocalizedOverview(ep.overview, enEp.overview),
+          };
+        });
+      }
 
       const result = { state: ResultState.AVAILABLE, episodes };
       writeSeriesCacheEntry(

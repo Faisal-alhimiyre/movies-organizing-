@@ -130,5 +130,9 @@ String defaultLinkForDetails(MetadataDetail details) {
   if (details.anilistId != null) {
     return 'https://anilist.co/anime/${details.anilistId}/';
   }
+  // TMDB fallback when no IMDb ID — lets the season sheet resolve without IMDb
+  if (details.tmdbType != null && details.tmdbId != null) {
+    return 'https://www.themoviedb.org/${details.tmdbType}/${details.tmdbId}';
+  }
   return '';
 }

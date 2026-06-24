@@ -415,7 +415,7 @@ class SeriesMetadataService {
     String? fallbackPoster,
   }) async {
     final lang = _tmdbLanguage(locale);
-    final cacheKey = '${_v5Prefix}season:tmdb:$tmdbId:$season:$locale';
+    final cacheKey = 'metadata:v7:season:tmdb:$tmdbId:$season:$locale';
 
     final cached = _readRawCache(cacheKey, _episodesTtl);
     if (cached != null) {
@@ -428,19 +428,34 @@ class SeriesMetadataService {
     final json = await _fetchTmdb('tv/$tmdbId/season/$season', {'language': lang});
 
     if (json != null) {
-      final result = _normalizeTmdbSeasonEpisodes(
+      var result = _normalizeTmdbSeasonEpisodes(
         json,
         tmdbId,
         season,
         fallbackPoster: fallbackPoster,
       );
+      if (locale != 'en') {
+        final enJson = await _fetchTmdb(
+          'tv/$tmdbId/season/$season',
+          {'language': 'en-US'},
+        );
+        if (enJson != null) {
+          final enResult = _normalizeTmdbSeasonEpisodes(
+            enJson,
+            tmdbId,
+            season,
+            fallbackPoster: fallbackPoster,
+          );
+          result = _mergeEpisodeLocaleResults(result, enResult);
+        }
+      }
       _writeRawCache(cacheKey, _episodesResultToJson(result), _episodesTtl);
       return result;
     }
 
     // Fallback to English when localized fetch failed.
     if (locale != 'en') {
-      final enKey = '${_v5Prefix}season:tmdb:$tmdbId:$season:en';
+      final enKey = 'metadata:v7:season:tmdb:$tmdbId:$season:en';
       final enCached = _readRawCache(enKey, _episodesTtl);
       if (enCached != null) {
         return _parseCachedEpisodesResult(enCached, isStale: true);
@@ -1128,6 +1143,71 @@ class SeriesMetadataService {
   /// Maps locale code to a TMDb `language` parameter.
   static String _tmdbLanguage(String locale) =>
       locale == 'ar' ? 'ar-SA' : 'en-US';
+
+  static bool _isGenericEpisodeTitle(String? title, int epNum) {
+    final text = title?.trim() ?? '';
+    if (text.isEmpty) return true;
+    if (RegExp(r'^episode \d+$', caseSensitive: false).hasMatch(text)) {
+      return true;
+    }
+    if (RegExp('^الحلقة\\s*$epNum\$').hasMatch(text)) return true;
+    return false;
+  }
+
+  static String _pickLocalizedEpisodeTitle(
+    String? localTitle,
+    String? enTitle,
+    int epNum,
+  ) {
+    final local = localTitle?.trim() ?? '';
+    final en = enTitle?.trim() ?? '';
+    if (local.isNotEmpty && !_isGenericEpisodeTitle(local, epNum)) return local;
+    if (en.isNotEmpty) return en;
+    if (local.isNotEmpty) return local;
+    return 'Episode $epNum';
+  }
+
+  static String _pickLocalizedOverview(String? localText, String? enText) {
+    final local = localText?.trim() ?? '';
+    final en = enText?.trim() ?? '';
+    return local.isNotEmpty ? local : en;
+  }
+
+  static SeasonEpisodesResult _mergeEpisodeLocaleResults(
+    SeasonEpisodesResult localResult,
+    SeasonEpisodesResult enResult,
+  ) {
+    final localEps = localResult.episodes ?? const [];
+    final enEps = enResult.episodes ?? const [];
+    if (localEps.isEmpty) return enResult;
+    if (enEps.isEmpty) return localResult;
+
+    final enByKey = {
+      for (final ep in enEps) ep.progressKey: ep,
+    };
+
+    final merged = localEps.map((ep) {
+      final enEp = enByKey[ep.progressKey];
+      if (enEp == null) return ep;
+      return EpisodeDetail(
+        source: ep.source,
+        seriesTmdbId: ep.seriesTmdbId,
+        seasonNumber: ep.seasonNumber,
+        episodeNumber: ep.episodeNumber,
+        title: _pickLocalizedEpisodeTitle(ep.title, enEp.title, ep.episodeNumber),
+        still: ep.still.isNotEmpty ? ep.still : enEp.still,
+        overview: _pickLocalizedOverview(ep.overview, enEp.overview),
+        runtimeMinutes: ep.runtimeMinutes ?? enEp.runtimeMinutes,
+        airDate: ep.airDate ?? enEp.airDate,
+        isAired: ep.isAired,
+      );
+    }).toList();
+
+    return SeasonEpisodesResult(
+      state: localResult.state,
+      episodes: merged,
+    );
+  }
 
   /// True when [airDate] is in the past (or absent, assumed aired).
   static bool _isAired(String? airDate) {

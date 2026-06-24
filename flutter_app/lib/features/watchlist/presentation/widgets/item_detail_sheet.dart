@@ -8,13 +8,16 @@ import '../../../../l10n/l10n.dart';
 import '../../../../models/metadata_detail.dart';
 import '../../../../models/watchlist_item.dart';
 import '../../../../repositories/metadata/metadata_service.dart';
+import '../../../../repositories/metadata/series_metadata_service.dart';
 import '../../application/title_meta_backfill.dart';
 import '../../application/watchlist_controller.dart';
 import 'card_poster.dart';
+import 'season_sheet.dart';
 
 enum ItemDetailAction {
   openLink,
   toggleWatched,
+  openSeasons,
   edit,
   moveToList,
   delete,
@@ -82,6 +85,11 @@ class _ItemDetailSheetState extends ConsumerState<ItemDetailSheet> {
   bool get _hasLink {
     final link = item.link?.trim();
     return link != null && link.isNotEmpty;
+  }
+
+  bool get _hasSeasons {
+    final ct = item.contentType;
+    return ct == 'tvSeries' || ct == 'anime';
   }
 
   @override
@@ -180,10 +188,20 @@ class _ItemDetailSheetState extends ConsumerState<ItemDetailSheet> {
                     child: _ActionList(
                       l10n: widget.l10n,
                       showOpenLink: _hasLink,
+                      showSeasons: _hasSeasons,
                       isWatched: _isWatched,
                       canMoveToList: widget.canMoveToList,
                       onOpenLink: () =>
                           _close(context, ItemDetailAction.openLink),
+                      onOpenSeasons: () async {
+                        // Don't close the detail sheet — open season sheet on top.
+                        await showSeasonSheet(
+                          context,
+                          l10n: widget.l10n,
+                          item: item,
+                          watched: widget.watched,
+                        );
+                      },
                       onToggleWatched: () =>
                           _close(context, ItemDetailAction.toggleWatched),
                       onEdit: () => _close(context, ItemDetailAction.edit),
@@ -370,10 +388,15 @@ class _RatingBlock extends StatelessWidget {
     final theme = Theme.of(context);
     final isWatched = watched != null;
     final hasRating = hasWatchRating(watched);
+    final isFullyWatched = watched?.isFullyWatched ?? false;
+    final isInProgress = watched?.isInProgress ?? false;
+
+    // Rating/note block is interactive when fully watched (tappable to edit).
+    // In-progress entries can also be tapped to add a note.
     final interactive = isWatched;
 
     final Widget content;
-    if (hasRating) {
+    if (hasRating && isFullyWatched) {
       content = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -398,7 +421,32 @@ class _RatingBlock extends StatelessWidget {
           ],
         ],
       );
-    } else if (isWatched) {
+    } else if (isInProgress) {
+      final progress = watched!.progress;
+      final eps = progress?.episodes.length ?? 0;
+      final totals = progress?.seasonTotals;
+      final total =
+          totals != null ? totals.values.fold(0, (a, b) => a + b) : 0;
+      final progressText = total > 0 ? l10n.progressEpisodes(eps, total) : null;
+      final note = watched?.note?.trim();
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l10n.filterInProgress,
+            style: theme.textTheme.labelLarge,
+          ),
+          if (progressText != null) ...[
+            const SizedBox(height: 4),
+            Text(progressText, style: theme.textTheme.bodySmall),
+          ],
+          if (note != null && note.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(note, style: theme.textTheme.bodySmall),
+          ],
+        ],
+      );
+    } else if (isFullyWatched) {
       content = Text(
         l10n.mobileWatchedUnrated,
         style: theme.textTheme.bodyMedium,
@@ -460,24 +508,32 @@ class _ExternalRatingsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final imdb = _formatImdb(item.imdbRating);
     final anilist = _formatAnilist(item.anilistRating);
+    final imdbUrl = _imdbUrl(item.link);
+    final anilistUrl = _anilistUrl(item.link);
 
     return Wrap(
       spacing: 8,
       runSpacing: 6,
       children: [
         if (imdb != null)
-          ContentScorePill(
-            value: imdb,
-            sourceLabel: 'IMDb',
-            bg: const Color(0xFFF5C518),
-            fg: Colors.black,
+          GestureDetector(
+            onTap: imdbUrl != null ? () => _openUrl(imdbUrl) : null,
+            child: ContentScorePill(
+              value: imdb,
+              sourceLabel: 'IMDb',
+              bg: const Color(0xFFF5C518),
+              fg: Colors.black,
+            ),
           ),
         if (anilist != null)
-          ContentScorePill(
-            value: anilist,
-            sourceLabel: 'AniList',
-            bg: const Color(0xFF02A9FF),
-            fg: Colors.white,
+          GestureDetector(
+            onTap: anilistUrl != null ? () => _openUrl(anilistUrl) : null,
+            child: ContentScorePill(
+              value: anilist,
+              sourceLabel: 'AniList',
+              bg: const Color(0xFF02A9FF),
+              fg: Colors.white,
+            ),
           ),
       ],
     );
@@ -488,9 +544,11 @@ class _ActionList extends StatelessWidget {
   const _ActionList({
     required this.l10n,
     required this.showOpenLink,
+    required this.showSeasons,
     required this.isWatched,
     required this.canMoveToList,
     required this.onOpenLink,
+    required this.onOpenSeasons,
     required this.onToggleWatched,
     required this.onEdit,
     required this.onMove,
@@ -499,9 +557,11 @@ class _ActionList extends StatelessWidget {
 
   final L10n l10n;
   final bool showOpenLink;
+  final bool showSeasons;
   final bool isWatched;
   final bool canMoveToList;
   final VoidCallback onOpenLink;
+  final VoidCallback onOpenSeasons;
   final VoidCallback onToggleWatched;
   final VoidCallback onEdit;
   final VoidCallback onMove;
@@ -512,6 +572,13 @@ class _ActionList extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (showSeasons)
+          FilledButton.icon(
+            onPressed: onOpenSeasons,
+            icon: const Icon(Icons.tv_outlined, size: 16),
+            label: Text(l10n.progressSeasons),
+          ),
+        if (showSeasons) const SizedBox(height: 8),
         if (showOpenLink)
           FilledButton(
             onPressed: onOpenLink,
@@ -578,4 +645,28 @@ Future<void> openItemLink(String? link) async {
   if (uri == null) return;
 
   await launchUrl(uri, mode: LaunchMode.externalApplication);
+}
+
+Future<void> _openUrl(String url) async {
+  final uri = Uri.tryParse(url);
+  if (uri == null) return;
+  await launchUrl(uri, mode: LaunchMode.externalApplication);
+}
+
+/// Returns the IMDb URL from the item's link if it points to IMDb.
+String? _imdbUrl(String? link) {
+  final raw = link?.trim();
+  if (raw == null || raw.isEmpty) return null;
+  if (raw.contains('imdb.com')) return raw.contains('://') ? raw : 'https://$raw';
+  final imdbId = MetadataService.extractImdbId(raw);
+  if (imdbId != null) return 'https://www.imdb.com/title/$imdbId/';
+  return null;
+}
+
+/// Returns the AniList URL from the item's link if it points to AniList.
+String? _anilistUrl(String? link) {
+  final raw = link?.trim();
+  if (raw == null || raw.isEmpty) return null;
+  if (raw.contains('anilist.co')) return raw.contains('://') ? raw : 'https://$raw';
+  return null;
 }

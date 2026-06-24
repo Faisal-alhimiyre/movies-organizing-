@@ -289,9 +289,16 @@
               type="search"
               id="searchInput"
               class="search__input"
-              placeholder="Search titles, actors, or summaries…"
+              placeholder=" "
               autocomplete="off"
+              data-i18n-aria="filter.searchAria"
             />
+            <span
+              class="search__fake-placeholder"
+              id="searchScopeBadge"
+              aria-hidden="true"
+              data-i18n-html="filter.searchPlaceholderRich"
+            ></span>
           </label>
 
           <div class="genre-filter">
@@ -831,43 +838,49 @@
 
         <div class="modal__search" id="searchAddPanel" hidden>
           <div class="title-search" id="searchAddStep">
-            <p class="add-panel-hint">
-              <strong>Can't find your title?</strong> Tap <strong>Manual</strong> at the top and add it yourself.
-            </p>
-            <label class="form-field form-field--full">
-              <span class="form-field__label">Search movies &amp; shows</span>
-              <span class="search title-search__query">
-                <span class="search__icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" focusable="false">
-                    <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2" />
-                    <path d="M16 16l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                  </svg>
+            <!-- Sticky controls: hint + search + type filter + status -->
+            <div class="title-search__controls">
+              <p class="add-panel-hint">
+                <strong>Can't find your title?</strong> Tap <strong>Manual</strong> at the top and add it yourself.
+              </p>
+              <label class="form-field form-field--full">
+                <span class="form-field__label">Search movies &amp; shows</span>
+                <span class="search title-search__query">
+                  <span class="search__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2" />
+                      <path d="M16 16l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    </svg>
+                  </span>
+                  <input
+                    type="search"
+                    id="titleSearchInput"
+                    class="search__input"
+                    placeholder="e.g. Avengers, Demon Slayer…"
+                    autocomplete="off"
+                  />
                 </span>
-                <input
-                  type="search"
-                  id="titleSearchInput"
-                  class="search__input"
-                  placeholder="e.g. Avengers, Demon Slayer…"
-                  autocomplete="off"
-                />
-              </span>
-            </label>
-            <div class="title-search__filters">
-              <label class="title-search__filter">
-                <span class="title-search__filter-label">Type</span>
-                <select id="titleSearchType" class="select">
-                  <option value="all">All</option>
-                  <option value="movie">Movies</option>
-                  <option value="series">TV Series</option>
-                  <option value="anime">Anime</option>
-                </select>
               </label>
+              <div class="title-search__filters">
+                <label class="title-search__filter">
+                  <span class="title-search__filter-label">Type</span>
+                  <select id="titleSearchType" class="select">
+                    <option value="all">All</option>
+                    <option value="movie">Movies</option>
+                    <option value="series">TV Series</option>
+                    <option value="anime">Anime</option>
+                  </select>
+                </label>
+              </div>
+              <p class="title-search__status" id="titleSearchStatus" aria-live="polite"></p>
             </div>
-            <p class="title-search__status" id="titleSearchStatus" aria-live="polite"></p>
-            <ul class="title-search__results" id="titleSearchResults"></ul>
-            <button type="button" class="btn btn--ghost title-search__more" id="titleSearchMore" hidden>
-              Load more
-            </button>
+            <!-- Scrollable results area -->
+            <div class="title-search__scroll">
+              <ul class="title-search__results" id="titleSearchResults"></ul>
+              <button type="button" class="btn btn--ghost title-search__more" id="titleSearchMore" hidden>
+                Load more
+              </button>
+            </div>
           </div>
 
           <div class="title-search-confirm" id="searchConfirmStep" hidden>

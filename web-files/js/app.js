@@ -122,6 +122,8 @@
     searchLoading: false,
     searchPickDetails: null,
     searchConfirmSecondary: [],
+    searchAddedKeys: new Set(),
+    searchAddingKeys: new Set(),
     manualLinkMeta: null,
     manualLinkPreviewDetails: null,
     ratingItemId: null,
@@ -587,8 +589,8 @@
   function saveUiPrefs() {
     const listId = state.activeListId;
     if (!listId || !canPersistActiveList(listId)) return;
+    // Filters are local-only — persist to localStorage but do NOT push to cloud.
     writeUiPrefs(listId, collectUiPrefs());
-    queueCloudSync();
   }
 
   function listSyncMeta(listId) {
@@ -597,7 +599,7 @@
       accountId: window.WatchlistAuth?.getAccountId(),
       name: window.WatchlistAuth?.getListLabel(id),
       description: window.WatchlistAuth?.getListDescription(id),
-      uiPrefs: collectUiPrefs(),
+      // uiPrefs intentionally excluded — filters stay device-local.
     };
   }
 
@@ -712,6 +714,17 @@
         state.syncStatus = "error";
         updateStats();
       }
+      // Re-trigger cloud sync and re-enrich any cards with missing data
+      setTimeout(() => {
+        queueCloudSync();
+        // Re-enrich items whose posters or badges may have failed while offline
+        const missingPosterIds = (state.items || [])
+          .filter((item) => !item.poster || item.poster === "")
+          .map((item) => item.id);
+        for (const id of missingPosterIds) {
+          queueItemBadgeEnrichment(id);
+        }
+      }, 800);
     });
     window.addEventListener("offline", () => {
       if (state.syncStatus === "pending" || state.syncStatus === "error") {
@@ -769,13 +782,8 @@
     const localHasData = !window.WatchlistAuth.isWatchlistEmpty(state.data);
     const remoteHasData = !window.WatchlistAuth.isWatchlistEmpty(remote.watchlist);
     const localStamp = Math.max(meta.localUpdated, meta.syncedAt);
-    const remoteUiPrefs = normalizeUiPrefs(remote.uiPrefs);
-    const localUiPrefs = readUiPrefs(listId);
 
-    if (remoteUiPrefs && (remoteUpdated > localStamp || !localUiPrefs)) {
-      applyUiPrefs(remoteUiPrefs, { renderNow: false });
-      writeUiPrefs(listId, remoteUiPrefs);
-    }
+    // uiPrefs are device-local — never overwritten from cloud.
 
     if (
       remoteHasData &&
@@ -807,10 +815,6 @@
           name: remote.name,
           description: remote.description || "",
         });
-      }
-      if (remoteUiPrefs) {
-        applyUiPrefs(remoteUiPrefs, { renderNow: false });
-        writeUiPrefs(listId, remoteUiPrefs);
       }
       writeSyncMeta(listId, { syncedAt: remoteUpdated, localUpdated: remoteUpdated });
       state.syncStatus = "saved";
@@ -2673,7 +2677,8 @@
 
   function updateStats() {
     const total = state.items.length;
-    const watchedCount = state.items.filter((i) => isItemWatched(i.id)).length;
+    const watchedCount = state.items.filter((i) => itemProgressState(i.id) === "watched").length;
+    const inProgressCount = state.items.filter((i) => itemProgressState(i.id) === "inProgress").length;
 
     const filteredForTabs = state.items.filter(itemMatchesFiltersExceptType);
     const tabCounts = {
@@ -2703,6 +2708,10 @@
         <span class="header__stat-value text-num">${watchedCount}</span>
         <span class="header__stat-label">${escapeHtml(t("stats.watchedWord"))}</span>
       </span>
+      ${inProgressCount > 0 ? `<span class="header__stat-chip">
+        <span class="header__stat-value text-num">${inProgressCount}</span>
+        <span class="header__stat-label">${escapeHtml(t("stats.inProgressWord"))}</span>
+      </span>` : ""}
       ${syncHtml}
     `;
 
@@ -3709,10 +3718,10 @@
               </button>
             </div>
           </div>`
-        : `<span class="card__footer-badge card__footer-badge--unwatched">${escapeHtml(t("card.notWatchedShort"))}</span>`;
+        : `<button type="button" class="card__footer-badge card__footer-badge--unwatched" data-action="quick-toggle-watched" data-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(t("card.markWatched"))}">${escapeHtml(t("card.notWatchedShort"))}</button>`;
 
     const mobileFooter = !isWatched
-      ? `<span class="card__watch-status">${escapeHtml(t("card.notWatchedShort"))}</span>`
+      ? `<button type="button" class="card__watch-status" data-action="quick-toggle-watched" data-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(t("card.markWatched"))}">${escapeHtml(t("card.notWatchedShort"))}</button>`
       : rated
         ? `<div class="card__watch-rating">
             <div class="card__watch-rating-top">
@@ -3726,8 +3735,8 @@
             }
           </div>`
         : progressState === "inProgress"
-          ? `<span class="card__watch-status card__watch-status--in-progress">${escapeHtml(t("card.inProgress"))}</span>`
-          : `<span class="card__watch-status card__watch-status--watched">${escapeHtml(t("card.watched"))}</span>`;
+          ? `<button type="button" class="card__watch-status card__watch-status--in-progress" data-action="quick-toggle-watched" data-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(t("card.markWatched"))}">${escapeHtml(t("card.inProgress"))}</button>`
+          : `<button type="button" class="card__watch-status card__watch-status--watched" data-action="quick-toggle-watched" data-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(t("card.markUnwatched"))}">${escapeHtml(t("card.watched"))}</button>`;
     const moveToListItem = canMoveToList
       ? `<button
           type="button"
@@ -4130,14 +4139,22 @@
     });
   }
 
+  function setModalSearchMode(hasResults) {
+    // Toggle class so CSS can switch between auto-height (no results / confirm)
+    // and full-height (search results are visible and need to scroll).
+    els.modal?.classList.toggle("modal--has-results", Boolean(hasResults));
+  }
+
   function renderTitleSearchResults() {
     if (!els.titleSearchResults) return;
 
     if (!state.searchResults.length) {
       els.titleSearchResults.innerHTML = "";
       state.searchResultFocusIndex = -1;
+      setModalSearchMode(false);
       return;
     }
+    setModalSearchMode(true);
 
     els.titleSearchResults.setAttribute("role", "listbox");
     els.titleSearchResults.setAttribute("aria-label", t("search.label"));
@@ -4145,6 +4162,12 @@
     els.titleSearchResults.innerHTML = state.searchResults
       .map((result, index) => {
         const onList = isSearchResultOnList(result);
+        const resultKey =
+          result.resultKey ||
+          `${result.title}::${result.year || ""}`;
+        const isAdded = onList || state.searchAddedKeys.has(resultKey);
+        const isAdding = state.searchAddingKeys.has(resultKey);
+
         const poster = result.poster
           ? `<img class="title-search__poster" src="${escapeHtml(result.poster)}" alt="" loading="lazy" />`
           : `<div class="title-search__poster title-search__poster--empty" aria-hidden="true">🎬</div>`;
@@ -4154,34 +4177,45 @@
         const pickLabel = onList
           ? `${result.title} — ${t("search.alreadyOnList")}`
           : t("search.pickResult", { title: result.title, meta });
-        const listBadge = onList
-          ? `<span class="title-search__badge">${escapeHtml(t("search.alreadyOnList"))}</span>`
-          : "";
         const tabIndex = index === state.searchResultFocusIndex ? "0" : "-1";
-        return `<li role="presentation">
-          <button
-            type="button"
-            class="title-search__item${onList ? " title-search__item--on-list" : ""}"
-            data-action="pick-search-result"
-            data-pick-source="${escapeHtml(result.source || "omdb")}"
-            data-imdb-id="${escapeHtml(result.imdbId || "")}"
-            data-anilist-id="${result.anilistId || ""}"
-            data-tmdb-type="${escapeHtml(result.tmdbType || "")}"
-            data-tmdb-id="${result.tmdbId || ""}"
+
+        // + / ✓ add button
+        const addBtnLabel = isAdded
+          ? t("search.added")
+          : t("search.addResult", { title: result.title });
+        const addBtnIcon = isAdded
+          ? `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="2,8 6,12 14,4"/></svg>`
+          : isAdding
+            ? `<svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="30" stroke-dashoffset="10"><animateTransform attributeName="transform" type="rotate" from="0 8 8" to="360 8 8" dur="0.8s" repeatCount="indefinite"/></circle></svg>`
+            : `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="2" x2="8" y2="14"/><line x1="2" y1="8" x2="14" y2="8"/></svg>`;
+
+        const sharedDataAttrs = `data-pick-source="${escapeHtml(result.source || "omdb")}" data-imdb-id="${escapeHtml(result.imdbId || "")}" data-anilist-id="${result.anilistId || ""}" data-tmdb-type="${escapeHtml(result.tmdbType || "")}" data-tmdb-id="${result.tmdbId || ""}" data-result-key="${escapeHtml(resultKey)}"`;
+
+        return `<li class="title-search__row" role="presentation">
+          <div
+            class="title-search__item${isAdded ? " title-search__item--on-list" : ""}"
+            data-action="${isAdded ? "" : "pick-search-result"}"
+            ${sharedDataAttrs}
             role="option"
             aria-selected="false"
-            aria-disabled="${onList ? "true" : "false"}"
+            aria-disabled="${isAdded ? "true" : "false"}"
             aria-label="${escapeHtml(pickLabel)}"
-            tabindex="${tabIndex}"
-            ${onList ? "disabled" : ""}
+            tabindex="${isAdded ? "-1" : tabIndex}"
           >
             ${poster}
             <span class="title-search__info">
               <span class="title-search__title text-ltr">${escapeHtml(ltr(result.title))}</span>
               <span class="title-search__meta">${escapeHtml(meta)}</span>
             </span>
-            ${listBadge}
-          </button>
+            <button
+              type="button"
+              class="title-search__add-btn${isAdded ? " title-search__add-btn--added" : ""}"
+              data-action="add-search-result"
+              ${sharedDataAttrs}
+              aria-label="${escapeHtml(addBtnLabel)}"
+              ${isAdded || isAdding ? "disabled" : ""}
+            >${addBtnIcon}</button>
+          </div>
         </li>`;
       })
       .join("");
@@ -4195,7 +4229,7 @@
   function getSearchResultButtons() {
     return [
       ...(els.titleSearchResults?.querySelectorAll(
-        "[data-action='pick-search-result']:not([disabled])"
+        "[data-action='pick-search-result']"
       ) || []),
     ];
   }
@@ -4244,6 +4278,7 @@
   }
 
   function resetSearchAddState() {
+    setModalSearchMode(false);
     clearTimeout(searchDebounceTimer);
     state.searchQuery = "";
     state.searchPage = 1;
@@ -4253,6 +4288,8 @@
     state.searchLoading = false;
     state.searchPickDetails = null;
     state.searchConfirmSecondary = [];
+    state.searchAddedKeys = new Set();
+    state.searchAddingKeys = new Set();
 
     if (els.titleSearchInput) els.titleSearchInput.value = "";
     if (els.titleSearchType) {
@@ -4273,8 +4310,25 @@
     setTitleSearchStatus("");
   }
 
+  async function quickToggleWatched(itemId) {
+    if (!itemId) return;
+    const progress = itemProgressState(itemId);
+    if (progress === "watched") {
+      await markItemUnwatched(itemId);
+      return;
+    }
+    const existing = normalizeWatchEntry(state.watched[itemId]);
+    const entry = existing ? { ...existing } : {};
+    delete entry.progress;
+    state.watched[itemId] = entry;
+    saveWatched();
+    render();
+  }
+
   function showSearchConfirmStep(details) {
     if (!els.searchAddStep || !els.searchConfirmStep || !details) return;
+
+    setModalSearchMode(false);
 
     searchConfirmReturnFocus = document.activeElement;
     state.searchPickDetails = details;
@@ -4416,10 +4470,24 @@
     setSearchPickLoading(true);
     setTitleSearchStatus(t("search.loadingDetails"));
     try {
-      const details = await window.WatchlistMetadata.getDetailsForPick(pick);
+      let details = await window.WatchlistMetadata.getDetailsForPick(pick, {
+        searchQuery: state.searchQuery,
+      });
       if (!details?.title) {
         setTitleSearchStatus(t("search.loadFailed"), { error: true });
         return;
+      }
+
+      const searchResult = searchResultFromPick(pick);
+      if (searchResult?.title) {
+        details = {
+          ...details,
+          title: window.WatchlistMetadata.preferLocalizedTitle(
+            searchResult.title,
+            details.title,
+            state.searchQuery
+          ),
+        };
       }
 
       setTitleSearchStatus("");
@@ -4427,6 +4495,103 @@
     } finally {
       setSearchPickLoading(false);
     }
+  }
+
+  /**
+   * Directly add a title from a search result row, without showing the confirm step.
+   * Falls back to the confirm step when essential metadata is missing.
+   */
+  async function handleSearchResultDirectAdd(addBtn) {
+    const pick = searchPickFromButton(addBtn);
+    if (!hasLookupId(pick)) return;
+
+    const resultKey = addBtn.dataset.resultKey || "";
+    if (state.searchAddedKeys.has(resultKey) || state.searchAddingKeys.has(resultKey)) return;
+
+    const existingResult = searchResultFromPick(pick);
+    if (existingResult && isSearchResultOnList(existingResult)) {
+      // Already on list — show checkmark without re-adding
+      state.searchAddedKeys.add(resultKey);
+      renderTitleSearchResults();
+      return;
+    }
+
+    state.searchAddingKeys.add(resultKey);
+    renderTitleSearchResults();
+
+    let details = null;
+    try {
+      details = await window.WatchlistMetadata.getDetailsForPick(pick, {
+        searchQuery: state.searchQuery,
+      });
+    } catch (_) {}
+
+    if (!details?.title) {
+      state.searchAddingKeys.delete(resultKey);
+      setTitleSearchStatus(t("search.loadFailed"), { error: true });
+      renderTitleSearchResults();
+      return;
+    }
+
+    // Preserve the localized title from the search result (e.g. Arabic title)
+    // instead of the English title returned by the details fetch.
+    const searchResult = searchResultFromPick(pick);
+    if (searchResult?.title) {
+      details = {
+        ...details,
+        title: window.WatchlistMetadata.preferLocalizedTitle(
+          searchResult.title,
+          details.title,
+          state.searchQuery
+        ),
+      };
+    }
+
+    // Determine content type from TMDB / current filter
+    const rawType = details.contentType ||
+      (pick.tmdbType === "movie" ? "movies" : pick.type === "movie" ? "movies" : "tvSeries");
+    const contentType = normalizeContentType(rawType);
+
+    const suggested = window.WatchlistMetadata?.suggestGenres(
+      details.genres,
+      STANDARD_GENRES,
+      contentType
+    ) || [];
+    const genre = suggested[0] || STANDARD_GENRES[0];
+
+    const item = buildItemFromSearchDetails(details, {
+      contentType,
+      genre,
+      secondaryGenres: suggested.slice(1),
+    });
+
+    state.searchAddingKeys.delete(resultKey);
+
+    // Fall back to confirm step when data is incomplete
+    if (!item.title || !item.summary || !item.leads.length) {
+      renderTitleSearchResults();
+      showSearchConfirmStep(details);
+      return;
+    }
+
+    const duplicate = findDuplicate(item, null);
+    if (duplicate) {
+      // Already on list from a previous session/sync — mark as added
+      state.searchAddedKeys.add(resultKey);
+      renderTitleSearchResults();
+      return;
+    }
+
+    state.items.push(item);
+    state.data = itemsToNested(state.items);
+    saveData();
+    updateGenreOptions();
+    render();
+    queueItemBadgeEnrichment(item.id);
+
+    state.searchAddedKeys.add(resultKey);
+    renderTitleSearchResults();
+    setTitleSearchStatus(t("search.addedStatus", { title: item.title }));
   }
 
   function applyRatingsFromDetails(details, item) {
@@ -4481,6 +4646,10 @@
     applyRatingsFromDetails(details, item);
     if (details.year) item.year = details.year;
     window.WatchlistMetadata?.applyTitleMetaFromDetails(details, item);
+    // Save external IDs so detail/season sheets can use them without re-fetching
+    if (details.imdbId) item.imdbId = details.imdbId;
+    if (details.tmdbId) item.tmdbId = details.tmdbId;
+    if (details.anilistId) item.anilistId = details.anilistId;
     item.id = makeId(contentType, genre, item.title);
     stampItemAddedAt(item);
     return item;
@@ -6785,6 +6954,11 @@
     });
 
     els.searchAddPanel?.addEventListener("click", async (event) => {
+      const addBtn = event.target.closest("[data-action='add-search-result']");
+      if (addBtn) {
+        await handleSearchResultDirectAdd(addBtn);
+        return;
+      }
       const pick = event.target.closest("[data-action='pick-search-result']");
       if (pick) {
         await handleSearchResultPick(pick);
@@ -7036,6 +7210,23 @@
         return;
       }
 
+      if (action === "quick-toggle-watched") {
+        const progress = itemProgressState(id);
+        if (progress === "watched") {
+          await markItemUnwatched(id);
+        } else {
+          // Quick toggle: mark fully watched without opening rating modal.
+          // Preserve rating/note; discard granular episode progress.
+          const existing = normalizeWatchEntry(state.watched[id]);
+          const entry = existing ? { ...existing } : {};
+          delete entry.progress;
+          state.watched[id] = entry;
+          saveWatched();
+          render();
+        }
+        return;
+      }
+
       if (action === "rate") {
         openRatingModal(id);
         return;
@@ -7259,6 +7450,7 @@
     init,
     renderExternalRatings,
     updateRatingModalActions,
+    quickToggleWatched,
     // Exposed for title-detail.js
     findItem: (id) => state.items.find((i) => i.id === id) ?? null,
     isWatched: isItemWatched,

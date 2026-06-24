@@ -23,8 +23,11 @@
   }
 
   #itemModal .modal__panel {
-    max-width: min(100%, 24rem);
-    max-height: min(88vh, 38rem);
+    width: 100%;
+    max-width: 100%;
+    height: fit-content;
+    max-height: 88dvh;
+    border-radius: 20px 20px 0 0;
   }
 
   .modal__panel--compact {
@@ -320,6 +323,9 @@
     border: 1px solid var(--border);
     border-radius: 6px;  /* bar style — pill looks odd at full width */
     white-space: nowrap;
+    /* Button element reset */
+    cursor: pointer;
+    font-family: inherit;
   }
 
   .card__watch-status--watched {

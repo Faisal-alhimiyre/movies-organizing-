@@ -128,11 +128,12 @@ List<TitleMetaBadge> buildTitleMetaBadges({
   int? seasonCount,
   int? episodeCount,
   String Function(String raw)? formatAgeRating,
+  bool arabic = false,
 }) {
   final badges = <TitleMetaBadge>[];
   final age = ageRating.trim();
   final run = runtime.trim();
-  final episodeDuration = formatEpisodeDurationLabel(run);
+  final episodeDuration = formatEpisodeDurationLabel(run, arabic: arabic);
 
   if (age.isNotEmpty) {
     final label = formatAgeRating?.call(age) ?? formatAgeRatingDisplay(age);
@@ -224,13 +225,13 @@ int? parsePositiveCount(dynamic raw) {
   return parsed != null && parsed > 0 ? parsed : null;
 }
 
-String formatRuntimeMinutes(int? minutes) {
+String formatRuntimeMinutes(int? minutes, {bool arabic = false}) {
   if (minutes == null || minutes <= 0) return '';
-  return '$minutes min';
+  return arabic ? '$minutes دقيقة' : '$minutes min';
 }
 
 /// Per-episode label for TV/anime badges (e.g. `~23 min/ep`).
-String formatEpisodeDurationLabel(String runtime) {
+String formatEpisodeDurationLabel(String runtime, {bool arabic = false}) {
   final trimmed = runtime.trim();
   if (trimmed.isEmpty) return '';
 
@@ -240,7 +241,9 @@ String formatEpisodeDurationLabel(String runtime) {
 
   final match = RegExp(r'(\d+)').firstMatch(trimmed);
   final minutes = match != null ? int.tryParse(match.group(1)!) : null;
-  if (minutes != null && minutes > 0) return '~$minutes min/ep';
+  if (minutes != null && minutes > 0) {
+    return arabic ? '~$minutes دقيقة/ح' : '~$minutes min/ep';
+  }
 
   return '~$trimmed/ep';
 }
@@ -252,6 +255,7 @@ List<TitleMetaBadge> titleMetaBadgesFromItem({
   int? seasonCount,
   int? episodeCount,
   String Function(String raw)? formatAgeRating,
+  bool arabic = false,
 }) {
   return buildTitleMetaBadges(
     contentType: contentType,
@@ -260,6 +264,7 @@ List<TitleMetaBadge> titleMetaBadgesFromItem({
     seasonCount: seasonCount,
     episodeCount: episodeCount,
     formatAgeRating: formatAgeRating,
+    arabic: arabic,
   );
 }
 

@@ -43,6 +43,7 @@ Future<void> showAccountMenuPanel({
   required L10n l10n,
   required bool sharePublishing,
   required VoidCallback onManageLists,
+  required VoidCallback onImportFile,
   required VoidCallback onShare,
   required VoidCallback onChangeCode,
   required VoidCallback onDeleteAccount,
@@ -84,6 +85,10 @@ Future<void> showAccountMenuPanel({
                 onManageLists: () {
                   Navigator.pop(dialogContext);
                   onManageLists();
+                },
+                onImportFile: () {
+                  Navigator.pop(dialogContext);
+                  onImportFile();
                 },
                 onShare: () {
                   Navigator.pop(dialogContext);
@@ -172,6 +177,7 @@ class _AccountMenuPanel extends ConsumerWidget {
     required this.parentContext,
     required this.sharePublishing,
     required this.onManageLists,
+    required this.onImportFile,
     required this.onShare,
     required this.onChangeCode,
     required this.onDeleteAccount,
@@ -183,6 +189,7 @@ class _AccountMenuPanel extends ConsumerWidget {
   final BuildContext parentContext;
   final bool sharePublishing;
   final VoidCallback onManageLists;
+  final VoidCallback onImportFile;
   final VoidCallback onShare;
   final VoidCallback onChangeCode;
   final VoidCallback onDeleteAccount;
@@ -229,6 +236,12 @@ class _AccountMenuPanel extends ConsumerWidget {
                     )
                   : null,
               onTap: onShare,
+            ),
+            _MenuItem(
+              label: l10n.menuImportFile,
+              onSurface: onSurface,
+              hoverBg: hoverBg,
+              onTap: onImportFile,
             ),
             _MenuItem(
               label: l10n.menuTheme,

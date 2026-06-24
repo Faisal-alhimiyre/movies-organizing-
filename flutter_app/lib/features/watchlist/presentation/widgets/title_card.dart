@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/theme/theme_extensions.dart';
 import '../../../../core/utils/rating_utils.dart';
+import '../../../../core/utils/watch_progress.dart';
 import '../../../../core/widgets/content_badges.dart';
 import '../../../../core/widgets/responsive_layout.dart';
 import '../../../../l10n/l10n.dart';
@@ -78,6 +79,7 @@ class _PosterTitleCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final tc = theme.extension<AppTypeColors>();
+    final watchState = _cardWatchState(watched);
     final isWatched = watched != null;
     final yearLabel = _formatReleaseYear(item.year);
     final cardBg = theme.colorScheme.surface; // #121212
@@ -160,13 +162,12 @@ class _PosterTitleCard extends StatelessWidget {
                         ),
                       ),
 
-                      // Top-right: watched ✓ only (menu moves to footer)
-                      if (isWatched)
-                        const Positioned(
-                          top: 5,
-                          right: 5,
-                          child: _WatchedCheck(),
-                        ),
+                      // Top-right: watch state badge
+                      Positioned(
+                        top: 5,
+                        right: 5,
+                        child: _WatchStateBadge(state: watchState, tc: tc),
+                      ),
 
                       // Bottom-left: title
                       Positioned(
@@ -174,7 +175,7 @@ class _PosterTitleCard extends StatelessWidget {
                         right: 5,
                         bottom: 5,
                         child: Text(
-                          item.title,
+                          item.cardDisplayTitle,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -182,8 +183,9 @@ class _PosterTitleCard extends StatelessWidget {
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
                             height: 1.2,
-                            decoration:
-                                isWatched ? TextDecoration.lineThrough : null,
+                            decoration: watchState == WatchState.watched
+                                ? TextDecoration.lineThrough
+                                : null,
                             decorationColor:
                                 Colors.white.withValues(alpha: 0.55),
                           ),
@@ -217,9 +219,11 @@ class _PosterTitleCard extends StatelessWidget {
                         Flexible(
                           child: _MobileFooterStatus(
                             l10n: l10n,
-                            isWatched: isWatched,
+                            watchState: watchState,
                             watched: watched,
+                            item: item,
                             tc: tc,
+                            onToggle: () => onAction?.call(TitleCardAction.toggleWatched),
                           ),
                         ),
                         _CardMenuButton(
@@ -297,6 +301,7 @@ class _HoverTitleCardState extends ConsumerState<_HoverTitleCard> {
     final theme = Theme.of(context);
     final tc = theme.extension<AppTypeColors>();
     final item = widget.item;
+    final watchState = _cardWatchState(widget.watched);
     final isWatched = widget.watched != null;
     final isDesktop = AppBreakpoints.isDesktop(context);
     final yearLabel = _formatReleaseYear(item.year);
@@ -331,20 +336,21 @@ class _HoverTitleCardState extends ConsumerState<_HoverTitleCard> {
                   children: [
                     // ── Title ──────────────────────────────────────────
                     Text(
-                      item.title,
+                      item.cardDisplayTitle,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: isDesktop ? 15 : 13,
                         fontWeight: FontWeight.w600,
                         height: 1.25,
-                        color: isWatched
+                        color: watchState == WatchState.watched
                             ? (tc?.textMuted ??
                                 theme.colorScheme.onSurface
                                     .withValues(alpha: 0.55))
                             : theme.colorScheme.onSurface,
-                        decoration:
-                            isWatched ? TextDecoration.lineThrough : null,
+                        decoration: watchState == WatchState.watched
+                            ? TextDecoration.lineThrough
+                            : null,
                         decorationColor:
                             theme.colorScheme.onSurface.withValues(alpha: 0.45),
                       ),
@@ -410,15 +416,19 @@ class _HoverTitleCardState extends ConsumerState<_HoverTitleCard> {
                           child: isDesktop
                               ? _WatchStatusRow(
                                   l10n: widget.l10n,
-                                  isWatched: isWatched,
+                                  watchState: watchState,
                                   watched: widget.watched,
+                                  item: item,
                                   tc: tc,
+                                  onToggle: () => widget.onAction?.call(TitleCardAction.toggleWatched),
                                 )
                               : _MobileFooterStatus(
                                   l10n: widget.l10n,
-                                  isWatched: isWatched,
+                                  watchState: watchState,
                                   watched: widget.watched,
+                                  item: item,
                                   tc: tc,
+                                  onToggle: () => widget.onAction?.call(TitleCardAction.toggleWatched),
                                 ),
                         ),
                         _CardMenuButton(
@@ -694,26 +704,38 @@ class _MobileTypeBadge extends StatelessWidget {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Watched checkmark — ✓ circle top-right on poster
+// Watch state badge — top-right on poster card; ✓ for watched, ◑ for in-progress.
 // ══════════════════════════════════════════════════════════════════════════════
 
-class _WatchedCheck extends StatelessWidget {
-  const _WatchedCheck();
+class _WatchStateBadge extends StatelessWidget {
+  const _WatchStateBadge({required this.state, this.tc});
+
+  final WatchState state;
+  final AppTypeColors? tc;
 
   @override
   Widget build(BuildContext context) {
-    final watched = Theme.of(context).extension<AppTypeColors>()?.watched ??
-        const Color(0xFF58C322);
+    if (state == WatchState.unwatched) return const SizedBox.shrink();
+
+    final watchedColor =
+        tc?.watched ?? const Color(0xFF58C322);
+    final inProgressColor =
+        tc?.inProgress ?? const Color(0xFFF59E0B);
+
+    final color =
+        state == WatchState.watched ? watchedColor : inProgressColor;
+    final icon = state == WatchState.watched ? Icons.check : Icons.timelapse;
+
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.65),
         shape: BoxShape.circle,
-        border: Border.all(color: watched.withValues(alpha: 0.45)),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
       ),
       child: SizedBox(
         width: 18,
         height: 18,
-        child: Icon(Icons.check, size: 11, color: watched),
+        child: Icon(icon, size: 11, color: color),
       ),
     );
   }
@@ -726,36 +748,67 @@ class _WatchedCheck extends StatelessWidget {
 class _MobileFooterStatus extends StatelessWidget {
   const _MobileFooterStatus({
     required this.l10n,
-    required this.isWatched,
+    required this.watchState,
     required this.watched,
+    required this.item,
     required this.tc,
+    this.onToggle,
   });
 
   final L10n l10n;
-  final bool isWatched;
+  final WatchState watchState;
   final WatchEntry? watched;
+  final WatchlistItem item;
   final AppTypeColors? tc;
+  final VoidCallback? onToggle;
 
   @override
   Widget build(BuildContext context) {
     final watchedColor = tc?.watched ?? const Color(0xFF58C322);
+    final inProgressColor = tc?.inProgress ?? const Color(0xFFF59E0B);
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
-    if (!isWatched) {
-      return _StatusPill(
-        label: l10n.cardUnwatched,
-        isWatched: false,
-        watchedColor: watchedColor,
-        onSurface: onSurface,
+    if (watchState == WatchState.unwatched) {
+      return GestureDetector(
+        onTap: onToggle,
+        child: _StatusPill(
+          label: l10n.cardUnwatched,
+          state: watchState,
+          watchedColor: watchedColor,
+          inProgressColor: inProgressColor,
+          onSurface: onSurface,
+        ),
+      );
+    }
+
+    if (watchState == WatchState.inprogress) {
+      final progress = watched?.progress;
+      final progressLabel = _episodeProgressLabel(item, progress);
+      final label = progressLabel != null
+          ? '${l10n.filterInProgress} · $progressLabel'
+          : l10n.filterInProgress;
+      return GestureDetector(
+        onTap: onToggle,
+        child: _StatusPill(
+          label: label,
+          state: watchState,
+          watchedColor: watchedColor,
+          inProgressColor: inProgressColor,
+          onSurface: onSurface,
+        ),
       );
     }
 
     if (!hasWatchRating(watched)) {
-      return _StatusPill(
-        label: l10n.cardWatched,
-        isWatched: true,
-        watchedColor: watchedColor,
-        onSurface: onSurface,
+      return GestureDetector(
+        onTap: onToggle,
+        child: _StatusPill(
+          label: l10n.cardWatched,
+          state: watchState,
+          watchedColor: watchedColor,
+          inProgressColor: inProgressColor,
+          onSurface: onSurface,
+        ),
       );
     }
 
@@ -810,58 +863,92 @@ class _MobileFooterStatus extends StatelessWidget {
 class _WatchStatusRow extends StatelessWidget {
   const _WatchStatusRow({
     required this.l10n,
-    required this.isWatched,
+    required this.watchState,
     required this.watched,
+    required this.item,
     required this.tc,
+    this.onToggle,
   });
 
   final L10n l10n;
-  final bool isWatched;
+  final WatchState watchState;
   final WatchEntry? watched;
+  final WatchlistItem item;
   final AppTypeColors? tc;
+  final VoidCallback? onToggle;
 
   @override
   Widget build(BuildContext context) {
     final watchedColor = tc?.watched ?? const Color(0xFF58C322);
+    final inProgressColor = tc?.inProgress ?? const Color(0xFFF59E0B);
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final personalRating = watched?.rating;
 
-    return _StatusPill(
-      label: isWatched
-          ? (hasWatchRating(watched)
-              ? '${l10n.cardWatched} · ${formatWatchRating(personalRating!)}'
-              : l10n.cardWatched)
-          : l10n.cardUnwatched,
-      isWatched: isWatched,
-      watchedColor: watchedColor,
-      onSurface: onSurface,
+    final String label;
+    if (watchState == WatchState.unwatched) {
+      label = l10n.cardUnwatched;
+    } else if (watchState == WatchState.inprogress) {
+      final progressLabel =
+          _episodeProgressLabel(item, watched?.progress);
+      label = progressLabel != null
+          ? '${l10n.filterInProgress} · $progressLabel'
+          : l10n.filterInProgress;
+    } else {
+      label = hasWatchRating(watched)
+          ? '${l10n.cardWatched} · ${formatWatchRating(personalRating!)}'
+          : l10n.cardWatched;
+    }
+
+    return GestureDetector(
+      onTap: onToggle,
+      child: _StatusPill(
+        label: label,
+        state: watchState,
+        watchedColor: watchedColor,
+        inProgressColor: inProgressColor,
+        onSurface: onSurface,
+      ),
     );
   }
 }
 
-/// Pill-shaped watch status chip — matches `.card__watch-status`
+/// Pill-shaped watch status chip — matches `.card__watch-status`.
+/// Handles three states: unwatched, in-progress (orange), watched (green).
 class _StatusPill extends StatelessWidget {
   const _StatusPill({
     required this.label,
-    required this.isWatched,
+    required this.state,
     required this.watchedColor,
+    required this.inProgressColor,
     required this.onSurface,
   });
 
   final String label;
-  final bool isWatched;
+  final WatchState state;
   final Color watchedColor;
+  final Color inProgressColor;
   final Color onSurface;
 
   @override
   Widget build(BuildContext context) {
-    final fg = isWatched ? watchedColor : onSurface.withValues(alpha: 0.6);
-    final bg = isWatched
-        ? watchedColor.withValues(alpha: 0.08)
-        : Colors.white.withValues(alpha: 0.04);
-    final border = isWatched
-        ? watchedColor.withValues(alpha: 0.28)
-        : onSurface.withValues(alpha: 0.15);
+    final Color fg;
+    final Color bg;
+    final Color border;
+
+    switch (state) {
+      case WatchState.watched:
+        fg = watchedColor;
+        bg = watchedColor.withValues(alpha: 0.08);
+        border = watchedColor.withValues(alpha: 0.28);
+      case WatchState.inprogress:
+        fg = inProgressColor;
+        bg = inProgressColor.withValues(alpha: 0.08);
+        border = inProgressColor.withValues(alpha: 0.28);
+      case WatchState.unwatched:
+        fg = onSurface.withValues(alpha: 0.6);
+        bg = Colors.white.withValues(alpha: 0.04);
+        border = onSurface.withValues(alpha: 0.15);
+    }
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -873,6 +960,8 @@ class _StatusPill extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
         child: Text(
           label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: fg,
             fontSize: 7.5,
@@ -969,4 +1058,39 @@ class _CardMenuButton extends StatelessWidget {
 String? _formatReleaseYear(int? year) {
   if (year == null) return null;
   return year.toString();
+}
+
+/// Derive the three-state watch state for a card without needing season data.
+/// Uses [WatchEntry.isFullyWatched] / [WatchEntry.isInProgress] so season
+/// data is not required at card level.
+WatchState _cardWatchState(WatchEntry? entry) {
+  if (entry == null) return WatchState.unwatched;
+  if (entry.isFullyWatched) return WatchState.watched;
+  return WatchState.inprogress;
+}
+
+/// Returns the `X/Y` episode progress label for TV/anime in-progress cards,
+/// using the `seasonTotals` stored on the progress object so we don't need to
+/// load episode data just for the card.
+String? _episodeProgressLabel(WatchlistItem item, WatchProgress? progress) {
+  if (progress == null) return null;
+  if (item.contentType == 'movies') return null;
+
+  final totals = progress.seasonTotals;
+  if (totals != null && totals.isNotEmpty) {
+    final total = totals.values.fold(0, (a, b) => a + b);
+    if (total > 0) return '${progress.episodes.length}/$total';
+  }
+
+  return null;
+}
+
+extension on WatchlistItem {
+  /// Card display title: "Show Title: Season N" when a season is selected,
+  /// plain title otherwise. Mirrors `cardDisplayTitle` in `web-files/js/app.js`.
+  String get cardDisplayTitle {
+    final seasonName = selectedSeasonName?.trim();
+    if (seasonName == null || seasonName.isEmpty) return title;
+    return '$title: $seasonName';
+  }
 }

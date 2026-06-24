@@ -53,7 +53,11 @@
       "tab.movies": "Movies",
       "tab.tvSeries": "TV Series",
       "tab.anime": "Anime",
-      "filter.searchPlaceholder": "Search titles or actors…",
+      "filter.searchPlaceholder": "Search titles or actors",
+      "filter.searchScope": " in your list",
+      "filter.searchPlaceholderRich":
+        'Search titles or actors<span class="search__scope-hl"> in your list</span>',
+      "filter.searchAria": "Search titles or actors in your list",
       "filter.allGenres": "All genres",
       "filter.addGenre": "Add genre…",
       "filter.labelGenre": "Genre",
@@ -117,6 +121,7 @@
       "stats.total": "{total} total · {watched} watched{sync}",
       "stats.totalWord": "total",
       "stats.watchedWord": "watched",
+      "stats.inProgressWord": "in progress",
       "sync.savingShort": "Saving…",
       "sync.failedShort": "Backup failed",
       "sync.savedShort": "Saved",
@@ -242,6 +247,9 @@
       "search.noSummary": "No summary available.",
       "search.alreadyOnList": "On your list",
       "search.pickResult": "{title} — {meta}",
+      "search.addResult": "Add {title}",
+      "search.added": "Added",
+      "search.addedStatus": "Added: {title}",
       "manual.hint":
         "<strong>Step 1: Paste your link.</strong> IMDb, AniList, or MyAnimeList. We'll fill in the details for you.",
       "manual.link": "Link",
@@ -681,7 +689,11 @@
       "tab.movies": "أفلام",
       "tab.tvSeries": "مسلسلات",
       "tab.anime": "أنمي",
-      "filter.searchPlaceholder": "ابحث في العناوين أو أسماء الممثلين…",
+      "filter.searchPlaceholder": "ابحث في العناوين أو أسماء الممثلين",
+      "filter.searchScope": " في قائمتك",
+      "filter.searchPlaceholderRich":
+        'ابحث في العناوين أو أسماء الممثلين<span class="search__scope-hl"> في قائمتك</span>',
+      "filter.searchAria": "ابحث في العناوين أو أسماء الممثلين في قائمتك",
       "filter.allGenres": "كل التصنيفات",
       "filter.addGenre": "أضف تصنيفاً…",
       "filter.labelGenre": "التصنيف",
@@ -745,6 +757,7 @@
       "stats.total": "{total} إجمالي · {watched} تمت مشاهدتها{sync}",
       "stats.totalWord": "إجمالي",
       "stats.watchedWord": "تمت مشاهدتها",
+      "stats.inProgressWord": "قيد المشاهدة",
       "sync.savingShort": "جاري الحفظ…",
       "sync.failedShort": "فشل النسخ الاحتياطي",
       "sync.savedShort": "تم الحفظ",
@@ -817,10 +830,10 @@
       "card.notWatched": "لم تُشاهد",
       "card.notWatchedShort": "غير مشاهد",
       "card.inProgress": "قيد المشاهدة",
-      "card.watched": "مشاهد",
+      "card.watched": "تمت المشاهدة",
       "card.yourRating": "تقييمك",
       "card.rate": "قيّم",
-      "card.markWatched": "تعيين كمشاهد",
+      "card.markWatched": "تمت المشاهدة",
       "card.markUnwatched": "تعيين كغير مشاهد",
       "card.markWatchedShort": "مشاهد",
       "card.markUnwatchedShort": "إلغاء",
@@ -835,7 +848,7 @@
       "card.releaseYear": "سنة الإصدار",
       "card.sectionDetails": "التفاصيل",
       "card.sectionTitle": "العنوان",
-      "card.sectionGenres": "الأنواع",
+      "card.sectionGenres": "التصنيف",
       "ageRating.allAges": "لجميع الأعمار",
       "ageRating.kids": "للأطفال",
       "ageRating.ages7": "7+",
@@ -870,6 +883,9 @@
       "search.noSummary": "لا يوجد ملخص.",
       "search.alreadyOnList": "في قائمتك",
       "search.pickResult": "{title} — {meta}",
+      "search.addResult": "أضف {title}",
+      "search.added": "تمت الإضافة",
+      "search.addedStatus": "تمت إضافة: {title}",
       "manual.hint":
         "<strong>الخطوة 1: الصق الرابط.</strong> IMDb أو AniList أو MyAnimeList. سنملأ التفاصيل لك.",
       "manual.link": "الرابط",
@@ -1052,7 +1068,7 @@
       "detail.yourRating": "تقييمك",
       "detail.genres": "التصنيفات",
       "detail.openLink": "فتح الرابط",
-      "detail.markWatched": "تعيين كمشاهد",
+      "detail.markWatched": "تمت المشاهدة",
       "detail.markUnwatched": "إلغاء المشاهدة",
       "detail.edit": "تعديل",
       "detail.move": "نقل لقائمة أخرى",
@@ -1103,7 +1119,7 @@
       "seasons.nextSeason": "الموسم التالي",
       "seasons.seasonNum": "الموسم {n}",
       "seasons.specials": "حلقات خاصة",
-      "seasons.episodeCount": "{n} حلقات",
+      "seasons.episodeCount": "{n} حلقة",
       "seasons.episodeCountOne": "حلقة واحدة",
       "seasons.watchedProgress": "{watched} / {total} مشاهَد",
       "seasons.markSeasonWatched": "تعيين {name} كمشاهَد",
@@ -1427,7 +1443,7 @@
       if (label && type) label.textContent = t(`tab.${type}`);
     });
 
-    setPlaceholder("#searchInput", "filter.searchPlaceholder");
+    setAria("#searchInput", "filter.searchAria");
     setAria("#genreSelect", "filter.byGenre");
     setAria("#watchedFilter", "filter.byWatched");
     setAria("#ratingFilter", "filter.byRating");

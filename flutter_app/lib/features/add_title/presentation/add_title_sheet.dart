@@ -82,6 +82,9 @@ class _AddTitleSheetState extends ConsumerState<AddTitleSheet>
   List<String> _confirmSecondaryGenres = const [];
   bool _saving = false;
   String? _errorKey;
+  // Tracks inline + button states
+  final Set<String> _addedKeys = {};
+  final Set<String> _addingKeys = {};
 
   @override
   void initState() {
@@ -153,6 +156,82 @@ class _AddTitleSheetState extends ConsumerState<AddTitleSheet>
               ? 'search.foundOne'
               : 'search.foundMany:${_results.length}';
       _statusError = false;
+    });
+  }
+
+  /// Add a result directly without going through the confirm step.
+  /// Falls back to confirm step when metadata is incomplete.
+  Future<void> _directAdd(TitleSearchResult result) async {
+    final key = result.dedupeKey();
+    if (_addedKeys.contains(key) || _addingKeys.contains(key)) return;
+
+    setState(() => _addingKeys.add(key));
+
+    final service = ref.read(metadataServiceProvider);
+    final details = await service.getDetailsForPick(result);
+
+    if (!mounted) return;
+
+    if (details == null || details.title.trim().isEmpty) {
+      setState(() {
+        _addingKeys.remove(key);
+        _statusKey = 'search.loadFailed';
+        _statusError = true;
+      });
+      return;
+    }
+
+    final contentType = details.contentType;
+    final suggested = suggestGenres(details.genres, contentType);
+    final genre =
+        suggested.isNotEmpty ? suggested.first : standardGenres.first;
+    final secondary = normalizeSecondaryGenres(
+      genre,
+      suggested.where((g) => g != genre).toList(),
+    );
+
+    final item = buildItemFromMetadata(
+      details: details,
+      contentType: contentType,
+      genre: genre,
+      secondaryGenres: secondary,
+    );
+
+    // Fall back to confirm step when essential data is missing
+    if (item.title.isEmpty || item.summary.isEmpty || item.lead.isEmpty) {
+      setState(() {
+        _addingKeys.remove(key);
+        _confirmDetails = details;
+        _confirmContentType = contentType;
+        _confirmGenre = genre;
+        _confirmSecondaryGenres = secondary;
+      });
+      return;
+    }
+
+    // Duplicate check
+    final duplicate = findDuplicateTitle(widget.existingItems, item);
+    if (duplicate != null) {
+      setState(() {
+        _addingKeys.remove(key);
+        _addedKeys.add(key);
+      });
+      return;
+    }
+
+    final errorKey = await widget.onSave(item);
+    if (!mounted) return;
+
+    setState(() {
+      _addingKeys.remove(key);
+      if (errorKey == null) {
+        _addedKeys.add(key);
+        _statusKey = 'search.addedStatus:${item.title}';
+        _statusError = false;
+      } else {
+        _statusKey = errorKey;
+        _statusError = true;
+      }
     });
   }
 
@@ -343,19 +422,21 @@ class _AddTitleSheetState extends ConsumerState<AddTitleSheet>
                   children: [
                     _SearchTab(
                       l10n: l10n,
-                      scrollController: scrollController,
                       searchController: _searchController,
                       searchType: _searchType,
                       results: _results,
                       searching: _searching || _loadingDetails,
                       statusKey: _statusKey,
                       statusError: _statusError,
+                      addedKeys: _addedKeys,
+                      addingKeys: _addingKeys,
                       onSearchTypeChanged: (value) {
                         setState(() => _searchType = value);
                         _queueSearch();
                       },
                       onQueryChanged: (_) => _queueSearch(),
                       onPick: _pickResult,
+                      onDirectAdd: _directAdd,
                     ),
                     _ManualTab(
                       l10n: l10n,
@@ -382,73 +463,107 @@ class _AddTitleSheetState extends ConsumerState<AddTitleSheet>
 class _SearchTab extends StatelessWidget {
   const _SearchTab({
     required this.l10n,
-    required this.scrollController,
     required this.searchController,
     required this.searchType,
     required this.results,
     required this.searching,
     required this.statusKey,
     required this.statusError,
+    required this.addedKeys,
+    required this.addingKeys,
     required this.onSearchTypeChanged,
     required this.onQueryChanged,
     required this.onPick,
+    required this.onDirectAdd,
   });
 
   final L10n l10n;
-  final ScrollController scrollController;
   final TextEditingController searchController;
   final String searchType;
   final List<TitleSearchResult> results;
   final bool searching;
   final String? statusKey;
   final bool statusError;
+  final Set<String> addedKeys;
+  final Set<String> addingKeys;
   final ValueChanged<String> onSearchTypeChanged;
   final ValueChanged<String> onQueryChanged;
   final ValueChanged<TitleSearchResult> onPick;
+  final ValueChanged<TitleSearchResult> onDirectAdd;
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      controller: scrollController,
-      padding: const EdgeInsets.all(16),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextField(
-          controller: searchController,
-          autofocus: true,
-          decoration: InputDecoration(
-            hintText: l10n.titleSearchPlaceholder,
-            prefixIcon: const Icon(Icons.search),
-            suffixIcon: searching
-                ? const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : null,
+        // ── Sticky controls (never scroll) ──────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: searchController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: l10n.titleSearchPlaceholder,
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: searching
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : null,
+                ),
+                onChanged: onQueryChanged,
+              ),
+              const SizedBox(height: 10),
+              _SearchTypeChips(
+                value: searchType,
+                onChanged: onSearchTypeChanged,
+                l10n: l10n,
+              ),
+              if (statusKey != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _statusMessage(l10n, statusKey!),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: statusError
+                        ? Theme.of(context).colorScheme.error
+                        : Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withValues(alpha: 0.55),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 8),
+            ],
           ),
-          onChanged: onQueryChanged,
         ),
-        const SizedBox(height: 10),
-        _SearchTypeChips(
-          value: searchType,
-          onChanged: onSearchTypeChanged,
-          l10n: l10n,
-        ),
-        if (statusKey != null) ...[
-          const SizedBox(height: 12),
-          Text(
-            _statusMessage(l10n, statusKey!),
-            style: TextStyle(
-              color: statusError ? Theme.of(context).colorScheme.error : null,
-            ),
+        // ── Scrollable results ───────────────────────────────────
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            itemCount: results.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 6),
+            itemBuilder: (context, i) {
+              final result = results[i];
+              final key = result.dedupeKey();
+              return _ResultRow(
+                result: result,
+                isAdded: addedKeys.contains(key),
+                isAdding: addingKeys.contains(key),
+                onPick: onPick,
+                onDirectAdd: onDirectAdd,
+              );
+            },
           ),
-        ],
-        const SizedBox(height: 12),
-        ...results.map(
-          (result) => _ResultRow(result: result, onPick: onPick),
         ),
       ],
     );
@@ -458,6 +573,10 @@ class _SearchTab extends StatelessWidget {
     if (key.startsWith('search.foundMany:')) {
       final count = int.tryParse(key.split(':').last) ?? 0;
       return l10n.searchFoundMany(count);
+    }
+    if (key.startsWith('search.addedStatus:')) {
+      final title = key.substring('search.addedStatus:'.length);
+      return '${l10n.message("search.added")}: $title';
     }
     return l10n.message(key);
   }
@@ -504,61 +623,129 @@ class _PosterPlaceholder extends StatelessWidget {
 }
 
 class _ResultRow extends StatelessWidget {
-  const _ResultRow({required this.result, required this.onPick});
+  const _ResultRow({
+    required this.result,
+    required this.isAdded,
+    required this.isAdding,
+    required this.onPick,
+    required this.onDirectAdd,
+  });
 
   final TitleSearchResult result;
+  final bool isAdded;
+  final bool isAdding;
   final ValueChanged<TitleSearchResult> onPick;
+  final ValueChanged<TitleSearchResult> onDirectAdd;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final onSurface = theme.colorScheme.onSurface;
+    final accent = theme.colorScheme.primary;
+    final addedColor = const Color(0xFF22C55E);
 
-    return GestureDetector(
-      onTap: () => onPick(result),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 6),
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: onSurface.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: onSurface.withValues(alpha: 0.08)),
-        ),
-        child: Row(
-          children: [
-            _ResultPoster(poster: result.poster),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    result.title,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w500, fontSize: 14),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (result.year.isNotEmpty) ...[
-                    const SizedBox(height: 3),
-                    Text(
-                      result.year,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: onSurface.withValues(alpha: 0.55),
+    final borderColor = isAdded
+        ? addedColor.withValues(alpha: 0.25)
+        : onSurface.withValues(alpha: 0.1);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isAdded
+            ? addedColor.withValues(alpha: 0.06)
+            : onSurface.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Main info area (tappable for confirm step)
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: isAdded ? null : () => onPick(result),
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Row(
+                  children: [
+                    _ResultPoster(poster: result.poster),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            result.title,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w500,
+                              fontSize: 14,
+                              color: isAdded
+                                  ? onSurface.withValues(alpha: 0.5)
+                                  : null,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (result.year.isNotEmpty) ...[
+                            const SizedBox(height: 3),
+                            Text(
+                              result.year,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: onSurface.withValues(alpha: 0.45),
+                              ),
+                            ),
+                          ],
+                          if (isAdded) ...[
+                            const SizedBox(height: 3),
+                            Text(
+                              'Added',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: addedColor,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
+                    if (!isAdded && !isAdding)
+                      Icon(
+                        Icons.chevron_right,
+                        size: 18,
+                        color: onSurface.withValues(alpha: 0.3),
+                      ),
                   ],
-                ],
+                ),
               ),
             ),
-            Icon(
-              Icons.chevron_right,
-              size: 18,
-              color: onSurface.withValues(alpha: 0.35),
-            ),
-          ],
-        ),
+          ),
+          // Vertical divider + add/status button — inside the box
+          Container(width: 1, color: borderColor),
+          SizedBox(
+            width: 48,
+            child: isAdded
+                ? Center(
+                    child: Icon(Icons.check_circle_rounded,
+                        size: 22, color: addedColor),
+                  )
+                : isAdding
+                    ? const Center(
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : IconButton(
+                        padding: EdgeInsets.zero,
+                        icon: Icon(Icons.add, size: 22, color: accent),
+                        onPressed: () => onDirectAdd(result),
+                      ),
+          ),
+        ],
       ),
     );
   }

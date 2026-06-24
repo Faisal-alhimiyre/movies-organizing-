@@ -10,6 +10,10 @@ class WatchlistItem {
     this.kind = '',
     this.link,
     this.poster,
+    this.cardPoster,
+    this.selectedSeason,
+    this.selectedSeasonName,
+    this.noSpecials,
     this.imdbRating,
     this.anilistRating,
     this.ageRating,
@@ -30,6 +34,19 @@ class WatchlistItem {
   final String kind;
   final String? link;
   final String? poster;
+
+  /// Season-specific poster URL — shown on the card when a season is selected.
+  final String? cardPoster;
+
+  /// Last selected season number (for restoring UI state across devices).
+  final int? selectedSeason;
+
+  /// Display name of the last selected season (e.g. "Season 2").
+  final String? selectedSeasonName;
+
+  /// When `true`, Season 0 (Specials) is hidden and excluded from completion.
+  final bool? noSpecials;
+
   final String? imdbRating;
   final String? anilistRating;
   final String? ageRating;
@@ -40,6 +57,9 @@ class WatchlistItem {
   final int? addedAt;
   final List<String> secondaryGenres;
 
+  /// Effective poster: prefers cardPoster (season-specific) over default poster.
+  String? get displayPoster => cardPoster ?? poster;
+
   Map<String, dynamic> toJson() => {
         'title': title,
         if (lead.isNotEmpty) 'lead': lead,
@@ -47,6 +67,12 @@ class WatchlistItem {
         if (kind.isNotEmpty) 'kind': kind,
         if (link != null) 'link': link,
         if (poster != null) 'poster': poster,
+        if (cardPoster != null && cardPoster!.isNotEmpty)
+          'cardPoster': cardPoster,
+        if (selectedSeason != null) 'selectedSeason': selectedSeason,
+        if (selectedSeasonName != null && selectedSeasonName!.isNotEmpty)
+          'selectedSeasonName': selectedSeasonName,
+        if (noSpecials == true) 'noSpecials': true,
         if (imdbRating != null) 'imdbRating': imdbRating,
         if (anilistRating != null) 'anilistRating': anilistRating,
         if (ageRating != null && ageRating!.isNotEmpty) 'ageRating': ageRating,
@@ -61,7 +87,7 @@ class WatchlistItem {
 
 /// Granular episode-level progress (stored alongside rating/note).
 ///
-/// Format: `{ "version": 1, "episodes": ["1:1", "1:2", "2:5"] }`
+/// Format: `{ "version": 1, "episodes": ["1:1", "1:2", "2:5"], "completed": true }`
 /// Episode keys are `"seasonNumber:episodeNumber"` strings.
 ///
 /// `null` progress on a [WatchEntry] means **legacy-complete**: the title was
@@ -71,6 +97,9 @@ class WatchProgress {
   const WatchProgress({
     required this.version,
     required this.episodes,
+    this.completed,
+    this.seasonTotals,
+    this.episodeRatings,
   });
 
   static const int currentVersion = 1;
@@ -82,6 +111,18 @@ class WatchProgress {
   final int version;
   final List<String> episodes;
 
+  /// `true` when all aired regular-season episodes are watched.
+  /// `null` means unknown (pre-feature data). Used to drive the DB `watched`
+  /// column without needing to load all season data.
+  final bool? completed;
+
+  /// Total aired episodes per season: `{"1": 13, "2": 10}`.
+  /// Stored so completion can be displayed without fetching episode lists.
+  final Map<String, int>? seasonTotals;
+
+  /// Per-episode external ratings from TMDB/OMDb: `{"1:1": 8.5}`.
+  final Map<String, double>? episodeRatings;
+
   String episodeKey(int season, int episode) => '$season:$episode';
 
   bool hasEpisode(int season, int episode) =>
@@ -90,26 +131,50 @@ class WatchProgress {
   WatchProgress withEpisode(int season, int episode) {
     final key = episodeKey(season, episode);
     if (episodes.contains(key)) return this;
-    return WatchProgress(version: currentVersion, episodes: [...episodes, key]);
+    return WatchProgress(
+      version: currentVersion,
+      episodes: [...episodes, key],
+      completed: completed,
+      seasonTotals: seasonTotals,
+      episodeRatings: episodeRatings,
+    );
   }
 
   WatchProgress withoutEpisode(int season, int episode) {
     final key = episodeKey(season, episode);
     return WatchProgress(
-        version: currentVersion,
-        episodes: episodes.where((e) => e != key).toList());
+      version: currentVersion,
+      episodes: episodes.where((e) => e != key).toList(),
+      completed: false,
+      seasonTotals: seasonTotals,
+      episodeRatings: episodeRatings,
+    );
   }
 
   WatchProgress withoutSeason(int season) {
     return WatchProgress(
-        version: currentVersion,
-        episodes: episodes.where((e) => !e.startsWith('$season:')).toList());
+      version: currentVersion,
+      episodes: episodes.where((e) => !e.startsWith('$season:')).toList(),
+      completed: false,
+      seasonTotals: seasonTotals,
+      episodeRatings: episodeRatings,
+    );
   }
 
-  Map<String, dynamic> toJson() => {
-        'version': version,
-        'episodes': episodes,
-      };
+  Map<String, dynamic> toJson() {
+    final json = <String, dynamic>{
+      'version': version,
+      'episodes': episodes,
+    };
+    if (completed != null) json['completed'] = completed;
+    if (seasonTotals != null && seasonTotals!.isNotEmpty) {
+      json['seasonTotals'] = seasonTotals;
+    }
+    if (episodeRatings != null && episodeRatings!.isNotEmpty) {
+      json['episodeRatings'] = episodeRatings;
+    }
+    return json;
+  }
 
   factory WatchProgress.fromJson(dynamic raw) {
     if (raw == null) return empty;
@@ -122,7 +187,40 @@ class WatchProgress {
             .where((e) => e.contains(':'))
             .toList()
         : <String>[];
-    return WatchProgress(version: currentVersion, episodes: eps);
+
+    bool? completed;
+    final completedRaw = map['completed'];
+    if (completedRaw is bool) completed = completedRaw;
+
+    Map<String, int>? seasonTotals;
+    final totalsRaw = map['seasonTotals'];
+    if (totalsRaw is Map) {
+      seasonTotals = {};
+      for (final e in totalsRaw.entries) {
+        final v = e.value;
+        final n = v is int ? v : int.tryParse(v.toString());
+        if (n != null) seasonTotals[e.key.toString()] = n;
+      }
+    }
+
+    Map<String, double>? episodeRatings;
+    final ratingsRaw = map['episodeRatings'];
+    if (ratingsRaw is Map) {
+      episodeRatings = {};
+      for (final e in ratingsRaw.entries) {
+        final v = e.value;
+        final n = v is double ? v : double.tryParse(v.toString());
+        if (n != null && n.isFinite) episodeRatings[e.key.toString()] = n;
+      }
+    }
+
+    return WatchProgress(
+      version: currentVersion,
+      episodes: eps,
+      completed: completed,
+      seasonTotals: seasonTotals,
+      episodeRatings: episodeRatings,
+    );
   }
 
   @override
@@ -130,11 +228,12 @@ class WatchProgress {
       identical(this, other) ||
       other is WatchProgress &&
           version == other.version &&
+          completed == other.completed &&
           episodes.length == other.episodes.length &&
           episodes.every((e) => other.episodes.contains(e));
 
   @override
-  int get hashCode => Object.hash(version, Object.hashAll(episodes));
+  int get hashCode => Object.hash(version, completed, Object.hashAll(episodes));
 }
 
 /// Watched / rating entry (`watchlist-watched-v1-{listId}`).
@@ -157,6 +256,13 @@ class WatchEntry {
   /// True when no granular progress exists — the entry came from the old
   /// watched model and all episodes are implicitly watched.
   bool get isLegacyComplete => progress == null;
+
+  /// True when the title is fully watched (all episodes done or legacy entry).
+  bool get isFullyWatched =>
+      isLegacyComplete || progress?.completed == true;
+
+  /// True when episode tracking is active but not yet complete.
+  bool get isInProgress => !isFullyWatched;
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:http/http.dart' as http;
@@ -46,36 +47,42 @@ class MetadataService {
     String query, {
     String type = 'all',
     int page = 1,
+    String locale = 'en',
   }) async {
     final q = query.trim();
     if (q.length < 2) {
       return const TitleSearchResponse(ok: true, results: []);
     }
-    if (!hasSearchConfigured) {
-      return const TitleSearchResponse(
-        ok: false,
-        error: 'search.notConfigured',
-      );
-    }
 
     final tasks = <Future<List<TitleSearchResult>>>[];
+
     if (type == 'anime') {
       tasks.add(_searchAnilist(q, page));
     } else {
-      if (_config.hasOmdbKey) {
-        tasks.add(_searchOmdb(q, type: type, page: page));
-      }
-      if (_config.hasTmdbKey) {
-        final tmdbType = type == 'series'
-            ? 'series'
-            : type == 'movie'
-                ? 'movie'
-                : 'all';
-        tasks.add(_searchTmdb(q, tmdbType, page));
+      // Prefer edge function: supports Arabic, partial matches, no API key exposure
+      if (_config.isSupabaseConfigured) {
+        tasks.add(_searchViaTmdbEdge(q, type, page, locale));
+      } else {
+        // Fall back to direct calls when Supabase is not configured
+        if (_config.hasOmdbKey) {
+          tasks.add(_searchOmdb(q, type: type, page: page));
+        }
+        if (_config.hasTmdbKey) {
+          final tmdbType = type == 'series'
+              ? 'series'
+              : type == 'movie'
+                  ? 'movie'
+                  : 'all';
+          tasks.add(_searchTmdb(q, tmdbType, page));
+        }
       }
       if (type == 'all') {
         tasks.add(_searchAnilist(q, page));
       }
+    }
+
+    if (tasks.isEmpty) {
+      return const TitleSearchResponse(ok: false, error: 'search.notConfigured');
     }
 
     final lists = await Future.wait(tasks);
@@ -85,6 +92,64 @@ class MetadataService {
       results: results,
       message: results.isEmpty ? 'search.noMatches' : null,
     );
+  }
+
+  /// Calls the `tmdb-metadata` Supabase edge function's `search` action.
+  Future<List<TitleSearchResult>> _searchViaTmdbEdge(
+    String query,
+    String type,
+    int page,
+    String locale,
+  ) async {
+    final baseUrl = _config.supabaseUrl.replaceAll(RegExp(r'/$'), '');
+    final functionUrl = '$baseUrl/functions/v1/tmdb-metadata';
+    final tmdbType =
+        type == 'series' ? 'tv' : type == 'movie' ? 'movie' : 'multi';
+
+    try {
+      final response = await _client.post(
+        Uri.parse(functionUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${_config.supabaseAnonKey}',
+          'apikey': _config.supabaseAnonKey,
+        },
+        body: jsonEncode({
+          'action': 'search',
+          'query': query,
+          'type': tmdbType,
+          'page': page,
+          'locale': locale,
+        }),
+      );
+
+      if (response.statusCode != 200) return [];
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      if (json['ok'] != true) return [];
+
+      final rawResults = json['results'] as List? ?? [];
+      return rawResults
+          .map((raw) {
+            final item = raw as Map<String, dynamic>;
+            final title = item['title']?.toString() ?? '';
+            final tmdbId = item['tmdbId'] as int?;
+            if (title.isEmpty || tmdbId == null) return null;
+            return TitleSearchResult(
+              source: 'tmdb',
+              tmdbType: item['tmdbType']?.toString(),
+              tmdbId: tmdbId,
+              title: title,
+              year: item['year']?.toString() ?? '',
+              type: item['type']?.toString() ?? '',
+              poster: item['poster']?.toString() ?? '',
+              resultKey: item['resultKey']?.toString() ?? '',
+            );
+          })
+          .whereType<TitleSearchResult>()
+          .toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   Future<MetadataDetail?> getDetailsForPick(TitleSearchResult pick) async {
@@ -238,14 +303,80 @@ class MetadataService {
     final cached = _readCached(cacheKey);
     if (cached != null) return cached;
 
+    // Try direct TMDB API first (requires client-side key)
     final json = await _fetchTmdb('$mediaType/$tmdbId', {
       'append_to_response': mediaType == 'tv'
           ? 'credits,content_ratings'
           : 'credits,release_dates',
     });
-    final payload = _normalizeTmdbDetail(json, mediaType);
-    if (payload != null) _writeCache(cacheKey, payload);
-    return payload;
+    if (json != null) {
+      final payload = _normalizeTmdbDetail(json, mediaType);
+      if (payload != null) _writeCache(cacheKey, payload);
+      return payload;
+    }
+
+    // Fallback: edge function details (no client-side key needed)
+    final edgePayload = await _fetchTmdbDetailsViaEdge(mediaType, tmdbId);
+    if (edgePayload != null) {
+      _writeCache(cacheKey, edgePayload);
+    }
+    return edgePayload;
+  }
+
+  Future<MetadataDetail?> _fetchTmdbDetailsViaEdge(
+    String mediaType,
+    int tmdbId,
+  ) async {
+    if (!_config.isSupabaseConfigured) return null;
+    final baseUrl = _config.supabaseUrl.replaceAll(RegExp(r'/$'), '');
+    final functionUrl = '$baseUrl/functions/v1/tmdb-metadata';
+    try {
+      final response = await _client.post(
+        Uri.parse(functionUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${_config.supabaseAnonKey}',
+          'apikey': _config.supabaseAnonKey,
+        },
+        body: jsonEncode({
+          'action': 'details',
+          'mediaType': mediaType,
+          'tmdbId': tmdbId,
+        }),
+      );
+      if (response.statusCode != 200) return null;
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      if (json['ok'] != true || json['details'] == null) return null;
+
+      final d = json['details'] as Map<String, dynamic>;
+      final title = d['title']?.toString() ?? '';
+      if (title.isEmpty) return null;
+
+      final actors = (d['actors'] as List? ?? []).map((e) => e.toString()).toList();
+      final genres = (d['genres'] as List? ?? []).map((e) => e.toString()).toList();
+
+      return _buildDetailPayload(
+        source: 'tmdb',
+        imdbId: d['imdbId']?.toString(),
+        tmdbId: tmdbId,
+        tmdbType: mediaType,
+        title: title,
+        year: d['year']?.toString() ?? '',
+        plot: d['plot']?.toString() ?? '',
+        poster: d['poster']?.toString() ?? '',
+        rating: d['rating']?.toString() ?? '',
+        actors: actors,
+        genres: genres,
+        omdbType: d['omdbType']?.toString() ?? (mediaType == 'tv' ? 'series' : 'movie'),
+        ageRating: d['ageRating']?.toString() ?? '',
+        runtime: d['runtime']?.toString() ?? '',
+        seasonCount: d['seasonCount'] is int ? d['seasonCount'] as int : null,
+        episodeCount: d['episodeCount'] is int ? d['episodeCount'] as int : null,
+      );
+    } catch (e) {
+      debugPrint('[metadata_service] _fetchTmdbDetailsViaEdge error: $e');
+      return null;
+    }
   }
 
   static String? extractImdbId(String url) {
@@ -274,8 +405,9 @@ class MetadataService {
   static int? parseAnilistId(String url) {
     try {
       final uri = Uri.parse(url);
-      if (!uri.host.replaceFirst('www.', '').contains('anilist.co'))
+      if (!uri.host.replaceFirst('www.', '').contains('anilist.co')) {
         return null;
+      }
       final parts = uri.pathSegments.where((p) => p.isNotEmpty).toList();
       if (parts.isNotEmpty && parts[0] == 'anime' && parts.length > 1) {
         return int.tryParse(parts[1]);

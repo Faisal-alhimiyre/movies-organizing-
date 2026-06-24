@@ -256,21 +256,29 @@
     const noteSnippet = hasNote
       ? `<p class="td-my-rating__note">${esc(entry.note)}</p>` : "";
 
-    // Unwatched: just the status label, no note interaction
+    // Unwatched: tap to mark watched
     if (state === "unwatched") {
       return `<div class="td-my-rating td-my-rating--status">
-        <span class="td-my-rating__status-badge td-my-rating__status-badge--unwatched">
+        <button type="button"
+          class="td-my-rating__status-badge td-my-rating__status-badge--unwatched td-my-rating__status-badge--clickable"
+          data-td-action="quick-toggle-watched"
+          data-td-id="${esc(itemId)}"
+          aria-label="${esc(t("card.markWatched"))}">
           ${esc(t("progress.unwatched"))}
-        </span>
+        </button>
       </div>`;
     }
 
-    // In progress: accent badge + Note button (no "MY RATING" label)
+    // In progress: tap to mark fully watched
     if (state === "inProgress") {
       return `<div class="td-my-rating td-my-rating--status">
-        <span class="td-my-rating__status-badge td-my-rating__status-badge--progress">
+        <button type="button"
+          class="td-my-rating__status-badge td-my-rating__status-badge--progress td-my-rating__status-badge--clickable"
+          data-td-action="quick-toggle-watched"
+          data-td-id="${esc(itemId)}"
+          aria-label="${esc(t("card.markWatched"))}">
           ${esc(t("progress.inprogress"))}
-        </span>
+        </button>
         <button type="button" class="btn btn--ghost btn--sm td-my-rating__note-btn"
           data-td-action="add-note" data-td-id="${esc(itemId)}">
           ${esc(hasNote ? t("detail.editNote") : t("detail.addNote"))}
@@ -954,11 +962,23 @@
     // Close menu before acting (except for the menu open button which is handled separately)
     if (action !== "open-menu") closeMenu();
 
-    handleAction(action, id, target);
+    handleAction(action, id, target, event);
   }
 
-  async function handleAction(action, itemId, target) {
+  async function handleAction(action, itemId, target, event) {
     switch (action) {
+      case "quick-toggle-watched": {
+        event?.stopPropagation?.();
+        event?.preventDefault?.();
+        _ignoreMutations = true;
+        await window.WatchlistApp?.quickToggleWatched?.(itemId);
+        updateMyRating();
+        refreshMenuItems();
+        window.WatchlistSeasons?.onTitleWatchedChanged?.();
+        Promise.resolve().then(() => { _ignoreMutations = false; });
+        break;
+      }
+
       case "toggle-watched": {
         // Suppress MutationObserver so it doesn't trigger a full rebuild.
         _ignoreMutations = true;

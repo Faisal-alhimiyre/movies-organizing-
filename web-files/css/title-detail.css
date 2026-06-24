@@ -502,6 +502,29 @@
   border: 1px solid rgba(251, 146, 60, 0.28);
 }
 
+.td-my-rating__status-badge--clickable {
+  cursor: pointer;
+  font: inherit;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: filter 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.td-my-rating__status-badge--clickable:hover {
+  filter: brightness(1.1);
+}
+
+.td-my-rating__status-badge--clickable:focus-visible {
+  outline: 2px solid var(--accent, #7c6aff);
+  outline-offset: 2px;
+}
+
+.td-my-rating__status-badge--unwatched.td-my-rating__status-badge--clickable:hover {
+  border-color: var(--border-strong, #555);
+  background: rgba(255, 255, 255, 0.07);
+}
+
 .td-my-rating__rate-btn {
   flex-shrink: 0;
 }

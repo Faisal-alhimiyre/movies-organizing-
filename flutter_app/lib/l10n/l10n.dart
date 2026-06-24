@@ -48,6 +48,7 @@ class L10n {
   String get menuChangeCode => _ar ? 'تغيير الرمز' : 'Change code';
   String get menuDeleteAccount => _ar ? 'حذف الحساب' : 'Delete account';
   String get menuShare => _ar ? 'مشاركة' : 'Share';
+  String get menuImportFile => _ar ? 'استيراد ملف' : 'Import file';
   String get menuTheme => _ar ? 'المظهر' : 'Theme';
   String get menuLanguage => _ar ? 'اللغة' : 'Language';
   String get menuAccount => _ar ? 'الحساب' : 'Account';
@@ -135,12 +136,13 @@ class L10n {
   String get genreAllSelected => _ar ? 'كل المحدد' : 'All selected';
 
   String get statsTotal => _ar ? 'عناوين' : 'titles';
-  String get statsWatched => _ar ? 'مشاهَد' : 'watched';
+  String get statsWatched => _ar ? 'تمت مشاهدتها' : 'watched';
+  String get statsInProgress => _ar ? 'قيد المشاهدة' : 'in progress';
 
-  String get cardWatched => _ar ? 'مشاهَد' : 'Watched';
+  String get cardWatched => _ar ? 'تمت المشاهدة' : 'Watched';
   String get cardUnwatched => _ar ? 'غير مشاهَد' : 'Unwatched';
   String get cardRate => _ar ? 'قيّم' : 'Rate';
-  String get cardMarkWatched => _ar ? 'تعيين كمشاهد' : 'Mark watched';
+  String get cardMarkWatched => _ar ? 'تمت المشاهدة' : 'Mark watched';
   String get cardMarkUnwatched => _ar ? 'تعيين كغير مشاهد' : 'Mark unwatched';
   String get cardMoveToList => _ar ? 'نقل لقائمة أخرى' : 'Move to another list';
   String get layoutHover => _ar ? 'معاينة عند التمرير' : 'Preview on hover';
@@ -148,7 +150,7 @@ class L10n {
   String get layoutToolbar => _ar ? 'شكل البطاقات' : 'Card layout';
   String get cardYourRating => _ar ? 'تقييمك' : 'Your rating';
   String get cardSectionDetails => _ar ? 'التفاصيل' : 'Details';
-  String get cardSectionGenres => _ar ? 'الأنواع' : 'Genres';
+  String get cardSectionGenres => _ar ? 'التصنيف' : 'Genres';
 
   /// Friendly label for MPAA / TV parental ratings (raw code stored separately).
   String ageRatingLabel(String raw) =>
@@ -176,6 +178,7 @@ class L10n {
   String get progressSeasonPartial => _ar ? 'مشاهَد جزئياً' : 'Partially watched';
   String get progressMarkAllWatched => _ar ? 'تعيين الكل كمشاهَد' : 'Mark all watched';
   String get progressClearAllWatched => _ar ? 'إلغاء تحديد الكل' : 'Unwatch all';
+  String get progressSeasons => _ar ? 'المواسم والحلقات' : 'Seasons & Episodes';
   String get progressLoadingEpisodes =>
       _ar ? 'جارٍ تحميل الحلقات…' : 'Loading episodes…';
   String get progressLoadError => _ar ? 'تعذّر تحميل الحلقات.' : 'Could not load episodes.';
@@ -185,6 +188,10 @@ class L10n {
   String get progressRetry => _ar ? 'إعادة المحاولة' : 'Retry';
   String get progressSpecials => _ar ? 'حلقات خاصة' : 'Specials';
   String progressSeason(int n) => _ar ? 'الموسم $n' : 'Season $n';
+  String progressEpisodeCount(int n) => _ar ? '$n حلقة' : n == 1 ? '1 episode' : '$n episodes';
+  String progressEpisodeNum(int n) => _ar ? 'الحلقة $n' : 'Episode $n';
+  String runtimeMin(int n) => _ar ? '$n دقيقة' : '$n min';
+  String runtimeMinPerEp(int n) => _ar ? '~$n دقيقة/ح' : '~$n min/ep';
   String get btnRateLater => _ar ? 'التقييم لاحقاً' : 'Rate later';
   String get btnSaveRating => _ar ? 'حفظ التقييم' : 'Save rating';
   String get ratingTitle => _ar ? 'تقييم العنوان' : 'Rate title';
@@ -368,6 +375,7 @@ class L10n {
   String get filterAll => _ar ? 'الكل' : 'All';
   String get filterWatched => _ar ? 'مشاهَد' : 'Watched';
   String get filterUnwatched => _ar ? 'غير مشاهَد' : 'Not watched';
+  String get filterInProgress => _ar ? 'قيد المشاهدة' : 'In progress';
   String get filterSortBy => _ar ? 'ترتيب حسب' : 'Sort by';
   String get filterSortDirection => _ar ? 'اتجاه الترتيب' : 'Sort direction';
   String get sortNewestFirst => _ar ? 'الأحدث أولاً' : 'Newest first';
@@ -600,6 +608,9 @@ class L10n {
       : 'To import with a different account: open the link in a private/incognito window, or sign out first.';
   String get shareListSharedTitle => _ar ? 'تمت المشاركة' : 'List shared';
   String get shareListUpdatedTitle => _ar ? 'تم تحديث القائمة' : 'List updated';
+  String get importInvalidFile => _ar
+      ? 'الملف غير صالح أو تالف.'
+      : 'Invalid or unrecognised file.';
   String get shareBackupCopied => _ar
       ? 'لا يوجد اتصال سحابي — تم نسخ ملف النسخ الاحتياطي.'
       : 'No cloud connection — backup JSON copied to clipboard.';
@@ -725,6 +736,8 @@ class L10n {
         return _ar
             ? 'تعذّر تحميل تفاصيل هذا العنوان.'
             : 'Could not load details for this title.';
+      case 'search.added':
+        return _ar ? 'تمت الإضافة' : 'Added';
       case 'search.incomplete':
         return _ar ? 'بيانات العنوان ناقصة.' : 'Title details are incomplete.';
       case 'search.missingActors':

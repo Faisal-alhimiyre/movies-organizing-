@@ -8,7 +8,6 @@ import '../core/storage/hive_boxes.dart';
 import '../core/utils/watchlist_parser.dart';
 import '../features/lists/application/move_title.dart';
 import '../models/watchlist_item.dart';
-import '../models/watchlist_data.dart';
 import 'auth_repository.dart';
 import 'local_storage_repository.dart';
 import 'supabase_sync_repository.dart';
@@ -49,7 +48,16 @@ class WatchlistSnapshot {
   int get total => items.length;
 
   int get watchedCount =>
-      items.where((i) => isItemWatched(i.id, watched)).length;
+      items.where((i) {
+        final entry = watched[i.id];
+        return entry != null && entry.isFullyWatched;
+      }).length;
+
+  int get inProgressCount =>
+      items.where((i) {
+        final entry = watched[i.id];
+        return entry != null && !entry.isFullyWatched;
+      }).length;
 
   WatchlistSnapshot copyWith({
     List<WatchlistItem>? items,
@@ -110,7 +118,7 @@ class WatchlistRepository {
       return const WatchlistSaveResult(syncStatus: SyncDisplayStatus.local);
     }
 
-    final pushed = await _supabase!.pushSnapshot(
+    final pushed = await _supabase.pushSnapshot(
       listId: listId,
       accountId: accountId,
       watchlist: nested,

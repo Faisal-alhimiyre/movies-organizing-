@@ -83,6 +83,18 @@ html[dir="rtl"] .filter {
   padding-inline-end: 0.75rem;
 }
 
+html[dir="rtl"] .search__fake-placeholder,
+html[lang="ar"] .search__fake-placeholder {
+  letter-spacing: 0;
+  font-family: "Noto Sans Arabic", var(--font), sans-serif;
+}
+
+html[dir="rtl"] .search__scope-hl,
+html[lang="ar"] .search__scope-hl {
+  letter-spacing: 0;
+  font-family: inherit;
+}
+
 html[dir="rtl"] .title-search-confirm__back::before {
   content: "→";
 }

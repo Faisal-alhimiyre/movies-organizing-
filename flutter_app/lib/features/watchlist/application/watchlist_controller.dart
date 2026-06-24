@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/config/environment.dart';
@@ -15,6 +18,22 @@ import '../../../repositories/watchlist_repository.dart';
 
 import 'poster_enrichment.dart';
 import 'watchlist_filters.dart';
+
+// ── Connectivity ──────────────────────────────────────────────────────────────
+
+/// True when the device has at least one non-none connectivity result.
+final connectivityProvider =
+    StreamProvider<bool>((ref) async* {
+  final conn = Connectivity();
+  // Emit the current state immediately.
+  final initial = await conn.checkConnectivity();
+  yield _hasConnection(initial);
+  // Then follow changes.
+  yield* conn.onConnectivityChanged.map(_hasConnection);
+});
+
+bool _hasConnection(List<ConnectivityResult> results) =>
+    results.any((r) => r != ConnectivityResult.none);
 
 final watchlistTypeFilterProvider =
     NotifierProvider<WatchlistTypeFilterNotifier, WatchlistTypeFilter>(
@@ -115,10 +134,35 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
       }
     });
 
+    // React to connectivity changes so the sync chip updates in real-time.
+    ref.listen(connectivityProvider, (prev, next) {
+      final isOnline = next.valueOrNull ?? true;
+      final current = state.valueOrNull;
+      if (current == null) return;
+      final cloud = ref.read(appConfigProvider).isSupabaseConfigured;
+      if (!cloud) return;
+      if (!isOnline) {
+        state = AsyncData(
+          current.copyWith(syncStatus: SyncDisplayStatus.offline),
+        );
+      } else if (current.syncStatus == SyncDisplayStatus.offline) {
+        // Came back online — re-trigger reconcile.
+        final listId = ref.read(sessionProvider)?.listId;
+        if (listId != null) _scheduleCloudReconcile(listId);
+      }
+    });
+
     final listId = session.listId;
     final snapshot = _instantSnapshot(listId);
     _scheduleCloudReconcile(listId);
     return snapshot;
+  }
+
+  bool get _isOnline {
+    // connectivityProvider is a StreamProvider; read synchronously.
+    final asyncOnline = ref.read(connectivityProvider);
+    // Default to true (optimistic) while not yet determined.
+    return asyncOnline.valueOrNull ?? true;
   }
 
   WatchlistSnapshot _instantSnapshot(String listId) {
@@ -128,6 +172,9 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
           cloudConfigured: cloud,
         );
     if (!cloud) return local;
+    if (!_isOnline) {
+      return local.copyWith(syncStatus: SyncDisplayStatus.offline);
+    }
     return local.copyWith(syncStatus: SyncDisplayStatus.pending);
   }
 
@@ -138,6 +185,7 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
 
   void _scheduleCloudReconcile(String listId) {
     if (!ref.read(appConfigProvider).isSupabaseConfigured) return;
+    if (!_isOnline) return;
 
     Future(() async {
       final changed = await ref

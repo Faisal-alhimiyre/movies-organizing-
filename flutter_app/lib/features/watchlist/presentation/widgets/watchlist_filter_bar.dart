@@ -91,11 +91,13 @@ class _WatchlistFilterBarState extends ConsumerState<WatchlistFilterBar> {
         items: const [
           WatchedFilter.all,
           WatchedFilter.watched,
+          WatchedFilter.inProgress,
           WatchedFilter.unwatched,
         ],
         labelBuilder: (v) => switch (v) {
           WatchedFilter.all => l10n.filterAll,
           WatchedFilter.watched => l10n.filterWatched,
+          WatchedFilter.inProgress => l10n.filterInProgress,
           WatchedFilter.unwatched => l10n.filterUnwatched,
         },
         onChanged: notifier.setWatchedFilter,

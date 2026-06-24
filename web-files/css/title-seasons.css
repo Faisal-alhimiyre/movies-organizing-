@@ -237,7 +237,7 @@
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
   padding: 0.5rem 1.5rem;
-  /* Always LTR so seasons are in chronological left→right order */
+  /* LTR by default; RTL pages override below so S1 starts on the right */
   direction: ltr;
   width: 100%;
   /* Hide scrollbar visually */
@@ -566,9 +566,11 @@
   column-gap: 0.55rem;
   row-gap: 0.4rem;
   align-items: center;
+  justify-content: start;
   padding: 0 1.25rem 0.55rem;
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
 }
 
 .tds-spoiler-toggle {
@@ -584,26 +586,31 @@
   font-size: 0.78rem;
   cursor: pointer;
   text-align: start;
+  width: auto;
+  max-width: 100%;
 }
 
 .tds-spoiler-toggle__label {
-  padding-inline-end: 0;
-}
-
-.tds-spoiler-toggle:focus-visible {
-  outline: 2px solid var(--accent, #7c6aff);
-  outline-offset: 2px;
-  border-radius: 4px;
+  grid-column: 1;
+  min-width: 0;
 }
 
 .tds-spoiler-toggle__track {
+  grid-column: 2;
   position: relative;
+  justify-self: end;
   flex: 0 0 2.1rem;
   width: 2.1rem;
   height: 1.15rem;
   border-radius: 999px;
   background: var(--border-strong, #525252);
   transition: background 0.15s;
+}
+
+.tds-spoiler-toggle:focus-visible {
+  outline: 2px solid var(--accent, #7c6aff);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .tds-spoiler-toggle__thumb {
@@ -623,10 +630,6 @@
 
 .tds-spoiler-toggle--on .tds-spoiler-toggle__thumb {
   transform: translateX(0.95rem);
-}
-
-html[dir="rtl"] .tds-spoiler-toggle {
-  text-align: end;
 }
 
 html[dir="rtl"] .tds-spoiler-toggle--on .tds-spoiler-toggle__thumb {
@@ -876,6 +879,15 @@ html[dir="rtl"] .tds-spoiler-toggle--on .tds-spoiler-toggle__thumb {
   z-index: 260;
   display: grid;
   place-items: center;
+  /* On small screens position near the top so the dialog stays visible
+     above the virtual keyboard when the rating input is focused */
+}
+@media (max-height: 600px), (max-width: 480px) {
+  .tds-episode-modal {
+    align-items: flex-start;
+    padding-top: 5dvh;
+    overflow-y: auto;
+  }
 }
 
 .tds-episode-modal__backdrop {
@@ -978,6 +990,8 @@ html[dir="rtl"] .tds-spoiler-toggle--on .tds-spoiler-toggle__thumb {
   background: var(--bg-card, #1e1e1e);
   color: var(--text, #e8e8e8);
   padding: 0.48rem 0.6rem;
+  /* ≥16px prevents iOS Safari auto-zoom on focus */
+  font-size: max(16px, 1rem);
 }
 
 .tds-episode-modal__actions {
@@ -1049,12 +1063,12 @@ html[dir="rtl"] .tds-spoiler-toggle--on .tds-spoiler-toggle__thumb {
 
 /* ── RTL support ─────────────────────────────────────────────────────────── */
 
+/* In RTL (Arabic) the "prev" button (lower season) is on the right */
 [dir="rtl"] .tds-nav-btn--prev { left: auto; right: 0.4rem; }
 [dir="rtl"] .tds-nav-btn--next { right: auto; left: 0.4rem; }
 
-/* The carousel itself always stays LTR (dir="ltr" on the element),
-   so season cards remain in chronological order regardless of page RTL.
-   Arrow key semantics are handled in JS (prev = lower season number always). */
+/* In RTL the carousel uses direction:rtl so Season 1 appears at the far right */
+[dir="rtl"] .tds-carousel { direction: rtl; }
 
 [dir="rtl"] .tds-season-mark-overlay {
   right: auto;

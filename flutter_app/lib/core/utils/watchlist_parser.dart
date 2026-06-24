@@ -67,6 +67,10 @@ List<WatchlistItem> flattenWatchlist(WatchlistData data) {
             kind: map['kind']?.toString() ?? '',
             link: map['link']?.toString(),
             poster: map['poster']?.toString(),
+            cardPoster: _parseOptionalString(map['cardPoster']),
+            selectedSeason: _parseOptionalInt(map['selectedSeason']),
+            selectedSeasonName: _parseOptionalString(map['selectedSeasonName']),
+            noSpecials: map['noSpecials'] == true,
             imdbRating: map['imdbRating']?.toString(),
             anilistRating: map['anilistRating']?.toString(),
             ageRating: map['ageRating']?.toString(),
@@ -116,6 +120,19 @@ int? _parseYear(dynamic raw) {
   return int.tryParse(raw?.toString() ?? '');
 }
 
+String? _parseOptionalString(dynamic raw) {
+  if (raw == null) return null;
+  final s = raw.toString().trim();
+  return s.isEmpty ? null : s;
+}
+
+int? _parseOptionalInt(dynamic raw) {
+  if (raw == null) return null;
+  if (raw is int) return raw;
+  if (raw is num) return raw.toInt();
+  return int.tryParse(raw.toString());
+}
+
 int? _parseAddedAtMs(dynamic raw) {
   if (raw == null) return null;
   if (raw is int) return raw;
@@ -151,6 +168,10 @@ void _backfillAddedAt(List<WatchlistItem> items) {
       kind: item.kind,
       link: item.link,
       poster: item.poster,
+      cardPoster: item.cardPoster,
+      selectedSeason: item.selectedSeason,
+      selectedSeasonName: item.selectedSeasonName,
+      noSpecials: item.noSpecials,
       imdbRating: item.imdbRating,
       anilistRating: item.anilistRating,
       ageRating: item.ageRating,
@@ -280,6 +301,16 @@ WatchlistData itemsToNested(List<WatchlistItem> items) {
     if (item.poster != null && item.poster!.isNotEmpty) {
       entry['poster'] = item.poster;
     }
+    if (item.cardPoster != null && item.cardPoster!.isNotEmpty) {
+      entry['cardPoster'] = item.cardPoster;
+    }
+    if (item.selectedSeason != null) {
+      entry['selectedSeason'] = item.selectedSeason;
+    }
+    if (item.selectedSeasonName != null && item.selectedSeasonName!.isNotEmpty) {
+      entry['selectedSeasonName'] = item.selectedSeasonName;
+    }
+    if (item.noSpecials == true) entry['noSpecials'] = true;
     if (item.imdbRating != null && item.imdbRating!.isNotEmpty) {
       entry['imdbRating'] = item.imdbRating;
     }

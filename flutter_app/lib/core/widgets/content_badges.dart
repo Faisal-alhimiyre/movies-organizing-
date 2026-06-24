@@ -204,6 +204,7 @@ class ContentTitleMetaBadges extends StatelessWidget {
       seasonCount: seasonCount,
       episodeCount: episodeCount,
       formatAgeRating: l10n.ageRatingLabel,
+      arabic: l10n.isArabic,
     );
     if (badges.isEmpty) return const SizedBox.shrink();
 

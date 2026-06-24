@@ -36,6 +36,7 @@ class WatchlistHeader extends ConsumerWidget {
     required this.listName,
     required this.total,
     required this.watchedCount,
+    this.inProgressCount = 0,
     required this.syncStatus,
     required this.cloudConfigured,
     required this.sharePublishing,
@@ -43,6 +44,7 @@ class WatchlistHeader extends ConsumerWidget {
     this.onAdd,
     required this.onShare,
     required this.onManageLists,
+    required this.onImportFile,
     required this.onChangeCode,
     required this.onDeleteAccount,
     required this.onSignOut,
@@ -51,6 +53,7 @@ class WatchlistHeader extends ConsumerWidget {
   final String listName;
   final int total;
   final int watchedCount;
+  final int inProgressCount;
   final SyncDisplayStatus syncStatus;
   final bool cloudConfigured;
   final bool sharePublishing;
@@ -59,6 +62,7 @@ class WatchlistHeader extends ConsumerWidget {
   final VoidCallback? onAdd;
   final VoidCallback onShare;
   final VoidCallback onManageLists;
+  final VoidCallback onImportFile;
   final VoidCallback onChangeCode;
   final VoidCallback onDeleteAccount;
   final VoidCallback onSignOut;
@@ -139,6 +143,7 @@ class WatchlistHeader extends ConsumerWidget {
                   l10n: l10n,
                   onShare: onShare,
                   onManageLists: onManageLists,
+                  onImportFile: onImportFile,
                   onChangeCode: onChangeCode,
                   onDeleteAccount: onDeleteAccount,
                   onSignOut: onSignOut,
@@ -153,6 +158,7 @@ class WatchlistHeader extends ConsumerWidget {
             _StatsRow(
               total: total,
               watchedCount: watchedCount,
+              inProgressCount: inProgressCount,
               syncStatus: syncStatus,
               cloudConfigured: cloudConfigured,
               l10n: l10n,
@@ -177,6 +183,7 @@ class _Toolbar extends StatelessWidget {
     required this.l10n,
     required this.onShare,
     required this.onManageLists,
+    required this.onImportFile,
     required this.onChangeCode,
     required this.onDeleteAccount,
     required this.onSignOut,
@@ -190,6 +197,7 @@ class _Toolbar extends StatelessWidget {
   final L10n l10n;
   final VoidCallback onShare;
   final VoidCallback onManageLists;
+  final VoidCallback onImportFile;
   final VoidCallback onChangeCode;
   final VoidCallback onDeleteAccount;
   final VoidCallback onSignOut;
@@ -216,6 +224,7 @@ class _Toolbar extends StatelessWidget {
               sharePublishing: sharePublishing,
               onShare: onShare,
               onManageLists: onManageLists,
+              onImportFile: onImportFile,
               onChangeCode: onChangeCode,
               onDeleteAccount: onDeleteAccount,
               onSignOut: onSignOut,
@@ -304,6 +313,7 @@ class _AccountMenu extends ConsumerStatefulWidget {
     required this.sharePublishing,
     required this.onShare,
     required this.onManageLists,
+    required this.onImportFile,
     required this.onChangeCode,
     required this.onDeleteAccount,
     required this.onSignOut,
@@ -315,6 +325,7 @@ class _AccountMenu extends ConsumerStatefulWidget {
   final bool sharePublishing;
   final VoidCallback onShare;
   final VoidCallback onManageLists;
+  final VoidCallback onImportFile;
   final VoidCallback onChangeCode;
   final VoidCallback onDeleteAccount;
   final VoidCallback onSignOut;
@@ -338,6 +349,7 @@ class _AccountMenuState extends ConsumerState<_AccountMenu> {
       l10n: widget.l10n,
       sharePublishing: widget.sharePublishing,
       onManageLists: widget.onManageLists,
+      onImportFile: widget.onImportFile,
       onShare: widget.onShare,
       onChangeCode: widget.onChangeCode,
       onDeleteAccount: widget.onDeleteAccount,
@@ -375,6 +387,7 @@ class _StatsRow extends StatelessWidget {
   const _StatsRow({
     required this.total,
     required this.watchedCount,
+    this.inProgressCount = 0,
     required this.syncStatus,
     required this.cloudConfigured,
     required this.l10n,
@@ -384,6 +397,7 @@ class _StatsRow extends StatelessWidget {
 
   final int total;
   final int watchedCount;
+  final int inProgressCount;
   final SyncDisplayStatus syncStatus;
   final bool cloudConfigured;
   final L10n l10n;
@@ -394,6 +408,9 @@ class _StatsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final syncLabel = _syncLabel();
     final watchedColor = tc?.watched ?? const Color(0xFF58C322);
+
+    final inProgressColor =
+        tc?.inProgress ?? const Color(0xFFF59E0B);
 
     return Wrap(
       spacing: 6,
@@ -411,6 +428,13 @@ class _StatsRow extends StatelessWidget {
           valueColor: watchedColor,
           onSurface: onSurface,
         ),
+        if (inProgressCount > 0)
+          _StatChip(
+            value: '$inProgressCount',
+            label: l10n.statsInProgress,
+            valueColor: inProgressColor,
+            onSurface: onSurface,
+          ),
         if (!cloudConfigured)
           _SyncLabel(
             icon: Icons.storage_outlined,
