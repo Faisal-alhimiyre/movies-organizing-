@@ -872,22 +872,20 @@ html[dir="rtl"] .tds-spoiler-toggle--on .tds-spoiler-toggle__thumb {
   margin-top: 0.5rem;
 }
 
-/* ── Episode modal ───────────────────────────────────────────────────────── */
+/* ── Episode modal (portaled to body — escapes title-detail transform) ─── */
 .tds-episode-modal {
   position: fixed;
   inset: 0;
-  z-index: 260;
-  display: grid;
-  place-items: center;
-  /* On small screens position near the top so the dialog stays visible
-     above the virtual keyboard when the rating input is focused */
-}
-@media (max-height: 600px), (max-width: 480px) {
-  .tds-episode-modal {
-    align-items: flex-start;
-    padding-top: 5dvh;
-    overflow-y: auto;
-  }
+  z-index: 360;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(1rem, env(safe-area-inset-top))
+    max(1rem, env(safe-area-inset-right))
+    max(1rem, env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .tds-episode-modal__backdrop {
@@ -901,6 +899,7 @@ html[dir="rtl"] .tds-spoiler-toggle--on .tds-spoiler-toggle__thumb {
   z-index: 1;
   width: min(92vw, 360px);
   max-height: min(86vh, 680px);
+  margin: auto;
   overflow-y: auto;
   border-radius: 12px;
   border: 1px solid var(--border-strong, #525252);

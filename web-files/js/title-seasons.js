@@ -53,6 +53,7 @@
   let _hideEpisodeRatings = false;
   let _activeEpisodeKey = null;
   let _episodeModalEditing = false;
+  let _episodeModalEl = null;
   let _dragStartX     = 0;
   let _isDragging     = false;
 
@@ -520,6 +521,8 @@
   }
 
   function detach() {
+    closeEpisodeModal();
+    unmountEpisodeModal();
     _token      = null;  // invalidate pending requests
     _slot       = null;
     _item       = null;
@@ -1356,7 +1359,7 @@
     const userEl = getP("episode-modal-user");
     const labelEl = getP("episode-modal-label");
     const inputEl = getP("episode-modal-input");
-    const saveBtn = _slot?.querySelector("[data-tds-action='save-episode-rating']");
+    const saveBtn = _episodeModalEl?.querySelector("[data-tds-action='save-episode-rating']");
 
     if (media) {
       media.innerHTML = ep.still
@@ -1412,7 +1415,15 @@
     }
 
     modal.hidden = false;
-    if (inputEl && !inputEl.hidden) inputEl.focus();
+    if (inputEl && !inputEl.hidden) {
+      inputEl.focus();
+      requestAnimationFrame(() => {
+        modal.querySelector(".tds-episode-modal__panel")?.scrollIntoView({
+          block: "center",
+          behavior: "smooth",
+        });
+      });
+    }
   }
 
   function closeEpisodeModal() {
@@ -1812,6 +1823,34 @@
     if (!_slot) return;
     _slot.addEventListener("click", onSlotClick);
     _slot.addEventListener("keydown", onSlotKeydown);
+    mountEpisodeModal();
+  }
+
+  function mountEpisodeModal() {
+    unmountEpisodeModal();
+    const modal = _slot?.querySelector("[data-tds-part='episode-modal']");
+    if (!modal) return;
+    _episodeModalEl = modal;
+    document.body.appendChild(_episodeModalEl);
+    _episodeModalEl.addEventListener("click", onSlotClick);
+    _episodeModalEl.addEventListener("keydown", onEpisodeModalKeydown);
+  }
+
+  function unmountEpisodeModal() {
+    if (!_episodeModalEl) return;
+    _episodeModalEl.removeEventListener("click", onSlotClick);
+    _episodeModalEl.removeEventListener("keydown", onEpisodeModalKeydown);
+    if (_episodeModalEl.parentElement === document.body) {
+      _episodeModalEl.remove();
+    }
+    _episodeModalEl = null;
+  }
+
+  function onEpisodeModalKeydown(event) {
+    if (event.key === "Escape" && _episodeModalEl && !_episodeModalEl.hidden) {
+      event.preventDefault();
+      closeEpisodeModal();
+    }
   }
 
   function onSlotClick(event) {
@@ -1965,7 +2004,15 @@
   // ─── Utility ──────────────────────────────────────────────────────────────
 
   function getP(part) {
-    return _slot?.querySelector(`[data-tds-part="${part}"]`) ?? null;
+    const roots = [];
+    if (_episodeModalEl) roots.push(_episodeModalEl);
+    if (_slot) roots.push(_slot);
+    for (const root of roots) {
+      if (root.dataset?.tdsPart === part) return root;
+      const el = root.querySelector(`[data-tds-part="${part}"]`);
+      if (el) return el;
+    }
+    return null;
   }
 
   // ─── Public API ───────────────────────────────────────────────────────────
