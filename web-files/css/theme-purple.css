@@ -25,6 +25,7 @@ html[data-theme="purple"] {
   --franchise: #5ee0b8;
   --franchise-dim: rgba(94, 224, 184, 0.12);
   --watched: #62e090;
+  --in-progress: #fb923c;
   --shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
 }
 
@@ -48,6 +49,14 @@ html[data-theme="purple"] .header__stat-chip {
 
 html[data-theme="purple"] .header__stat-value {
   color: #f5effc;
+}
+
+html[data-theme="purple"] .header__stat-chip--watched .header__stat-value {
+  color: var(--watched);
+}
+
+html[data-theme="purple"] .header__stat-chip--in-progress .header__stat-value {
+  color: var(--in-progress, #fb923c);
 }
 
 html[data-theme="purple"] .header__stat-label {

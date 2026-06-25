@@ -567,11 +567,8 @@
             </button>
           </div>
           <div class="tds-season-actions" data-tds-part="season-actions" hidden>
-            <div class="tds-season-actions__stats">
-              <p class="tds-season-actions__progress" data-tds-part="season-progress"></p>
-              <p class="tds-season-actions__avg" data-tds-part="season-avg" hidden></p>
-            </div>
             <button type="button" class="tds-season-mark-btn" data-tds-action="mark-season" data-tds-season=""></button>
+            <p class="tds-season-actions__avg" data-tds-part="season-avg" hidden></p>
           </div>
         </div>
         <div class="tds-episodes-section" data-tds-part="episodes-section" hidden>
@@ -1087,18 +1084,9 @@
 
     const entry = getEntry();
     const ws = seasonWatchState(entry, season);
-    const prog = seasonProgressFromEntry(entry, season);
-    const progStr = prog.total > 0
-      ? t("seasons.watchedProgress", { watched: prog.watched, total: prog.total })
-      : "";
 
-    const progressEl = actionsEl.querySelector("[data-tds-part='season-progress']");
     const avgEl = actionsEl.querySelector("[data-tds-part='season-avg']");
     const markBtn = actionsEl.querySelector("[data-tds-action='mark-season']");
-    if (progressEl) {
-      progressEl.textContent = progStr;
-      progressEl.hidden = !progStr;
-    }
     if (markBtn) {
       markBtn.textContent = seasonMarkLabel(ws);
       markBtn.dataset.tdsSeason = String(seasonNum);

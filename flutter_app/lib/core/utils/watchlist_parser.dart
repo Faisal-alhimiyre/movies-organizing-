@@ -68,8 +68,10 @@ List<WatchlistItem> flattenWatchlist(WatchlistData data) {
             link: map['link']?.toString(),
             poster: map['poster']?.toString(),
             cardPoster: _parseOptionalString(map['cardPoster']),
-            selectedSeason: _parseOptionalInt(map['selectedSeason']),
-            selectedSeasonName: _parseOptionalString(map['selectedSeasonName']),
+            selectedSeason: _parseOptionalInt(map['selectedSeason']) ??
+                _parseOptionalInt(map['lastSelectedSeason']),
+            selectedSeasonName: _parseOptionalString(map['selectedSeasonName']) ??
+                _parseOptionalString(map['cardSeasonName']),
             noSpecials: map['noSpecials'] == true,
             imdbRating: map['imdbRating']?.toString(),
             anilistRating: map['anilistRating']?.toString(),

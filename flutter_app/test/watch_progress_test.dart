@@ -313,6 +313,49 @@ void main() {
     });
   });
 
+  // ─── itemProgressState ───────────────────────────────────────────────────────
+
+  group('itemProgressState', () {
+    test('null entry → unwatched', () {
+      expect(itemProgressState(null), ItemProgressState.unwatched);
+    });
+
+    test('legacy-complete entry → watched', () {
+      const entry = WatchEntry(rating: 8);
+      expect(itemProgressState(entry), ItemProgressState.watched);
+    });
+
+    test('empty granular progress → unwatched', () {
+      const entry = WatchEntry(progress: WatchProgress.empty);
+      expect(itemProgressState(entry), ItemProgressState.unwatched);
+    });
+
+    test('partial episodes → inProgress', () {
+      const entry = WatchEntry(
+        progress: WatchProgress(version: 1, episodes: ['1:1']),
+      );
+      expect(itemProgressState(entry), ItemProgressState.inProgress);
+    });
+
+    test('completed granular → watched', () {
+      const entry = WatchEntry(
+        progress: WatchProgress(
+          version: 1,
+          episodes: ['1:1'],
+          completed: true,
+        ),
+      );
+      expect(itemProgressState(entry), ItemProgressState.watched);
+    });
+
+    test('specials-only episodes → unwatched', () {
+      const entry = WatchEntry(
+        progress: WatchProgress(version: 1, episodes: ['0:1']),
+      );
+      expect(itemProgressState(entry), ItemProgressState.unwatched);
+    });
+  });
+
   // ─── itemWatchState ──────────────────────────────────────────────────────────
 
   group('itemWatchState', () {

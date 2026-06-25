@@ -1,0 +1,35 @@
+---
+description: Flutter must match web behavior — web is the reference implementation
+alwaysApply: true
+---
+
+# Flutter ↔ Web parity
+
+The **website** (`web-files/`) is the reference for product behavior, UI flows, and data semantics. When building or changing the **Flutter app** (`flutter_app/`), match the web unless the user explicitly asks otherwise.
+
+## How to work
+
+1. **Find the web equivalent first** — e.g. `app.js`, `title-detail.js`, `title-seasons.js`, `sync.js`, `metadata.js`.
+2. **Mirror field names and precedence** — use the same helper semantics (e.g. `cardPoster || poster` → `displayPoster`).
+3. **Keep sync aligned** — `web-files/js/sync.js` ↔ `watchlist_sync_converter.dart`; DB column names are canonical.
+4. **Name web helpers explicitly** in Dart when they exist on web (`cardDisplayPoster`, `cardDisplayTitle`, `persistSeasonPoster`).
+
+## Web ↔ Flutter field map (common)
+
+| Web (in-memory / JSON) | Flutter | Supabase column |
+|------------------------|---------|-----------------|
+| `cardPoster` | `cardPoster` | `card_poster` |
+| `lastSelectedSeason` | `selectedSeason` | `selected_season` |
+| `cardSeasonName` | `selectedSeasonName` | `selected_season_name` |
+
+Parser/import should accept **both** web and Flutter JSON keys where they differ.
+
+## Posters
+
+- **Store:** `poster` (default), `cardPoster` (season-specific after season pick).
+- **Display:** `cardPoster ?? poster` — same as web `cardDisplayPoster`.
+- **Season pick:** persist `cardPoster`, season number, and season name (web `persistSeasonPoster` in `title-seasons.js`).
+
+## When in doubt
+
+Implement what the web does today, then verify cross-device sync between web and Flutter.

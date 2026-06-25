@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/constants/storage_keys.dart';
 import '../core/storage/hive_boxes.dart';
+import '../core/utils/watch_progress.dart';
 import '../core/utils/watchlist_parser.dart';
 import '../features/lists/application/move_title.dart';
 import '../models/watchlist_item.dart';
@@ -47,17 +48,15 @@ class WatchlistSnapshot {
 
   int get total => items.length;
 
-  int get watchedCount =>
-      items.where((i) {
-        final entry = watched[i.id];
-        return entry != null && entry.isFullyWatched;
-      }).length;
+  int get watchedCount => items
+      .where((i) =>
+          itemProgressStateForId(i.id, watched) == ItemProgressState.watched)
+      .length;
 
-  int get inProgressCount =>
-      items.where((i) {
-        final entry = watched[i.id];
-        return entry != null && !entry.isFullyWatched;
-      }).length;
+  int get inProgressCount => items
+      .where((i) =>
+          itemProgressStateForId(i.id, watched) == ItemProgressState.inProgress)
+      .length;
 
   WatchlistSnapshot copyWith({
     List<WatchlistItem>? items,

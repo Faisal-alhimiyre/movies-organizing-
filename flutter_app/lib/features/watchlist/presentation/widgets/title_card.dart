@@ -175,7 +175,7 @@ class _PosterTitleCard extends StatelessWidget {
                         right: 5,
                         bottom: 5,
                         child: Text(
-                          item.cardDisplayTitle,
+                          item.cardDisplayTitle(l10n),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -336,7 +336,7 @@ class _HoverTitleCardState extends ConsumerState<_HoverTitleCard> {
                   children: [
                     // ── Title ──────────────────────────────────────────
                     Text(
-                      item.cardDisplayTitle,
+                      item.cardDisplayTitle(widget.l10n),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -1061,12 +1061,13 @@ String? _formatReleaseYear(int? year) {
 }
 
 /// Derive the three-state watch state for a card without needing season data.
-/// Uses [WatchEntry.isFullyWatched] / [WatchEntry.isInProgress] so season
-/// data is not required at card level.
+/// Mirrors web `itemProgressState` in `app.js`.
 WatchState _cardWatchState(WatchEntry? entry) {
-  if (entry == null) return WatchState.unwatched;
-  if (entry.isFullyWatched) return WatchState.watched;
-  return WatchState.inprogress;
+  return switch (itemProgressState(entry)) {
+    ItemProgressState.unwatched => WatchState.unwatched,
+    ItemProgressState.inProgress => WatchState.inprogress,
+    ItemProgressState.watched => WatchState.watched,
+  };
 }
 
 /// Returns the `X/Y` episode progress label for TV/anime in-progress cards,
@@ -1085,12 +1086,26 @@ String? _episodeProgressLabel(WatchlistItem item, WatchProgress? progress) {
   return null;
 }
 
-extension on WatchlistItem {
-  /// Card display title: "Show Title: Season N" when a season is selected,
-  /// plain title otherwise. Mirrors `cardDisplayTitle` in `web-files/js/app.js`.
-  String get cardDisplayTitle {
+extension WatchlistItemCardDisplay on WatchlistItem {
+  /// Mirrors web `cardDisplayTitle(item)` in `web-files/js/app.js`.
+  String cardDisplayTitle(L10n l10n) {
+    final showTitle = title.trim();
     final seasonName = selectedSeasonName?.trim();
-    if (seasonName == null || seasonName.isEmpty) return title;
-    return '$title: $seasonName';
+    if (seasonName != null && seasonName.isNotEmpty) {
+      if (showTitle.isEmpty) return seasonName;
+      if (seasonName.toLowerCase().startsWith(showTitle.toLowerCase())) {
+        return seasonName;
+      }
+      return '$showTitle: $seasonName';
+    }
+    final seasonNum = selectedSeason;
+    if ((contentType == 'tvSeries' || contentType == 'anime') &&
+        seasonNum != null &&
+        seasonNum > 0) {
+      final seasonLabel = l10n.progressSeason(seasonNum);
+      if (showTitle.isNotEmpty) return '$showTitle: $seasonLabel';
+      return seasonLabel;
+    }
+    return showTitle;
   }
 }

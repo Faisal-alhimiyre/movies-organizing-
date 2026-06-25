@@ -1,3 +1,4 @@
+import '../../../core/utils/watch_progress.dart';
 import '../../../core/utils/watchlist_parser.dart';
 import '../../../core/utils/title_meta_format.dart';
 import '../../../models/watchlist_item.dart';
@@ -186,24 +187,13 @@ bool itemMatchesWatchedFilter(
   WatchedFilter filter,
   Map<String, WatchEntry> watched,
 ) {
+  final state = itemProgressStateForId(item.id, watched);
   return switch (filter) {
     WatchedFilter.all => true,
-    WatchedFilter.unwatched => !isItemWatched(item.id, watched),
-    WatchedFilter.watched => _isItemFullyWatched(item.id, watched),
-    WatchedFilter.inProgress => _isItemInProgress(item.id, watched),
+    WatchedFilter.unwatched => state == ItemProgressState.unwatched,
+    WatchedFilter.watched => state == ItemProgressState.watched,
+    WatchedFilter.inProgress => state == ItemProgressState.inProgress,
   };
-}
-
-bool _isItemFullyWatched(String id, Map<String, WatchEntry> watched) {
-  final entry = watched[id];
-  if (entry == null) return false;
-  return entry.isFullyWatched;
-}
-
-bool _isItemInProgress(String id, Map<String, WatchEntry> watched) {
-  final entry = watched[id];
-  if (entry == null) return false;
-  return entry.isInProgress;
 }
 
 bool itemMatchesRatingFilter(

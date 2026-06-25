@@ -2704,11 +2704,11 @@
         <span class="header__stat-value text-num">${total}</span>
         <span class="header__stat-label">${escapeHtml(t("stats.totalWord"))}</span>
       </span>
-      <span class="header__stat-chip">
+      <span class="header__stat-chip header__stat-chip--watched">
         <span class="header__stat-value text-num">${watchedCount}</span>
         <span class="header__stat-label">${escapeHtml(t("stats.watchedWord"))}</span>
       </span>
-      ${inProgressCount > 0 ? `<span class="header__stat-chip">
+      ${inProgressCount > 0 ? `<span class="header__stat-chip header__stat-chip--in-progress">
         <span class="header__stat-value text-num">${inProgressCount}</span>
         <span class="header__stat-label">${escapeHtml(t("stats.inProgressWord"))}</span>
       </span>` : ""}

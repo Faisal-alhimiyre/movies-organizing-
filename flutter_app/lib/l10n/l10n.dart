@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app/localization.dart';
 import '../app/theme/theme_controller.dart';
 import '../core/utils/code_validator.dart';
+import '../core/utils/rating_utils.dart';
 import '../core/utils/title_meta_format.dart';
 
 /// Hand-maintained strings for Stage 3 gate/auth. Full `i18n.js` port in a later stage.
@@ -164,10 +165,13 @@ class L10n {
   String get mobileEditRating => _ar ? 'تعديل التقييم' : 'Edit rating';
   String get mobileClose => _ar ? 'إغلاق' : 'Close';
   String get btnClose => mobileClose;
+  String get detailOpenMenu => _ar ? 'مزيد من الإجراءات' : 'More actions';
 
   // ─── Episode / season progress ────────────────────────────────────────────
   String get progressUnwatched => _ar ? 'لم تُشاهد' : 'Unwatched';
   String get progressInProgress => _ar ? 'قيد المشاهدة' : 'In progress';
+  String get detailAddNote => _ar ? 'إضافة ملاحظة' : 'Add note';
+  String get detailEditNote => _ar ? 'تعديل الملاحظة' : 'Edit note';
   String get progressWatched => _ar ? 'مشاهَد' : 'Watched';
   String progressEpisodes(int watched, int total) =>
       _ar ? '$watched/$total حلقة' : '$watched/$total episodes';
@@ -179,6 +183,15 @@ class L10n {
   String get progressMarkAllWatched => _ar ? 'تعيين الكل كمشاهَد' : 'Mark all watched';
   String get progressClearAllWatched => _ar ? 'إلغاء تحديد الكل' : 'Unwatch all';
   String get progressSeasons => _ar ? 'المواسم والحلقات' : 'Seasons & Episodes';
+  String get seasonsSectionTitle => _ar ? 'المواسم' : 'Seasons';
+  String get seasonsGapPromptTitle =>
+      _ar ? 'حلقات سابقة غير مشاهَدة' : 'Earlier episodes unwatched';
+  String get seasonsGapPromptMessage => _ar
+      ? 'لم تُعيّن الحلقات أو المواسم الأقدم كمشاهَدة. هل تريد تعيين كل الحلقات السابقة كمشاهَدة أيضاً؟'
+      : "You haven't marked earlier episodes or seasons as watched. Mark all previous episodes as watched too?";
+  String get seasonsGapMarkAll =>
+      _ar ? 'تعيين الكل كمشاهَد' : 'Mark all watched';
+  String get seasonsGapNo => _ar ? 'لا' : 'No';
   String get progressLoadingEpisodes =>
       _ar ? 'جارٍ تحميل الحلقات…' : 'Loading episodes…';
   String get progressLoadError => _ar ? 'تعذّر تحميل الحلقات.' : 'Could not load episodes.';
@@ -190,6 +203,31 @@ class L10n {
   String progressSeason(int n) => _ar ? 'الموسم $n' : 'Season $n';
   String progressEpisodeCount(int n) => _ar ? '$n حلقة' : n == 1 ? '1 episode' : '$n episodes';
   String progressEpisodeNum(int n) => _ar ? 'الحلقة $n' : 'Episode $n';
+  String get seasonsEpisodesTitle => _ar ? 'الحلقات' : 'Episodes';
+  String seasonsEpisodesFor(String seasonName) =>
+      _ar ? '$seasonsEpisodesTitle — $seasonName' : '$seasonsEpisodesTitle — $seasonName';
+  String get seasonsSpoilerMode => _ar ? 'إخفاء صورة الحلقة' : 'Hide episode still';
+  String get seasonsHideEpisodeRatings =>
+      _ar ? 'إخفاء تقييمات الحلقات' : 'Hide episode ratings';
+  String seasonsWatchedProgress(int watched, int total) => _ar
+      ? '$watched / $total مشاهَد'
+      : '$watched / $total watched';
+  String seasonsEpisodeRatingSource(double rating) => _ar
+      ? 'تقييم الحلقة ${formatWatchRating(rating)}/10'
+      : 'Episode ${formatWatchRating(rating)}/10';
+  String seasonsEpisodeRatingYours(double rating) => _ar
+      ? 'تقييمك ${formatWatchRating(rating)}/10'
+      : 'You ${formatWatchRating(rating)}/10';
+  String seasonsSeasonAvgSource(double rating) => _ar
+      ? 'متوسط الموسم ${formatWatchRating(rating)}/10'
+      : 'Season avg ${formatWatchRating(rating)}/10';
+  String seasonsSeasonAvgOmdb(double rating) => _ar
+      ? 'متوسط OMDb ${formatWatchRating(rating)}/10'
+      : 'OMDb avg ${formatWatchRating(rating)}/10';
+  String get seasonsYourEpisodeRating =>
+      _ar ? 'تقييمك للحلقة (0-10)' : 'Your episode rating (0-10)';
+  String get seasonsEditEpisodeRating => _ar ? 'تعديل' : 'Edit';
+  String get seasonsClearEpisodeRating => _ar ? 'مسح' : 'Clear';
   String runtimeMin(int n) => _ar ? '$n دقيقة' : '$n min';
   String runtimeMinPerEp(int n) => _ar ? '~$n دقيقة/ح' : '~$n min/ep';
   String get btnRateLater => _ar ? 'التقييم لاحقاً' : 'Rate later';

@@ -272,6 +272,8 @@ class EpisodeDetail {
     this.runtimeMinutes,
     this.airDate,
     this.isAired = true,
+    this.episodeRating,
+    this.episodeRatingSource,
   });
 
   final String source;
@@ -295,6 +297,12 @@ class EpisodeDetail {
   /// False only for future episodes with a known future air date.
   final bool isAired;
 
+  /// External rating (IMDb/OMDb or TMDB vote_average), 0–10.
+  final double? episodeRating;
+
+  /// `"imdb"` or `"tmdb"` when [episodeRating] is set.
+  final String? episodeRatingSource;
+
   /// Stable progress key used by [WatchProgress] (format: `season:episode`).
   String get progressKey => '$seasonNumber:$episodeNumber';
 
@@ -309,6 +317,9 @@ class EpisodeDetail {
         if (runtimeMinutes != null) 'runtimeMinutes': runtimeMinutes,
         if (airDate != null) 'airDate': airDate,
         'isAired': isAired,
+        if (episodeRating != null) 'episodeRating': episodeRating,
+        if (episodeRatingSource != null)
+          'episodeRatingSource': episodeRatingSource,
       };
 
   factory EpisodeDetail.fromJson(Map<String, dynamic> json) => EpisodeDetail(
@@ -322,7 +333,16 @@ class EpisodeDetail {
         runtimeMinutes: json['runtimeMinutes'] as int?,
         airDate: json['airDate']?.toString(),
         isAired: json['isAired'] != false,
+        episodeRating: _parseEpisodeRating(json['episodeRating']),
+        episodeRatingSource: json['episodeRatingSource']?.toString(),
       );
+}
+
+double? _parseEpisodeRating(dynamic raw) {
+  if (raw == null) return null;
+  final n = double.tryParse(raw.toString().replaceAll(',', '.'));
+  if (n == null || !n.isFinite || n <= 0 || n > 10) return null;
+  return (n * 10).round() / 10;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -358,12 +378,20 @@ class SeasonEpisodesResult {
   const SeasonEpisodesResult({
     required this.state,
     this.episodes,
+    this.seasonPoster,
+    this.seasonOverview,
     this.isStale = false,
     this.debugMessage,
   });
 
   final MetadataResultState state;
   final List<EpisodeDetail>? episodes;
+
+  /// Season poster from the season-details API (TMDB `poster_path`).
+  final String? seasonPoster;
+
+  /// Season overview from the season-details API (TMDB `overview`).
+  final String? seasonOverview;
 
   /// True when the data came from a stale cache entry.
   final bool isStale;

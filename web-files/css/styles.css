@@ -3954,15 +3954,7 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   }
 
   .header__main {
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .header__brand {
-    gap: 0.38rem;
-    min-width: 0;
-    flex: 1;
+    gap: 0.38rem 0.5rem;
   }
 
   .header__title {
@@ -4002,7 +3994,6 @@ html[data-theme] .header__toolbar .btn--primary:hover {
 
   .header__actions {
     width: auto;
-    margin-left: auto;
     gap: 0.4rem;
   }
 

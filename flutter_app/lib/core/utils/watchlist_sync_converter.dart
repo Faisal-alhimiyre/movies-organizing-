@@ -1,4 +1,5 @@
 import '../../models/watchlist_data.dart';
+import 'watch_progress.dart';
 import 'watchlist_parser.dart';
 
 class WatchlistConvertResult {
@@ -138,33 +139,28 @@ WatchlistConvertResult rowsToWatchlist(List<Map<String, dynamic>> rows) {
     final itemId = row['item_id']?.toString() ?? '';
     if (itemId.isEmpty) continue;
 
-    // Rows with granular progress but !watched are still tracked (in-progress).
+    // Rows with meaningful progress, a note, or watched=true (web rowsToWatchlist).
     final isWatched = row['watched'] == true;
-    final rawProgress = row['watch_progress'];
-    final progressMap =
-        rawProgress is Map && rawProgress.isNotEmpty ? rawProgress : null;
-    final hasProgress = progressMap != null;
+    final exportedProgress = exportProgressObject(row['watch_progress']);
+    final note = row['watch_note']?.toString().trim() ?? '';
+    final hasNote = note.isNotEmpty;
 
-    if (isWatched || hasProgress) {
+    if (isWatched || exportedProgress != null || hasNote) {
       final watchEntry = <String, dynamic>{};
 
-      if (isWatched) {
-        final ratingRaw = row['watch_rating'];
-        if (ratingRaw != null && ratingRaw.toString().isNotEmpty) {
-          final rating =
-              double.tryParse(ratingRaw.toString().replaceAll(',', '.'));
-          if (rating != null && rating.isFinite) {
-            watchEntry['rating'] = rating;
-          }
+      final ratingRaw = row['watch_rating'];
+      if (ratingRaw != null && ratingRaw.toString().isNotEmpty) {
+        final rating =
+            double.tryParse(ratingRaw.toString().replaceAll(',', '.'));
+        if (rating != null && rating.isFinite) {
+          watchEntry['rating'] = rating;
         }
-
-        final note = row['watch_note']?.toString().trim() ?? '';
-        if (note.isNotEmpty) watchEntry['note'] = note;
       }
 
-      // Attach granular progress when present.
-      if (progressMap != null) {
-        watchEntry['progress'] = Map<String, dynamic>.from(progressMap);
+      if (hasNote) watchEntry['note'] = note;
+
+      if (exportedProgress != null) {
+        watchEntry['progress'] = exportedProgress.toJson();
       }
 
       watched[itemId] = watchEntry;
@@ -235,6 +231,9 @@ List<Map<String, dynamic>> watchlistToRows(
           'season_count': map['seasonCount']?.toString() ?? '',
           'episode_count': map['episodeCount']?.toString() ?? '',
           'year': map['year']?.toString() ?? '',
+          'card_poster': map['cardPoster']?.toString() ?? '',
+          'selected_season_name': map['selectedSeasonName']?.toString() ?? '',
+          'no_specials': map['noSpecials'] == true,
           'watched': watchMeta.watched,
           'watch_rating': watchMeta.rating,
           'watch_note': watchMeta.note,
@@ -244,18 +243,8 @@ List<Map<String, dynamic>> watchlistToRows(
           'updated_at': now,
         };
 
-        final cardPoster = map['cardPoster']?.toString() ?? '';
-        if (cardPoster.isNotEmpty) row['card_poster'] = cardPoster;
-
         final selectedSeason = map['selectedSeason'];
         if (selectedSeason != null) row['selected_season'] = selectedSeason;
-
-        final selectedSeasonName = map['selectedSeasonName']?.toString() ?? '';
-        if (selectedSeasonName.isNotEmpty) {
-          row['selected_season_name'] = selectedSeasonName;
-        }
-
-        if (map['noSpecials'] == true) row['no_specials'] = true;
 
         rows.add(row);
       }

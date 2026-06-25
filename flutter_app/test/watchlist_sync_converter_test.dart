@@ -31,6 +31,45 @@ void main() {
         {'rating': 8.5, 'note': 'Great watch'},
       );
     });
+
+    test('ignores empty watch_progress placeholder rows', () {
+      final result = rowsToWatchlist([
+        {
+          'list_id': 'lst_test',
+          'item_id': 'tvSeries::Drama::Show A',
+          'content_type': 'tvSeries',
+          'genre': 'Drama',
+          'title': 'Show A',
+          'kind': 'series',
+          'watched': false,
+          'watch_progress': {'version': 1, 'episodes': <String>[]},
+        },
+        {
+          'list_id': 'lst_test',
+          'item_id': 'tvSeries::Drama::Show B',
+          'content_type': 'tvSeries',
+          'genre': 'Drama',
+          'title': 'Show B',
+          'kind': 'series',
+          'watched': false,
+          'watch_progress': {
+            'version': 1,
+            'episodes': ['1:1', '1:2'],
+          },
+        },
+      ]);
+
+      expect(result.watched.containsKey('tvSeries::Drama::Show A'), isFalse);
+      expect(
+        result.watched['tvSeries::Drama::Show B'],
+        {
+          'progress': {
+            'version': 1,
+            'episodes': ['1:1', '1:2'],
+          },
+        },
+      );
+    });
   });
 
   group('watchlistToRows', () {
@@ -74,6 +113,24 @@ void main() {
 
       expect(parseAddedAtMs(rows.first['added_at']),
           DateTime.parse(remoteAt).millisecondsSinceEpoch);
+    });
+
+    test('always sends empty card_poster, selected_season_name, and false no_specials', () {
+      final rows = watchlistToRows(
+        'lst_test',
+        WatchlistData(
+          movies: {
+            'Action': [
+              {'title': 'No Poster'},
+            ],
+          },
+        ),
+        const {},
+      );
+
+      expect(rows.first['card_poster'], '');
+      expect(rows.first['selected_season_name'], '');
+      expect(rows.first['no_specials'], false);
     });
   });
 }

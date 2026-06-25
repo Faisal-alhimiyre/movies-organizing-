@@ -52,6 +52,145 @@
    *  Prevents the MutationObserver from triggering a full detail rebuild. */
   let _ignoreMutations = false;
 
+  /** Mobile pull-to-dismiss + background scroll lock */
+  let _savedScrollY = 0;
+  let _panelDrag = null;
+  let _swipeBound = false;
+  const MOBILE_SHEET_MQ = "(max-width: 640px)";
+  const PANEL_DRAG_CLOSE_PX = 120;
+  const PANEL_DRAG_START_PX = 8;
+
+  function isMobileSheet() {
+    return window.matchMedia(MOBILE_SHEET_MQ).matches;
+  }
+
+  function lockBackgroundScroll() {
+    _savedScrollY = window.scrollY || window.pageYOffset || 0;
+    document.documentElement.classList.add("td-scroll-lock");
+    document.body.classList.add("td-scroll-lock");
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${_savedScrollY}px`;
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    document.body.style.width = "100%";
+  }
+
+  function unlockBackgroundScroll() {
+    document.documentElement.classList.remove("td-scroll-lock");
+    document.body.classList.remove("td-scroll-lock");
+    document.body.style.position = "";
+    document.body.style.top = "";
+    document.body.style.left = "";
+    document.body.style.right = "";
+    document.body.style.width = "";
+    window.scrollTo(0, _savedScrollY);
+  }
+
+  function scrollAtTop() {
+    return (_scroll?.scrollTop ?? 0) <= 0;
+  }
+
+  function canStartPanelDrag(target) {
+    if (!target?.closest) return false;
+    if (target.closest(
+      "button, a, input, textarea, select, label, [role='menu'], #tdMenuPanel, .tds-carousel, .tds-carousel-wrap, .tds-ep-modal"
+    )) {
+      return false;
+    }
+    return true;
+  }
+
+  function resetPanelDragStyles() {
+    if (!_panel || !_overlay) return;
+    _panel.classList.remove("td-panel--dragging");
+    _overlay.classList.remove("td-overlay--dragging");
+    _panel.style.transform = "";
+    const backdrop = _overlay.querySelector("#tdBackdrop");
+    if (backdrop) backdrop.style.opacity = "";
+  }
+
+  function onPanelTouchStart(event) {
+    if (!isMobileSheet() || !_isOpen || _panelDrag) return;
+    if (!canStartPanelDrag(event.target)) return;
+
+    const onTopbar = Boolean(event.target.closest("#tdTopbar"));
+    if (!scrollAtTop() && !onTopbar) return;
+
+    const touch = event.changedTouches?.[0] || event.touches?.[0];
+    if (!touch) return;
+
+    _panelDrag = {
+      pointerId: touch.identifier,
+      startY: touch.clientY,
+      startX: touch.clientX,
+      dragging: false,
+    };
+  }
+
+  function onPanelTouchMove(event) {
+    if (!_panelDrag || !_isOpen) return;
+
+    const touch = Array.from(event.changedTouches).find(
+      (t) => t.identifier === _panelDrag.pointerId
+    ) || event.touches?.[0];
+    if (!touch || touch.identifier !== _panelDrag.pointerId) return;
+
+    const dy = touch.clientY - _panelDrag.startY;
+    const dx = touch.clientX - _panelDrag.startX;
+
+    if (!_panelDrag.dragging) {
+      if (dy <= 0) return;
+      if (Math.abs(dx) > Math.abs(dy)) {
+        _panelDrag = null;
+        return;
+      }
+      if (dy < PANEL_DRAG_START_PX) return;
+      if (!scrollAtTop()) {
+        _panelDrag = null;
+        return;
+      }
+      _panelDrag.dragging = true;
+      _panel.classList.add("td-panel--dragging");
+      _overlay.classList.add("td-overlay--dragging");
+    }
+
+    event.preventDefault();
+    const offset = Math.max(0, dy);
+    _panel.style.transform = `translateY(${offset}px)`;
+    const backdrop = _overlay.querySelector("#tdBackdrop");
+    if (backdrop) {
+      const fade = Math.max(0, 1 - offset / 280);
+      backdrop.style.opacity = String(0.62 * fade);
+    }
+  }
+
+  function onPanelTouchEnd(event) {
+    if (!_panelDrag) return;
+
+    const touch = Array.from(event.changedTouches).find(
+      (t) => t.identifier === _panelDrag.pointerId
+    );
+    const dy = touch ? touch.clientY - _panelDrag.startY : 0;
+    const wasDragging = _panelDrag.dragging;
+    _panelDrag = null;
+
+    resetPanelDragStyles();
+
+    if (!wasDragging) return;
+
+    const panelHeight = _panel?.offsetHeight || 0;
+    if (dy > PANEL_DRAG_CLOSE_PX || dy > panelHeight * 0.22) close();
+  }
+
+  function setupSwipeToDismiss() {
+    if (_swipeBound || !_panel) return;
+    _swipeBound = true;
+    _panel.addEventListener("touchstart", onPanelTouchStart, { passive: true });
+    _panel.addEventListener("touchmove", onPanelTouchMove, { passive: false });
+    _panel.addEventListener("touchend", onPanelTouchEnd, { passive: true });
+    _panel.addEventListener("touchcancel", onPanelTouchEnd, { passive: true });
+  }
+
   // ─── I18n helpers ─────────────────────────────────────────────────────────
   function t(key, vars) {
     const i18n = window.WatchlistI18n;
@@ -199,16 +338,8 @@
         if (titleEl) titleEl.textContent = payload.name || formatSeasonLabel(season);
 
         if (metaEl) {
-          const metaParts = [
-            payload.year || (season.airDate ? season.airDate.slice(0, 4) : ""),
-            season.episodeCount != null
-              ? (season.episodeCount === 1
-                  ? t("seasons.episodeCountOne")
-                  : t("seasons.episodeCount", { n: season.episodeCount }))
-              : null,
-          ].filter(Boolean);
-          metaEl.textContent = metaParts.join(" · ");
-          metaEl.hidden = metaParts.length === 0;
+          metaEl.textContent = "";
+          metaEl.hidden = true;
         }
 
         const overviewEl = detailEl.querySelector("[data-td-part='season-overview']");
@@ -258,41 +389,40 @@
 
     // Unwatched: tap to mark watched
     if (state === "unwatched") {
-      return `<div class="td-my-rating td-my-rating--status">
+      return `<div class="td-my-rating td-my-rating--chip">
         <button type="button"
-          class="td-my-rating__status-badge td-my-rating__status-badge--unwatched td-my-rating__status-badge--clickable"
+          class="card__footer-badge card__footer-badge--unwatched"
           data-td-action="quick-toggle-watched"
           data-td-id="${esc(itemId)}"
           aria-label="${esc(t("card.markWatched"))}">
-          ${esc(t("progress.unwatched"))}
+          ${esc(t("card.notWatchedShort"))}
         </button>
       </div>`;
     }
 
     // In progress: tap to mark fully watched
     if (state === "inProgress") {
-      return `<div class="td-my-rating td-my-rating--status">
-        <button type="button"
-          class="td-my-rating__status-badge td-my-rating__status-badge--progress td-my-rating__status-badge--clickable"
-          data-td-action="quick-toggle-watched"
-          data-td-id="${esc(itemId)}"
-          aria-label="${esc(t("card.markWatched"))}">
-          ${esc(t("progress.inprogress"))}
-        </button>
-        <button type="button" class="btn btn--ghost btn--sm td-my-rating__note-btn"
-          data-td-action="add-note" data-td-id="${esc(itemId)}">
-          ${esc(hasNote ? t("detail.editNote") : t("detail.addNote"))}
-        </button>
+      return `<div class="td-my-rating td-my-rating--chip td-my-rating--in-progress">
+        <div class="td-my-rating__toolbar">
+          <button type="button"
+            class="card__watch-status card__watch-status--in-progress"
+            data-td-action="quick-toggle-watched"
+            data-td-id="${esc(itemId)}"
+            aria-label="${esc(t("card.markWatched"))}">
+            ${esc(t("card.inProgress"))}
+          </button>
+          <button type="button" class="btn btn--ghost btn--sm td-my-rating__note-btn"
+            data-td-action="add-note" data-td-id="${esc(itemId)}">
+            ${esc(hasNote ? t("detail.editNote") : t("detail.addNote"))}
+          </button>
+        </div>
         ${noteSnippet}
       </div>`;
     }
 
     // Watched (fully): show rating controls
-    const label = `<span class="td-my-rating__label">${esc(t("detail.myRating"))}</span>`;
     if (!rated) {
-      return `<div class="td-my-rating td-my-rating--actionable">
-        ${label}
-        ${noteSnippet}
+      return `<div class="td-my-rating td-my-rating--chip">
         <button
           type="button"
           class="btn btn--primary td-my-rating__rate-btn"
@@ -303,6 +433,7 @@
     }
 
     const ratingDisplay = formatRating(entry.rating);
+    const label = `<span class="td-my-rating__label">${esc(t("detail.myRating"))}</span>`;
     return `<div class="td-my-rating td-my-rating--rated">
       ${label}
       <div class="td-my-rating__value">
@@ -701,6 +832,7 @@
     _overlay.addEventListener("click", onOverlayClick);
     _overlay.addEventListener("keydown", onOverlayKeydown);
     _titleObserver = null;
+    setupSwipeToDismiss();
   }
 
   // ─── Seasons integration ───────────────────────────────────────────────────
@@ -750,7 +882,7 @@
     _overlay.removeAttribute("aria-hidden");
     _overlay.classList.add("td-is-open");
 
-    document.body.style.overflow = "hidden";
+    lockBackgroundScroll();
 
     requestAnimationFrame(() => {
       _overlay.querySelector("#tdCloseBtn")?.focus();
@@ -797,12 +929,14 @@
 
     closeMenu();
     detachSeasons();
+    _panelDrag = null;
+    resetPanelDragStyles();
 
     _overlay.classList.remove("td-is-open");
     _overlay.setAttribute("aria-hidden", "true");
     _overlay.setAttribute("inert", "");
 
-    document.body.style.overflow = "";
+    unlockBackgroundScroll();
 
     disconnectObservers();
     _topbarTitle?.classList.remove("td-topbar__title--visible");

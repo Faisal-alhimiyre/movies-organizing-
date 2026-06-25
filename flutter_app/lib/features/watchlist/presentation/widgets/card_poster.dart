@@ -15,9 +15,13 @@ class CardPoster extends ConsumerStatefulWidget {
   const CardPoster({
     super.key,
     required this.item,
+    this.posterOverride,
   });
 
   final WatchlistItem item;
+
+  /// Immediate poster URL (e.g. season select) before item sync catches up.
+  final String? posterOverride;
 
   @override
   ConsumerState<CardPoster> createState() => _CardPosterState();
@@ -27,10 +31,16 @@ class _CardPosterState extends ConsumerState<CardPoster> {
   String? _posterUrl;
   bool _loading = false;
 
+  String? _effectivePoster() {
+    final override = _usablePoster(widget.posterOverride);
+    if (override != null) return override;
+    return _usablePoster(widget.item.displayPoster);
+  }
+
   @override
   void initState() {
     super.initState();
-    _posterUrl = _usablePoster(widget.item.poster);
+    _posterUrl = _effectivePoster();
     if (_posterUrl == null && itemNeedsPosterBackfill(widget.item)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _hydratePoster());
     }
@@ -39,13 +49,17 @@ class _CardPosterState extends ConsumerState<CardPoster> {
   @override
   void didUpdateWidget(covariant CardPoster oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final nextPoster = _usablePoster(widget.item.poster);
+    final nextPoster = _effectivePoster();
     if (nextPoster != null) {
-      setState(() => _posterUrl = nextPoster);
+      if (nextPoster != _posterUrl) {
+        setState(() => _posterUrl = nextPoster);
+      }
       return;
     }
     if (oldWidget.item.id != widget.item.id ||
-        oldWidget.item.link != widget.item.link) {
+        oldWidget.item.link != widget.item.link ||
+        oldWidget.item.displayPoster != widget.item.displayPoster ||
+        oldWidget.posterOverride != widget.posterOverride) {
       _posterUrl = null;
       if (itemNeedsPosterBackfill(widget.item)) {
         _hydratePoster();
@@ -77,7 +91,7 @@ class _CardPosterState extends ConsumerState<CardPoster> {
       if (!mounted) return;
 
       if (hasValidPoster(enriched)) {
-        setState(() => _posterUrl = enriched.poster);
+        setState(() => _posterUrl = _usablePoster(enriched.displayPoster));
         await ref
             .read(watchlistControllerProvider.notifier)
             .patchEnrichedItem(enriched);

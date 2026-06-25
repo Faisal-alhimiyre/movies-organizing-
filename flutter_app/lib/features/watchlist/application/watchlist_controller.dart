@@ -117,6 +117,9 @@ final watchlistFilterProvider =
 );
 
 class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
+  /// Serializes local/cloud writes so rapid taps don't race or block the UI.
+  Future<void> _persistChain = Future.value();
+
   @override
   Future<WatchlistSnapshot> build() async {
     final session = ref.watch(sessionProvider);
@@ -323,7 +326,17 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
       note: note?.trim().isEmpty == true ? null : note?.trim(),
     );
 
-    return _persist(session, snapshot.items, watched);
+    state = AsyncData(
+      WatchlistSnapshot(
+        items: snapshot.items,
+        watched: watched,
+        isEmptyList: snapshot.isEmptyList,
+        syncStatus: snapshot.syncStatus,
+      ),
+    );
+
+    _schedulePersist(session, refresh: false);
+    return null;
   }
 
   Future<String?> markWatchedLater(String itemId) async {
@@ -340,7 +353,17 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     final watched = Map<String, WatchEntry>.from(snapshot.watched);
     watched.putIfAbsent(itemId, () => const WatchEntry());
 
-    return _persist(session, snapshot.items, watched);
+    state = AsyncData(
+      WatchlistSnapshot(
+        items: snapshot.items,
+        watched: watched,
+        isEmptyList: snapshot.isEmptyList,
+        syncStatus: snapshot.syncStatus,
+      ),
+    );
+
+    _schedulePersist(session, refresh: false);
+    return null;
   }
 
   Future<String?> markUnwatched(String itemId) async {
@@ -353,7 +376,17 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     final watched = Map<String, WatchEntry>.from(snapshot.watched)
       ..remove(itemId);
 
-    return _persist(session, snapshot.items, watched);
+    state = AsyncData(
+      WatchlistSnapshot(
+        items: snapshot.items,
+        watched: watched,
+        isEmptyList: snapshot.isEmptyList,
+        syncStatus: snapshot.syncStatus,
+      ),
+    );
+
+    _schedulePersist(session, refresh: false);
+    return null;
   }
 
   Future<CopyItemToListResult> copyItemToList({
@@ -405,6 +438,20 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     return _persist(session, items, watched);
   }
 
+  void _schedulePersist(Session session, {bool refresh = false}) {
+    _persistChain = _persistChain.then((_) async {
+      if (ref.read(sessionProvider)?.listId != session.listId) return;
+      final snap = state.value;
+      if (snap == null) return;
+      await _persist(
+        session,
+        snap.items,
+        snap.watched,
+        refresh: refresh,
+      );
+    });
+  }
+
   Future<String?> _persist(
     Session session,
     List<WatchlistItem> items,
@@ -414,6 +461,18 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     final live = ref.read(sessionProvider);
     if (live == null || live.listId != session.listId) {
       return null;
+    }
+
+    // Queued / optimistic paths may update state while an earlier save is in
+    // flight — always flush the latest snapshot (web: localStorage is current).
+    var itemsToSave = items;
+    var watchedToSave = watched;
+    if (!refresh) {
+      final snap = state.value;
+      if (snap != null) {
+        itemsToSave = snap.items;
+        watchedToSave = snap.watched;
+      }
     }
 
     final cloud = ref.read(appConfigProvider).isSupabaseConfigured;
@@ -426,8 +485,8 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     final result = await ref.read(watchlistRepositoryProvider).saveItems(
           listId: session.listId,
           accountId: session.accountId,
-          items: items,
-          watched: watched,
+          items: itemsToSave,
+          watched: watchedToSave,
           cloudConfigured: cloud,
           listName: listName,
         );
@@ -435,14 +494,13 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     if (refresh) {
       ref.invalidateSelf();
     } else {
-      state = AsyncData(
-        WatchlistSnapshot(
-          items: items,
-          watched: watched,
-          isEmptyList: items.isEmpty,
-          syncStatus: result.syncStatus,
-        ),
-      );
+      // Never roll back optimistic UI — only refresh sync status.
+      final current = state.value;
+      if (current != null) {
+        state = AsyncData(
+          current.copyWith(syncStatus: result.syncStatus),
+        );
+      }
     }
 
     if (result.syncStatus == SyncDisplayStatus.error) {
@@ -470,12 +528,18 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     final snapshot = state.value;
     if (snapshot == null) return;
 
-    await _persist(
-      session,
-      items,
-      watched ?? snapshot.watched,
-      refresh: refresh,
+    final newWatched = watched ?? snapshot.watched;
+
+    state = AsyncData(
+      WatchlistSnapshot(
+        items: items,
+        watched: newWatched,
+        isEmptyList: items.isEmpty,
+        syncStatus: snapshot.syncStatus,
+      ),
     );
+
+    _schedulePersist(session, refresh: refresh);
   }
 
   /// Update one title in memory (and cloud/local storage when signed in).
@@ -489,20 +553,20 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     final items = [...snapshot.items];
     items[index] = updated;
 
-    final session = ref.read(sessionProvider);
-    if (session == null) {
-      state = AsyncData(
-        WatchlistSnapshot(
-          items: items,
-          watched: snapshot.watched,
-          isEmptyList: items.isEmpty,
-          syncStatus: snapshot.syncStatus,
-        ),
-      );
-      return;
-    }
+    // Optimistic update so poster / season fields refresh immediately in UI.
+    state = AsyncData(
+      WatchlistSnapshot(
+        items: items,
+        watched: snapshot.watched,
+        isEmptyList: items.isEmpty,
+        syncStatus: snapshot.syncStatus,
+      ),
+    );
 
-    await _persist(session, items, snapshot.watched, refresh: refresh);
+    final session = ref.read(sessionProvider);
+    if (session == null) return;
+
+    _schedulePersist(session, refresh: refresh);
   }
 
   /// Merge metadata (poster, ratings, year) for one title without a full reload.

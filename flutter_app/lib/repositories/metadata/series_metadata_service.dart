@@ -33,10 +33,9 @@ final seriesMetadataServiceProvider = Provider<SeriesMetadataService>((ref) {
 /// Uses the same Hive cache box as [MetadataService] but with a `metadata:v5:`
 /// prefix to avoid collisions with existing v4 title-level entries.
 ///
-/// Source priority:
-///   TV series: TMDb → OMDb fallback
-///   Anime:     TMDb → AniList → OMDb fallback → synthetic Season 1
-///   Movies:    not supported (returns [MetadataResultState.invalidId])
+/// Source priority (matches web `series-metadata.js`):
+///   TV series / anime: TheTVDB (edge) → TMDb → AniList → OMDb fallback
+///   Movies:            not supported (returns [MetadataResultState.invalidId])
 class SeriesMetadataService {
   SeriesMetadataService({
     required AppConfig config,
@@ -57,6 +56,7 @@ class SeriesMetadataService {
   static const _v5Prefix = 'metadata:v5:';
 
   static const _tmdbImage = 'https://image.tmdb.org/t/p/w500';
+  static const _tvdbArt = 'https://artworks.thetvdb.com';
   static const _anilistApi = 'https://graphql.anilist.co';
 
   // ── Cache TTLs ─────────────────────────────────────────────
@@ -189,6 +189,26 @@ class SeriesMetadataService {
       return const SeriesMetadataResult(state: MetadataResultState.invalidId);
     }
 
+    if (_config.isSupabaseConfigured) {
+      try {
+        final tvdbId = await _resolveTvdbId(resolution);
+        if (tvdbId != null) {
+          final tvdbResult = await _fetchTvdbSeriesMetadata(
+            tvdbId,
+            locale,
+            fallbackPoster: fallbackPoster,
+          );
+          if (tvdbResult.state == MetadataResultState.available ||
+              tvdbResult.state == MetadataResultState.partiallyAvailable ||
+              tvdbResult.state == MetadataResultState.offlineWithCache) {
+            return tvdbResult;
+          }
+        }
+      } catch (_) {
+        // Fall through to TMDb / AniList / OMDb.
+      }
+    }
+
     switch (resolution.source) {
       case 'tmdb':
         return _fetchTmdbSeriesMetadata(
@@ -224,6 +244,40 @@ class SeriesMetadataService {
   }) async {
     if (!resolution.hasUsableSource) {
       return const SeasonEpisodesResult(state: MetadataResultState.invalidId);
+    }
+
+    final effectivePoster = seasonSummary?.poster.isNotEmpty == true
+        ? seasonSummary!.poster
+        : fallbackPoster;
+
+    if (_config.isSupabaseConfigured) {
+      try {
+        final tvdbId = await _resolveTvdbId(resolution);
+        if (tvdbId != null) {
+          var tvdbResult = await _fetchTvdbSeasonEpisodes(
+            tvdbId,
+            seasonNumber,
+            locale,
+            fallbackPoster: effectivePoster,
+            seasonSummary: seasonSummary,
+          );
+          if (tvdbResult.state == MetadataResultState.available ||
+              tvdbResult.state == MetadataResultState.offlineWithCache) {
+            final tmdbId = resolution.tmdbId;
+            if (tmdbId != null) {
+              tvdbResult = await _enrichTmdbEpisodeRatings(
+                tvdbResult,
+                tmdbId,
+                seasonNumber,
+                locale,
+              );
+            }
+            return tvdbResult;
+          }
+        }
+      } catch (_) {
+        // Fall through to TMDb / AniList / OMDb.
+      }
     }
 
     switch (resolution.source) {
@@ -421,14 +475,15 @@ class SeriesMetadataService {
     String? fallbackPoster,
   }) async {
     final lang = _tmdbLanguage(locale);
-    final cacheKey = 'metadata:v7:season:tmdb:$tmdbId:$season:$locale';
+    final cacheKey = 'metadata:v9:season:tmdb:$tmdbId:$season:$locale';
 
     final cached = _readRawCache(cacheKey, _episodesTtl);
     if (cached != null) {
-      return _parseCachedEpisodesResult(
+      final parsed = _parseCachedEpisodesResult(
         cached,
         isStale: _isStale(cacheKey, _episodesTtl),
       );
+      return _enrichTmdbEpisodeRatings(parsed, tmdbId, season, locale);
     }
 
     final json = await _fetchTmdb('tv/$tmdbId/season/$season', {'language': lang});
@@ -455,28 +510,31 @@ class SeriesMetadataService {
           result = _mergeEpisodeLocaleResults(result, enResult);
         }
       }
+      result = await _enrichTmdbEpisodeRatings(result, tmdbId, season, locale);
       _writeRawCache(cacheKey, _episodesResultToJson(result), _episodesTtl);
       return result;
     }
 
     // Fallback to English when localized fetch failed.
     if (locale != 'en') {
-      final enKey = 'metadata:v7:season:tmdb:$tmdbId:$season:en';
+      final enKey = 'metadata:v9:season:tmdb:$tmdbId:$season:en';
       final enCached = _readRawCache(enKey, _episodesTtl);
       if (enCached != null) {
-        return _parseCachedEpisodesResult(enCached, isStale: true);
+        final parsed = _parseCachedEpisodesResult(enCached, isStale: true);
+        return _enrichTmdbEpisodeRatings(parsed, tmdbId, season, locale);
       }
       final enJson = await _fetchTmdb(
         'tv/$tmdbId/season/$season',
         {'language': 'en-US'},
       );
       if (enJson != null) {
-        final enResult = _normalizeTmdbSeasonEpisodes(
+        var enResult = _normalizeTmdbSeasonEpisodes(
           enJson,
           tmdbId,
           season,
           fallbackPoster: fallbackPoster,
         );
+        enResult = await _enrichTmdbEpisodeRatings(enResult, tmdbId, season, 'en');
         _writeRawCache(enKey, _episodesResultToJson(enResult), _episodesTtl);
         return enResult;
       }
@@ -484,15 +542,143 @@ class SeriesMetadataService {
 
     final stale = _readRawCacheStale(cacheKey);
     if (stale != null) {
-      return _parseCachedEpisodesResult(
+      final parsed = _parseCachedEpisodesResult(
         stale,
         isStale: true,
         forceState: MetadataResultState.offlineWithCache,
       );
+      return _enrichTmdbEpisodeRatings(parsed, tmdbId, season, locale);
     }
     return const SeasonEpisodesResult(
       state: MetadataResultState.offlineNoCache,
     );
+  }
+
+  Future<SeasonEpisodesResult> _enrichTmdbEpisodeRatings(
+    SeasonEpisodesResult result,
+    int tmdbId,
+    int season,
+    String locale,
+  ) async {
+    final episodes = result.episodes;
+    if (episodes == null || episodes.isEmpty) return result;
+    if (!episodes.any((e) => e.episodeRating == null)) return result;
+
+    var ratingMap = await _fetchEpisodeRatingMap(tmdbId, season, locale);
+    ratingMap ??= locale != 'en'
+        ? await _fetchEpisodeRatingMap(tmdbId, season, 'en')
+        : null;
+    if (ratingMap == null || ratingMap.isEmpty) return result;
+
+    final enriched = episodes.map((ep) {
+      if (ep.episodeRating != null) return ep;
+      final rating = ratingMap![ep.episodeNumber];
+      if (rating == null) return ep;
+      return EpisodeDetail(
+        source: ep.source,
+        seriesTmdbId: ep.seriesTmdbId,
+        seasonNumber: ep.seasonNumber,
+        episodeNumber: ep.episodeNumber,
+        title: ep.title,
+        still: ep.still,
+        overview: ep.overview,
+        runtimeMinutes: ep.runtimeMinutes,
+        airDate: ep.airDate,
+        isAired: ep.isAired,
+        episodeRating: rating,
+        episodeRatingSource: 'tmdb',
+      );
+    }).toList();
+
+    return SeasonEpisodesResult(
+      state: result.state,
+      episodes: enriched,
+      seasonPoster: result.seasonPoster,
+      isStale: result.isStale,
+      debugMessage: result.debugMessage,
+    );
+  }
+
+  Future<Map<int, double>?> _fetchEpisodeRatingMap(
+    int tmdbId,
+    int season,
+    String locale,
+  ) async {
+    if (_config.hasTmdbKey) {
+      final lang = _tmdbLanguage(locale);
+      final json = await _fetchTmdb(
+        'tv/$tmdbId/season/$season',
+        {'language': lang},
+      );
+      return _ratingMapFromSeasonJson(json);
+    }
+
+    final edge = await _invokeTmdbEdge({
+      'action': 'seasonRatings',
+      'tmdbId': tmdbId,
+      'season': season,
+      'locale': locale,
+    });
+    if (edge == null) return null;
+
+    final rows = edge['episodes'];
+    if (rows is! List) return null;
+
+    final map = <int, double>{};
+    for (final raw in rows) {
+      if (raw is! Map) continue;
+      final epNum = raw['episodeNumber'];
+      final rating = raw['rating'];
+      if (epNum is! int && epNum is! num) continue;
+      final n = rating is num ? rating.toDouble() : double.tryParse('$rating');
+      if (n == null || !n.isFinite || n <= 0 || n > 10) continue;
+      map[epNum is int ? epNum : epNum.round()] = (n * 10).round() / 10;
+    }
+    return map.isEmpty ? null : map;
+  }
+
+  Map<int, double>? _ratingMapFromSeasonJson(Map<String, dynamic>? json) {
+    if (json == null) return null;
+    final rawEps = json['episodes'];
+    if (rawEps is! List) return null;
+    final map = <int, double>{};
+    for (final raw in rawEps) {
+      if (raw is! Map) continue;
+      final epNum = raw['episode_number'];
+      final vote = raw['vote_average'];
+      if (epNum is! int && epNum is! num) continue;
+      final n = vote is num ? vote.toDouble() : double.tryParse('$vote');
+      if (n == null || !n.isFinite || n <= 0 || n > 10) continue;
+      map[epNum is int ? epNum : epNum.round()] = (n * 10).round() / 10;
+    }
+    return map.isEmpty ? null : map;
+  }
+
+  Future<Map<String, dynamic>?> _invokeTmdbEdge(
+    Map<String, dynamic> body,
+  ) async {
+    if (!_config.isSupabaseConfigured) return null;
+
+    final baseUrl = _config.supabaseUrl.replaceAll(RegExp(r'/$'), '');
+    final functionUrl = '$baseUrl/functions/v1/tmdb-metadata';
+
+    try {
+      final response = await _client.post(
+        Uri.parse(functionUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${_config.supabaseAnonKey}',
+          'apikey': _config.supabaseAnonKey,
+        },
+        body: jsonEncode(body),
+      );
+      if (response.statusCode != 200) return null;
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      if (json['error'] != null) return null;
+      return json;
+    } catch (_) {
+      return null;
+    }
   }
 
   SeasonEpisodesResult _normalizeTmdbSeasonEpisodes(
@@ -525,6 +711,8 @@ class SeriesMetadataService {
           ? MetadataResultState.noSeasons
           : MetadataResultState.available,
       episodes: episodes,
+      seasonPoster: posterPath != null ? seasonPoster : null,
+      seasonOverview: json['overview']?.toString(),
     );
   }
 
@@ -543,6 +731,10 @@ class SeriesMetadataService {
         : (seasonPoster ?? fallbackPoster ?? '');
 
     final airDate = json['air_date']?.toString();
+    final voteAvg = (json['vote_average'] as num?)?.toDouble();
+    final externalRating = voteAvg != null && voteAvg > 0 && voteAvg <= 10
+        ? ((voteAvg * 10).round() / 10)
+        : null;
 
     return EpisodeDetail(
       source: 'tmdb',
@@ -555,6 +747,8 @@ class SeriesMetadataService {
       runtimeMinutes: json['runtime'] as int?,
       airDate: airDate?.isNotEmpty == true ? airDate : null,
       isAired: _isAired(airDate),
+      episodeRating: externalRating,
+      episodeRatingSource: externalRating != null ? 'tmdb' : null,
     );
   }
 
@@ -900,6 +1094,7 @@ class SeriesMetadataService {
       final ep = raw as Map<String, dynamic>;
       final epNum = parsePositiveCount(ep['Episode']) ?? 0;
       final released = _na(ep['Released']?.toString());
+      final imdbRating = _parseOmdbEpisodeRating(ep['imdbRating']?.toString());
       return EpisodeDetail(
         source: 'omdb',
         seasonNumber: season,
@@ -911,6 +1106,8 @@ class SeriesMetadataService {
         runtimeMinutes: null,
         airDate: released.isNotEmpty ? released : null,
         isAired: released.isNotEmpty ? _isAired(released) : true,
+        episodeRating: imdbRating,
+        episodeRatingSource: imdbRating != null ? 'imdb' : null,
       );
     }).where((e) => e.episodeNumber > 0).toList();
   }
@@ -1057,6 +1254,461 @@ class SeriesMetadataService {
   }
 
   // ─────────────────────────────────────────────────────────────
+  // TheTVDB provider (via tvdb-metadata edge function — matches web)
+  // ─────────────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>?> _invokeTvdbEdge(
+    Map<String, dynamic> body,
+  ) async {
+    if (!_config.isSupabaseConfigured) return null;
+
+    final baseUrl = _config.supabaseUrl.replaceAll(RegExp(r'/$'), '');
+    final functionUrl = '$baseUrl/functions/v1/tvdb-metadata';
+
+    try {
+      final response = await _client.post(
+        Uri.parse(functionUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${_config.supabaseAnonKey}',
+          'apikey': _config.supabaseAnonKey,
+        },
+        body: jsonEncode(body),
+      );
+      if (response.statusCode != 200) return null;
+      final json = jsonDecode(response.body);
+      if (json is! Map<String, dynamic>) return null;
+      if (json['error'] != null) return null;
+      return json;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<int?> _resolveTvdbId(SeriesIdResolution resolution) async {
+    if (!_config.isSupabaseConfigured) return null;
+
+    final imdbId = resolution.imdbId;
+    if (imdbId != null && imdbId.isNotEmpty) {
+      final id = await _resolveTvdbIdByImdb(imdbId);
+      if (id != null) return id;
+    }
+
+    final tmdbId = resolution.tmdbId;
+    if (tmdbId != null) {
+      final id = await _resolveTvdbIdByTmdb(tmdbId);
+      if (id != null) return id;
+    }
+
+    final anilistId = resolution.anilistId;
+    if (anilistId != null) {
+      return _resolveTvdbIdByAnilist(anilistId);
+    }
+
+    return null;
+  }
+
+  Future<int?> _resolveTvdbIdByImdb(String imdbId) async {
+    final cacheKey = 'metadata:v7:resolve:tvdb:imdb:$imdbId';
+    final cached = _readRawCache(cacheKey, _resolveTtl);
+    final cachedId = cached?['tvdbId'];
+    if (cachedId is int && cachedId > 0) return cachedId;
+
+    final negKey = 'metadata:v7:resolve:tvdb:negative:imdb:$imdbId';
+    if (_isNegativeCacheValid(negKey)) return null;
+
+    final result = await _invokeTvdbEdge({'action': 'resolve', 'imdbId': imdbId});
+    final tvdbId = result?['tvdbId'];
+    if (tvdbId is int && tvdbId > 0) {
+      _writeRawCache(cacheKey, {'tvdbId': tvdbId}, _resolveTtl);
+      return tvdbId;
+    }
+
+    _writeNegativeCache(negKey, _negativeResolveTtl);
+    return null;
+  }
+
+  Future<int?> _resolveTvdbIdByTmdb(int tmdbId) async {
+    final cacheKey = 'metadata:v7:resolve:tvdb:tmdb:$tmdbId';
+    final cached = _readRawCache(cacheKey, _resolveTtl);
+    final cachedId = cached?['tvdbId'];
+    if (cachedId is int && cachedId > 0) return cachedId;
+
+    final negKey = 'metadata:v7:resolve:tvdb:negative:tmdb:$tmdbId';
+    if (_isNegativeCacheValid(negKey)) return null;
+
+    final result = await _invokeTvdbEdge({'action': 'resolve', 'tmdbId': tmdbId});
+    final tvdbId = result?['tvdbId'];
+    if (tvdbId is int && tvdbId > 0) {
+      _writeRawCache(cacheKey, {'tvdbId': tvdbId}, _resolveTtl);
+      return tvdbId;
+    }
+
+    _writeNegativeCache(negKey, _negativeResolveTtl);
+    return null;
+  }
+
+  Future<int?> _resolveTvdbIdByAnilist(int anilistId) async {
+    final cacheKey = 'metadata:v7:resolve:tvdb:anilist:$anilistId';
+    final cached = _readRawCache(cacheKey, _resolveTtl);
+    final cachedId = cached?['tvdbId'];
+    if (cachedId is int && cachedId > 0) return cachedId;
+
+    final data = await _anilistQuery(
+      r'query ($id: Int) { Media(id: $id, type: ANIME) { externalLinks { site url } } }',
+      {'id': anilistId},
+    );
+    final links = data?['Media']?['externalLinks'] as List? ?? [];
+    for (final raw in links) {
+      if (raw is! Map) continue;
+      final site = raw['site']?.toString() ?? '';
+      if (!RegExp(r'^imdb$', caseSensitive: false).hasMatch(site)) continue;
+      final linkedImdb =
+          MetadataService.extractImdbId(raw['url']?.toString() ?? '');
+      if (linkedImdb == null) continue;
+      final tvdbId = await _resolveTvdbIdByImdb(linkedImdb);
+      if (tvdbId != null) {
+        _writeRawCache(cacheKey, {'tvdbId': tvdbId}, _resolveTtl);
+        return tvdbId;
+      }
+    }
+    return null;
+  }
+
+  Future<SeriesMetadataResult> _fetchTvdbSeriesMetadata(
+    int tvdbId,
+    String locale, {
+    String? fallbackPoster,
+  }) async {
+    final cacheKey = 'metadata:v8:series:tvdb:$tvdbId:$locale';
+    final cached = _readRawCache(cacheKey, _seriesTtl);
+    if (cached != null) {
+      return _parseCachedSeriesResult(
+        cached,
+        isStale: _isStale(cacheKey, _seriesTtl),
+      );
+    }
+
+    try {
+      final seriesData = await _invokeTvdbEdge({
+        'action': 'series',
+        'tvdbId': tvdbId,
+        'locale': locale,
+      });
+      final seasonsResult = await _invokeTvdbEdge({
+        'action': 'seasons',
+        'tvdbId': tvdbId,
+        'locale': locale,
+      });
+
+      if (seriesData == null) {
+        final stale = _readRawCacheStale(cacheKey);
+        if (stale != null) {
+          return _parseCachedSeriesResult(
+            stale,
+            isStale: true,
+            forceState: MetadataResultState.offlineWithCache,
+          );
+        }
+        return const SeriesMetadataResult(
+          state: MetadataResultState.offlineNoCache,
+        );
+      }
+
+      final poster = _normalizeTvdbArtworkUrl(seriesData['poster']?.toString()) !=
+              ''
+          ? _normalizeTvdbArtworkUrl(seriesData['poster']?.toString())
+          : (fallbackPoster ?? '');
+
+      final rawSeasons = seasonsResult?['seasons'] as List? ?? [];
+      var seasons = rawSeasons
+          .whereType<Map>()
+          .map((raw) => _normalizeTvdbSeasonSummary(
+                Map<String, dynamic>.from(raw),
+                fallbackPoster: poster,
+              ))
+          .whereType<SeasonSummary>()
+          .toList();
+
+      Map<String, dynamic>? totalsData;
+      try {
+        totalsData = await _invokeTvdbEdge({
+          'action': 'episodeTotals',
+          'tvdbId': tvdbId,
+          'locale': locale,
+        });
+        final seasonCounts = totalsData?['seasonCounts'];
+        if (seasonCounts is Map) {
+          seasons = seasons.map((season) {
+            if (season.seasonNumber <= 0) return season;
+            final count = parsePositiveCount(
+              seasonCounts['${season.seasonNumber}'],
+            );
+            if (count == null || count <= 0) return season;
+            return SeasonSummary(
+              source: season.source,
+              seasonNumber: season.seasonNumber,
+              name: season.name,
+              poster: season.poster,
+              episodeCount: count,
+              overview: season.overview,
+              airDate: season.airDate,
+              isSpecials: season.isSpecials,
+              isSynthetic: season.isSynthetic,
+            );
+          }).toList();
+        }
+      } catch (_) {
+        // Episode counts optional.
+      }
+
+      final regularSeasons =
+          rawSeasons.where((s) => s is Map && s['isSpecials'] != true).length;
+
+      final series = SeriesSummary(
+        source: 'tvdb',
+        imdbId: seriesData['imdbId']?.toString(),
+        title: seriesData['title']?.toString() ?? '',
+        overview: seriesData['overview']?.toString() ?? '',
+        poster: poster,
+        status: seriesData['status']?.toString(),
+        firstAirDate: seriesData['firstAired']?.toString(),
+        totalSeasons: regularSeasons > 0 ? regularSeasons : null,
+        totalEpisodes: parsePositiveCount(totalsData?['episodeTotal']),
+      );
+
+      final result = SeriesMetadataResult(
+        state: seasons.isEmpty
+            ? MetadataResultState.noSeasons
+            : MetadataResultState.available,
+        series: series,
+        seasons: seasons,
+      );
+      _writeRawCache(cacheKey, _seriesResultToJson(result), _seriesTtl);
+      return result;
+    } catch (_) {
+      final stale = _readRawCacheStale(cacheKey);
+      if (stale != null) {
+        return _parseCachedSeriesResult(
+          stale,
+          isStale: true,
+          forceState: MetadataResultState.offlineWithCache,
+        );
+      }
+      return const SeriesMetadataResult(
+        state: MetadataResultState.unavailable,
+      );
+    }
+  }
+
+  SeasonSummary? _normalizeTvdbSeasonSummary(
+    Map<String, dynamic> json, {
+    String? fallbackPoster,
+  }) {
+    final seasonNum = json['seasonNumber'];
+    final int? seasonNumber = switch (seasonNum) {
+      int n => n,
+      num n => n.round(),
+      _ => null,
+    };
+    if (seasonNumber == null) return null;
+
+    final posterRaw = json['poster']?.toString() ?? '';
+    final poster = _normalizeTvdbArtworkUrl(posterRaw).isNotEmpty
+        ? _normalizeTvdbArtworkUrl(posterRaw)
+        : (fallbackPoster ?? '');
+
+    return SeasonSummary(
+      source: 'tvdb',
+      seasonNumber: seasonNumber,
+      name: json['name']?.toString() ?? 'Season $seasonNumber',
+      poster: poster,
+      overview: json['overview']?.toString() ?? '',
+      airDate: json['airDate']?.toString(),
+      isSpecials: json['isSpecials'] == true || seasonNumber == 0,
+      isSynthetic: false,
+    );
+  }
+
+  Future<SeasonEpisodesResult> _fetchTvdbSeasonEpisodes(
+    int tvdbId,
+    int season,
+    String locale, {
+    String? fallbackPoster,
+    SeasonSummary? seasonSummary,
+  }) async {
+    final cacheKey = 'metadata:v13:season:tvdb:$tvdbId:$season:$locale';
+    final cached = _readRawCache(cacheKey, _episodesTtl);
+    if (cached != null) {
+      return _parseCachedEpisodesResult(
+        cached,
+        isStale: _isStale(cacheKey, _episodesTtl),
+      );
+    }
+
+    try {
+      final episodesResult = await _invokeTvdbEdge({
+        'action': 'episodes',
+        'tvdbId': tvdbId,
+        'season': season,
+        'locale': locale,
+      });
+      Map<String, dynamic>? enEpisodesResult;
+      if (locale != 'en') {
+        enEpisodesResult = await _invokeTvdbEdge({
+          'action': 'episodes',
+          'tvdbId': tvdbId,
+          'season': season,
+          'locale': 'en',
+        });
+      }
+
+      final rawEps = episodesResult?['episodes'] as List?;
+      if (rawEps == null) {
+        final stale = _readRawCacheStale(cacheKey);
+        if (stale != null) {
+          return _parseCachedEpisodesResult(
+            stale,
+            isStale: true,
+            forceState: MetadataResultState.offlineWithCache,
+          );
+        }
+        return const SeasonEpisodesResult(
+          state: MetadataResultState.offlineNoCache,
+        );
+      }
+
+      if (rawEps.isEmpty) {
+        return const SeasonEpisodesResult(
+          state: MetadataResultState.unavailable,
+        );
+      }
+
+      var episodes = rawEps
+          .whereType<Map>()
+          .map((raw) => _normalizeTvdbEpisode(Map<String, dynamic>.from(raw)))
+          .where((ep) => ep.seasonNumber == season)
+          .toList();
+
+      final seasonPosterUrl = _normalizeTvdbArtworkUrl(fallbackPoster);
+      final nonEmpty = episodes.where((e) => e.still.isNotEmpty).toList();
+      final uniqueUrls = nonEmpty.map((e) => e.still).toSet();
+      final isPosterDup = nonEmpty.length >= 2 &&
+          uniqueUrls.length == 1 &&
+          seasonPosterUrl.isNotEmpty &&
+          uniqueUrls.contains(seasonPosterUrl);
+      if (isPosterDup) {
+        episodes = episodes
+            .map(
+              (e) => EpisodeDetail(
+                source: e.source,
+                seasonNumber: e.seasonNumber,
+                episodeNumber: e.episodeNumber,
+                title: e.title,
+                still: '',
+                overview: e.overview,
+                runtimeMinutes: e.runtimeMinutes,
+                airDate: e.airDate,
+                isAired: e.isAired,
+              ),
+            )
+            .toList();
+      }
+
+      if (locale != 'en' && enEpisodesResult != null) {
+        final enRaw = enEpisodesResult['episodes'] as List? ?? [];
+        final enByKey = <String, EpisodeDetail>{
+          for (final raw in enRaw.whereType<Map>())
+            _normalizeTvdbEpisode(Map<String, dynamic>.from(raw)).progressKey:
+                _normalizeTvdbEpisode(Map<String, dynamic>.from(raw)),
+        };
+        episodes = episodes.map((ep) {
+          final enEp = enByKey[ep.progressKey];
+          if (enEp == null) return ep;
+          return EpisodeDetail(
+            source: ep.source,
+            seasonNumber: ep.seasonNumber,
+            episodeNumber: ep.episodeNumber,
+            title: _pickLocalizedEpisodeTitle(
+              ep.title,
+              enEp.title,
+              ep.episodeNumber,
+            ),
+            still: ep.still.isNotEmpty ? ep.still : enEp.still,
+            overview: _pickLocalizedOverview(ep.overview, enEp.overview),
+            runtimeMinutes: ep.runtimeMinutes ?? enEp.runtimeMinutes,
+            airDate: ep.airDate ?? enEp.airDate,
+            isAired: ep.isAired,
+          );
+        }).toList();
+      }
+
+      if (episodes.isEmpty) {
+        return const SeasonEpisodesResult(
+          state: MetadataResultState.unavailable,
+        );
+      }
+
+      final seasonPoster = seasonSummary?.poster.isNotEmpty == true
+          ? seasonSummary!.poster
+          : fallbackPoster;
+      final seasonOverview = seasonSummary?.overview.isNotEmpty == true
+          ? seasonSummary!.overview
+          : null;
+
+      final result = SeasonEpisodesResult(
+        state: MetadataResultState.available,
+        episodes: episodes,
+        seasonPoster: seasonPoster,
+        seasonOverview: seasonOverview,
+      );
+      _writeRawCache(cacheKey, _episodesResultToJson(result), _episodesTtl);
+      return result;
+    } catch (_) {
+      final stale = _readRawCacheStale(cacheKey);
+      if (stale != null) {
+        return _parseCachedEpisodesResult(
+          stale,
+          isStale: true,
+          forceState: MetadataResultState.offlineWithCache,
+        );
+      }
+      return const SeasonEpisodesResult(
+        state: MetadataResultState.unavailable,
+      );
+    }
+  }
+
+  EpisodeDetail _normalizeTvdbEpisode(Map<String, dynamic> json) {
+    final seasonNum = json['seasonNumber'];
+    final epNum = json['episodeNumber'];
+    final season = seasonNum is int
+        ? seasonNum
+        : (seasonNum is num ? seasonNum.round() : 0);
+    final episode = epNum is int ? epNum : (epNum is num ? epNum.round() : 0);
+
+    return EpisodeDetail(
+      source: 'tvdb',
+      seasonNumber: season,
+      episodeNumber: episode,
+      title: json['title']?.toString() ?? 'Episode $episode',
+      still: _normalizeTvdbArtworkUrl(json['still']?.toString()),
+      overview: json['overview']?.toString() ?? '',
+      runtimeMinutes: parsePositiveCount(json['runtimeMinutes']),
+      airDate: json['airDate']?.toString(),
+      isAired: json['isAired'] != false,
+    );
+  }
+
+  String _normalizeTvdbArtworkUrl(String? url) {
+    final s = url?.trim() ?? '';
+    if (s.isEmpty) return '';
+    if (s.startsWith('http')) return s;
+    if (s.startsWith('/')) return '$_tvdbArt$s';
+    return s;
+  }
+
+  // ─────────────────────────────────────────────────────────────
   // Cache helpers
   // ─────────────────────────────────────────────────────────────
 
@@ -1141,6 +1793,9 @@ class SeriesMetadataService {
         'payload': {
           if (result.episodes != null)
             'episodes': result.episodes!.map((e) => e.toJson()).toList(),
+          if (result.seasonPoster != null) 'seasonPoster': result.seasonPoster,
+          if (result.seasonOverview != null && result.seasonOverview!.isNotEmpty)
+            'seasonOverview': result.seasonOverview,
         },
         'state': result.state.name,
       };
@@ -1198,6 +1853,8 @@ class SeriesMetadataService {
                 EpisodeDetail.fromJson(Map<String, dynamic>.from(e as Map)))
             .toList()
         : null;
+    final seasonPoster = payload['seasonPoster']?.toString();
+    final seasonOverview = payload['seasonOverview']?.toString();
 
     final stateStr = cached['state']?.toString();
     final parsedState = MetadataResultState.values.firstWhere(
@@ -1208,6 +1865,11 @@ class SeriesMetadataService {
     return SeasonEpisodesResult(
       state: forceState ?? parsedState,
       episodes: episodes,
+      seasonPoster: seasonPoster != null && seasonPoster.isNotEmpty
+          ? seasonPoster
+          : null,
+      seasonOverview:
+          seasonOverview != null && seasonOverview.isNotEmpty ? seasonOverview : null,
       isStale: isStale,
     );
   }
@@ -1276,12 +1938,16 @@ class SeriesMetadataService {
         runtimeMinutes: ep.runtimeMinutes ?? enEp.runtimeMinutes,
         airDate: ep.airDate ?? enEp.airDate,
         isAired: ep.isAired,
+        episodeRating: ep.episodeRating ?? enEp.episodeRating,
+        episodeRatingSource: ep.episodeRatingSource ?? enEp.episodeRatingSource,
       );
     }).toList();
 
     return SeasonEpisodesResult(
       state: localResult.state,
       episodes: merged,
+      seasonPoster: localResult.seasonPoster ?? enResult.seasonPoster,
+      seasonOverview: localResult.seasonOverview ?? enResult.seasonOverview,
     );
   }
 
@@ -1293,6 +1959,15 @@ class SeriesMetadataService {
     } catch (_) {
       return true;
     }
+  }
+
+  static double? _parseOmdbEpisodeRating(String? raw) {
+    if (raw == null) return null;
+    final text = raw.trim();
+    if (text.isEmpty || text.toUpperCase() == 'N/A') return null;
+    final n = double.tryParse(text.replaceAll(',', '.'));
+    if (n == null || !n.isFinite || n <= 0 || n > 10) return null;
+    return (n * 10).round() / 10;
   }
 
   static String? _anilistDateStr(Map? dateMap) {

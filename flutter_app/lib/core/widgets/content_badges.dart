@@ -318,17 +318,24 @@ class ContentCardRatingBadges extends StatelessWidget {
     required this.imdbRating,
     required this.anilistRating,
     this.compact = true,
+    this.detail = false,
   });
 
   final String? imdbRating;
   final String? anilistRating;
   final bool compact;
+  final bool detail;
 
-  factory ContentCardRatingBadges.fromItem(WatchlistItem item, {bool compact = true}) {
+  factory ContentCardRatingBadges.fromItem(
+    WatchlistItem item, {
+    bool compact = true,
+    bool detail = false,
+  }) {
     return ContentCardRatingBadges(
       imdbRating: item.imdbRating,
       anilistRating: item.anilistRating,
       compact: compact,
+      detail: detail,
     );
   }
 
@@ -344,10 +351,11 @@ class ContentCardRatingBadges extends StatelessWidget {
           flex: 0,
           child: ContentScorePill(
             value: imdb,
-            sourceLabel: 'IMDb',
+            sourceLabel: detail ? 'IMDb' : 'IMDb',
             bg: const Color(0xFFF5C518),
             fg: Colors.black,
             compact: compact,
+            detail: detail,
           ),
         ),
       if (imdb != null && anilist != null) SizedBox(width: compact ? 2.5 : 8),
@@ -356,10 +364,11 @@ class ContentCardRatingBadges extends StatelessWidget {
           flex: 0,
           child: ContentScorePill(
             value: anilist,
-            sourceLabel: 'AL',
+            sourceLabel: detail ? 'AniList' : 'AL',
             bg: const Color(0xFF02A9FF),
             fg: Colors.white,
             compact: compact,
+            detail: detail,
           ),
         ),
     ];
@@ -380,6 +389,7 @@ class ContentScorePill extends StatelessWidget {
     required this.bg,
     required this.fg,
     this.compact = false,
+    this.detail = false,
   });
 
   final String value;
@@ -387,21 +397,41 @@ class ContentScorePill extends StatelessWidget {
   final Color bg;
   final Color fg;
   final bool compact;
+  final bool detail;
 
   @override
   Widget build(BuildContext context) {
-    final pad = compact
-        ? const EdgeInsets.fromLTRB(4.8, 1.6, 5.4, 1.6)
-        : const EdgeInsets.symmetric(horizontal: 8, vertical: 3);
-    final valueSize = compact ? 7.0 : 10.5;
-    final labelSize = compact ? 6.5 : 9.0;
-    final gap = compact ? 2.5 : 4.0;
+    final EdgeInsets pad;
+    final double valueSize;
+    final double labelSize;
+    final double gap;
+    final BorderRadius radius;
+
+    if (detail) {
+      pad = const EdgeInsets.fromLTRB(12, 5, 14, 5);
+      valueSize = 16;
+      labelSize = 12;
+      gap = 7;
+      radius = BorderRadius.circular(8);
+    } else if (compact) {
+      pad = const EdgeInsets.fromLTRB(4.8, 1.6, 5.4, 1.6);
+      valueSize = 7;
+      labelSize = 6.5;
+      gap = 2.5;
+      radius = BorderRadius.circular(999);
+    } else {
+      pad = const EdgeInsets.symmetric(horizontal: 8, vertical: 3);
+      valueSize = 10.5;
+      labelSize = 9;
+      gap = 4;
+      radius = BorderRadius.circular(999);
+    }
 
     return DecoratedBox(
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(999),
-        boxShadow: compact
+        borderRadius: radius,
+        boxShadow: compact && !detail
             ? const [BoxShadow(color: Colors.black26, blurRadius: 3, offset: Offset(0, 1))]
             : null,
       ),

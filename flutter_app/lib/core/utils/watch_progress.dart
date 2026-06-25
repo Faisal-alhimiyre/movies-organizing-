@@ -4,6 +4,7 @@
 /// Controllers and UI call these to derive display state and build new entries.
 library;
 
+import '../../models/series_metadata.dart';
 import '../../models/watchlist_item.dart';
 
 // ─── Episode/season references ───────────────────────────────────────────────
@@ -58,6 +59,47 @@ enum WatchState {
   inprogress,
   watched,
 }
+
+/// List-filter progress state — mirrors web `itemProgressState` in `app.js`.
+enum ItemProgressState {
+  unwatched,
+  inProgress,
+  watched,
+}
+
+/// Mirrors web `exportProgressObject` in `watch-progress.js`.
+/// Returns null when there is nothing meaningful to store or restore.
+WatchProgress? exportProgressObject(dynamic raw) {
+  final parsed = WatchProgress.fromJson(raw);
+  if (parsed.episodes.isNotEmpty) return parsed;
+  if (parsed.episodeRatings != null && parsed.episodeRatings!.isNotEmpty) {
+    return parsed;
+  }
+  if (parsed.seasonTotals != null && parsed.seasonTotals!.isNotEmpty) {
+    return parsed;
+  }
+  if (parsed.completed == true) return parsed;
+  return null;
+}
+
+/// Three-state progress for filters, stats, and cards (no episode-count lookup).
+ItemProgressState itemProgressState(WatchEntry? entry) {
+  if (entry == null) return ItemProgressState.unwatched;
+  if (entry.isLegacyComplete) return ItemProgressState.watched;
+  final prog = entry.progress;
+  if (prog == null) return ItemProgressState.unwatched;
+  if (prog.completed == true) return ItemProgressState.watched;
+  final hasRegularEpisode =
+      prog.episodes.any((k) => !k.startsWith('0:'));
+  if (hasRegularEpisode) return ItemProgressState.inProgress;
+  return ItemProgressState.unwatched;
+}
+
+ItemProgressState itemProgressStateForId(
+  String id,
+  Map<String, WatchEntry> watched,
+) =>
+    itemProgressState(watched[id]);
 
 class WatchStateResult {
   const WatchStateResult({
@@ -210,8 +252,7 @@ WatchEntry markEpisodeWatched(
   return WatchEntry(
     rating: entry?.rating,
     note: entry?.note,
-    progress: WatchProgress(
-        version: WatchProgress.currentVersion, episodes: updated),
+    progress: _rebuildProgress(entry?.progress, episodes: updated),
   );
 }
 
@@ -239,12 +280,13 @@ WatchEntry unmarkEpisodeWatched(
   return WatchEntry(
     rating: entry?.rating,
     note: entry?.note,
-    progress:
-        WatchProgress(version: WatchProgress.currentVersion, episodes: base),
+    progress: _rebuildProgress(
+      entry?.progress,
+      episodes: base,
+      completed: false,
+    ),
   );
 }
-
-/// Mark all currently aired episodes in [season] as watched.
 WatchEntry markSeasonWatched(
     WatchEntry? entry, SeasonRef season) {
   final airedKeys = airedKeysForSeason(season);
@@ -262,8 +304,23 @@ WatchEntry markSeasonWatched(
   return WatchEntry(
     rating: entry?.rating,
     note: entry?.note,
-    progress:
-        WatchProgress(version: WatchProgress.currentVersion, episodes: merged),
+    progress: _rebuildProgress(entry?.progress, episodes: merged),
+  );
+}
+
+/// Mark episodes watched by explicit key list (gap-fill, legacy expand).
+WatchEntry markEpisodesWatchedWithKeys(
+  WatchEntry? entry,
+  List<String> airedKeys,
+) {
+  final existing = entry?.isLegacyComplete == true
+      ? const <String>[]
+      : List<String>.from(entry?.progress?.episodes ?? const []);
+  final merged = {...existing, ...airedKeys}.toList();
+  return WatchEntry(
+    rating: entry?.rating,
+    note: entry?.note,
+    progress: _rebuildProgress(entry?.progress, episodes: merged),
   );
 }
 
@@ -291,8 +348,11 @@ WatchEntry unmarkSeasonWatched(
   return WatchEntry(
     rating: entry?.rating,
     note: entry?.note,
-    progress:
-        WatchProgress(version: WatchProgress.currentVersion, episodes: base),
+    progress: _rebuildProgress(
+      entry?.progress,
+      episodes: base,
+      completed: false,
+    ),
   );
 }
 
@@ -305,14 +365,104 @@ WatchEntry markAllWatched(WatchEntry? entry, List<SeasonRef> seasons) {
   return WatchEntry(
     rating: entry?.rating,
     note: entry?.note,
-    progress: WatchProgress(
-        version: WatchProgress.currentVersion, episodes: regularAiredKeys),
+    progress: _rebuildProgress(
+      entry?.progress,
+      episodes: regularAiredKeys,
+      completed: true,
+    ),
   );
 }
 
 /// Clear all progress; returns null so caller can remove the key from the
 /// watched map. Preserves rating/note for callers that need them separately.
 WatchEntry? clearAllProgress(WatchEntry? entry) => null;
+
+/// Preserve seasonTotals / episodeRatings when rebuilding episode lists.
+WatchProgress _rebuildProgress(
+  WatchProgress? base, {
+  required List<String> episodes,
+  bool? completed,
+}) {
+  return WatchProgress(
+    version: WatchProgress.currentVersion,
+    episodes: episodes,
+    completed: completed ?? base?.completed,
+    seasonTotals: base?.seasonTotals,
+    episodeRatings: base?.episodeRatings,
+  );
+}
+
+double? getEpisodeRating(WatchEntry? entry, int season, int episode) {
+  final ratings = entry?.progress?.episodeRatings;
+  if (ratings == null) return null;
+  final val = ratings[episodeKey(season, episode)];
+  if (val == null || !val.isFinite || val <= 0 || val > 10) return null;
+  return (val * 10).round() / 10;
+}
+
+WatchEntry? setEpisodeRating(
+  WatchEntry? entry,
+  int season,
+  int episode,
+  double rating,
+) {
+  if (!rating.isFinite || rating < 0 || rating > 10) return entry;
+  final key = episodeKey(season, episode);
+  final base = entry?.progress ?? WatchProgress.empty;
+  final episodes = base.episodes.contains(key)
+      ? base.episodes
+      : [...base.episodes, key];
+  final ratings = Map<String, double>.from(base.episodeRatings ?? {});
+  ratings[key] = (rating * 10).round() / 10;
+  return WatchEntry(
+    rating: entry?.rating,
+    note: entry?.note,
+    progress: WatchProgress(
+      version: WatchProgress.currentVersion,
+      episodes: episodes,
+      completed: base.completed,
+      seasonTotals: base.seasonTotals,
+      episodeRatings: ratings,
+    ),
+  );
+}
+
+WatchEntry? clearEpisodeRating(WatchEntry? entry, int season, int episode) {
+  final key = episodeKey(season, episode);
+  final base = entry?.progress;
+  if (base?.episodeRatings == null || !base!.episodeRatings!.containsKey(key)) {
+    return entry;
+  }
+  final ratings = Map<String, double>.from(base.episodeRatings!);
+  ratings.remove(key);
+  return WatchEntry(
+    rating: entry?.rating,
+    note: entry?.note,
+    progress: WatchProgress(
+      version: WatchProgress.currentVersion,
+      episodes: base.episodes,
+      completed: base.completed,
+      seasonTotals: base.seasonTotals,
+      episodeRatings: ratings.isEmpty ? null : ratings,
+    ),
+  );
+}
+
+/// Watched / total for a season using loaded episode metadata.
+({int watched, int total}) seasonProgressFromEpisodes(
+  WatchEntry? entry,
+  List<EpisodeDetail> episodes,
+  int seasonNumber,
+) {
+  final aired = episodes
+      .where((e) => e.seasonNumber == seasonNumber && e.isAired)
+      .toList();
+  if (aired.isEmpty) return (watched: 0, total: 0);
+  final watched = aired
+      .where((e) => isEpisodeWatched(entry, e.seasonNumber, e.episodeNumber))
+      .length;
+  return (watched: watched, total: aired.length);
+}
 
 // ─── Private helpers ─────────────────────────────────────────────────────────
 

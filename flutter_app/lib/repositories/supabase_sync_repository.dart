@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -80,6 +82,7 @@ class SupabaseSyncRepository {
   SupabaseSyncRepository(this._client);
 
   final SupabaseClient? _client;
+  final Map<String, Future<void>> _pushChains = {};
 
   static const accountsTable = 'accounts';
   static const listsTable = 'lists';
@@ -195,6 +198,35 @@ class SupabaseSyncRepository {
 
   /// Full list replace (`sync.js` → `pushSnapshot`).
   Future<bool> pushSnapshot({
+    required String listId,
+    required String accountId,
+    required WatchlistData watchlist,
+    required Map<String, dynamic> watched,
+    String listName = 'My list',
+    String description = '',
+  }) async {
+    final previous = _pushChains[listId] ?? Future.value();
+    final gate = Completer<void>();
+    _pushChains[listId] = gate.future;
+    await previous;
+    try {
+      return await _pushSnapshotImpl(
+        listId: listId,
+        accountId: accountId,
+        watchlist: watchlist,
+        watched: watched,
+        listName: listName,
+        description: description,
+      );
+    } finally {
+      gate.complete();
+      if (identical(_pushChains[listId], gate.future)) {
+        _pushChains.remove(listId);
+      }
+    }
+  }
+
+  Future<bool> _pushSnapshotImpl({
     required String listId,
     required String accountId,
     required WatchlistData watchlist,

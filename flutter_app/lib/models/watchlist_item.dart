@@ -57,7 +57,8 @@ class WatchlistItem {
   final int? addedAt;
   final List<String> secondaryGenres;
 
-  /// Effective poster: prefers cardPoster (season-specific) over default poster.
+  /// Effective poster for cards and detail header.
+  /// Mirrors web `cardDisplayPoster(item)` → `cardPoster || poster`.
   String? get displayPoster => cardPoster ?? poster;
 
   Map<String, dynamic> toJson() => {
@@ -261,8 +262,15 @@ class WatchEntry {
   bool get isFullyWatched =>
       isLegacyComplete || progress?.completed == true;
 
-  /// True when episode tracking is active but not yet complete.
-  bool get isInProgress => !isFullyWatched;
+  /// True when ≥1 regular-season episode is watched but the title is not complete.
+  /// Mirrors web `itemProgressState` → `"inProgress"` in `app.js`.
+  bool get isInProgress {
+    if (isFullyWatched) return false;
+    final prog = progress;
+    if (prog == null) return false;
+    if (prog.completed == true) return false;
+    return prog.episodes.any((k) => !k.startsWith('0:'));
+  }
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};

@@ -752,10 +752,6 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
           snapshot,
           TitleCardAction.delete,
         );
-      case ItemDetailAction.openSeasons:
-        // Season sheet is opened directly from item_detail_sheet.dart;
-        // this case is never returned but must be handled for exhaustiveness.
-        break;
     }
   }
 
@@ -997,14 +993,19 @@ class _WatchlistBody extends ConsumerWidget {
                     : null,
               ),
               if (snapshot.items.isNotEmpty)
-                Padding(
-                  padding: EdgeInsets.only(
-                    top: AppBreakpoints.isMobile(context) ? -5.6 : -12,
-                    bottom: AppBreakpoints.isMobile(context) ? 8.8 : 24,
+                Transform.translate(
+                  offset: Offset(
+                    0,
+                    AppBreakpoints.isMobile(context) ? -5.6 : -12,
                   ),
-                  child: Align(
-                    alignment: AlignmentDirectional.centerStart,
-                    child: CardLayoutToggle(l10n: l10n),
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      bottom: AppBreakpoints.isMobile(context) ? 8.8 : 24,
+                    ),
+                    child: Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: CardLayoutToggle(l10n: l10n),
+                    ),
                   ),
                 ),
               if (snapshot.isEmptyList || snapshot.items.isEmpty)
