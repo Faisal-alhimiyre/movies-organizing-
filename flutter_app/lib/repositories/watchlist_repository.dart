@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -79,11 +80,34 @@ class WatchlistSaveResult {
   final SyncDisplayStatus syncStatus;
 }
 
+class _PendingCloudPush {
+  _PendingCloudPush({
+    required this.listId,
+    required this.accountId,
+    required this.items,
+    required this.watched,
+    required this.listName,
+  });
+
+  final String listId;
+  final String accountId;
+  final List<WatchlistItem> items;
+  final Map<String, WatchEntry> watched;
+  final String listName;
+}
+
+/// Mirrors web `sync.js` debounce (`DEBOUNCE_MS = 900`).
 class WatchlistRepository {
   WatchlistRepository(this._local, this._supabase);
 
   final LocalStorageRepository _local;
   final SupabaseSyncRepository? _supabase;
+
+  static const _cloudDebounceMs = 900;
+
+  final Map<String, Timer> _cloudPushTimers = {};
+  final Map<String, _PendingCloudPush> _pendingCloudPush = {};
+  final Map<String, bool> _cloudPushInFlight = {};
 
   /// Local cache only — use [reconcileWithCloud] for background sync.
   WatchlistSnapshot readSnapshot(
@@ -94,10 +118,19 @@ class WatchlistRepository {
   }
 
   /// Pulls remote snapshot when newer than local. Returns true if local data changed.
-  Future<bool> reconcileWithCloud(String listId) async {
-    return _reconcileWithCloud(listId);
+  Future<bool> reconcileWithCloud(
+    String listId, {
+    String? accountId,
+    String listName = 'My list',
+  }) async {
+    return _reconcileWithCloud(
+      listId,
+      accountId: accountId,
+      listName: listName,
+    );
   }
 
+  /// Writes local storage immediately; cloud push is debounced (web parity).
   Future<WatchlistSaveResult> saveItems({
     required String listId,
     required String accountId,
@@ -105,32 +138,42 @@ class WatchlistRepository {
     required Map<String, WatchEntry> watched,
     bool cloudConfigured = false,
     String listName = 'My list',
+    bool flushCloud = false,
   }) async {
     final nested = itemsToNested(items);
     final watchedJson = watchedMapToJson(watched);
     final now = DateTime.now().millisecondsSinceEpoch;
 
     await _local.writeWatchlist(listId, nested, watched: watchedJson);
-    await _writeSyncMeta(listId, localUpdated: now, syncedAt: 0);
+    await _writeSyncMeta(listId, localUpdated: now, syncedAt: _readSyncMeta(listId).syncedAt);
 
     if (!cloudConfigured || _supabase == null) {
       return const WatchlistSaveResult(syncStatus: SyncDisplayStatus.local);
     }
 
-    final pushed = await _supabase.pushSnapshot(
+    _pendingCloudPush[listId] = _PendingCloudPush(
       listId: listId,
       accountId: accountId,
-      watchlist: nested,
-      watched: watchedJson,
+      items: items,
+      watched: watched,
       listName: listName,
     );
 
-    if (pushed) {
-      await _writeSyncMeta(listId, localUpdated: now, syncedAt: now);
-      return const WatchlistSaveResult(syncStatus: SyncDisplayStatus.saved);
+    if (flushCloud) {
+      final ok = await flushCloudPush(listId);
+      return WatchlistSaveResult(
+        syncStatus: ok ? SyncDisplayStatus.saved : SyncDisplayStatus.error,
+      );
     }
 
-    return const WatchlistSaveResult(syncStatus: SyncDisplayStatus.error);
+    _scheduleCloudPush(listId);
+    return const WatchlistSaveResult(syncStatus: SyncDisplayStatus.pending);
+  }
+
+  /// Push any debounced cloud save immediately (e.g. before switching lists).
+  Future<bool> flushCloudPush(String listId) async {
+    _cloudPushTimers.remove(listId)?.cancel();
+    return _executeCloudPush(listId);
   }
 
   Future<CopyItemToListResult> copyItemToTargetList({
@@ -164,6 +207,7 @@ class WatchlistRepository {
       targetWatched[copy.id] = WatchEntry(
         rating: watchedEntry.rating,
         note: watchedEntry.note,
+        progress: watchedEntry.progress,
       );
     }
 
@@ -174,6 +218,7 @@ class WatchlistRepository {
       watched: targetWatched,
       cloudConfigured: cloudConfigured,
       listName: targetListName,
+      flushCloud: true,
     );
 
     if (result.syncStatus == SyncDisplayStatus.error) {
@@ -181,6 +226,60 @@ class WatchlistRepository {
     }
 
     return CopyItemToListResult.success(targetListName);
+  }
+
+  void _scheduleCloudPush(String listId) {
+    _cloudPushTimers.remove(listId)?.cancel();
+    _cloudPushTimers[listId] = Timer(
+      const Duration(milliseconds: _cloudDebounceMs),
+      () {
+        unawaited(_executeCloudPush(listId));
+      },
+    );
+  }
+
+  Future<bool> _executeCloudPush(String listId) async {
+    final supabase = _supabase;
+    final pending = _pendingCloudPush.remove(listId);
+    if (supabase == null || pending == null || pending.listId != listId) {
+      return false;
+    }
+
+    if (_cloudPushInFlight[listId] == true) {
+      _pendingCloudPush[listId] = pending;
+      _scheduleCloudPush(listId);
+      return false;
+    }
+
+    _cloudPushInFlight[listId] = true;
+    try {
+      final nested = itemsToNested(pending.items);
+      final watchedJson = watchedMapToJson(pending.watched);
+      final now = DateTime.now().millisecondsSinceEpoch;
+
+      final pushed = await supabase.pushSnapshot(
+        listId: pending.listId,
+        accountId: pending.accountId,
+        watchlist: nested,
+        watched: watchedJson,
+        listName: pending.listName,
+      );
+
+      if (pushed) {
+        await _writeSyncMeta(
+          listId,
+          localUpdated: now,
+          syncedAt: now,
+        );
+        return true;
+      }
+      return false;
+    } finally {
+      _cloudPushInFlight[listId] = false;
+      if (_pendingCloudPush.containsKey(listId)) {
+        _scheduleCloudPush(listId);
+      }
+    }
   }
 
   WatchlistSnapshot _readSnapshot(
@@ -210,15 +309,34 @@ class WatchlistRepository {
     );
   }
 
-  Future<bool> _reconcileWithCloud(String listId) async {
+  Future<bool> _reconcileWithCloud(
+    String listId, {
+    String? accountId,
+    String listName = 'My list',
+  }) async {
     final supabase = _supabase;
     if (supabase == null) return false;
+    if (_cloudPushInFlight[listId] == true) return false;
+    if (_pendingCloudPush.containsKey(listId)) return false;
 
     final localData = _local.readWatchlist(listId);
+    final localWatched = _readWatched(listId);
     final localHasData = localData != null && !localData.isEmpty;
 
     final remote = await supabase.fetchSnapshot(listId);
-    if (remote == null) return false;
+    if (remote == null) {
+      if (localHasData && accountId != null && accountId.isNotEmpty) {
+        _pendingCloudPush[listId] = _PendingCloudPush(
+          listId: listId,
+          accountId: accountId,
+          items: flattenWatchlist(localData),
+          watched: localWatched,
+          listName: listName,
+        );
+        return await _executeCloudPush(listId);
+      }
+      return false;
+    }
 
     final remoteHasData = !remote.watchlist.isEmpty;
     if (!remoteHasData) return false;
@@ -227,11 +345,36 @@ class WatchlistRepository {
     final localStamp = math.max(meta.localUpdated, meta.syncedAt);
     final remoteUpdated = remote.updatedAt?.millisecondsSinceEpoch ?? 0;
 
+    // Local is newer — push up (matches web `reconcileWithCloud`).
+    if (localHasData &&
+        localStamp > remoteUpdated &&
+        accountId != null &&
+        accountId.isNotEmpty) {
+      _pendingCloudPush[listId] = _PendingCloudPush(
+        listId: listId,
+        accountId: accountId,
+        items: flattenWatchlist(localData),
+        watched: localWatched,
+        listName: listName,
+      );
+      return await _executeCloudPush(listId);
+    }
+
     if (!localHasData || remoteUpdated > localStamp) {
+      if (_cloudPushInFlight[listId] == true ||
+          _pendingCloudPush.containsKey(listId)) {
+        return false;
+      }
+
+      final remoteWatched = parseWatchedMap(remote.watched);
+      final mergedWatched = localHasData
+          ? mergeWatchedPreferRicher(remoteWatched, localWatched)
+          : remoteWatched;
+
       await _local.writeWatchlist(
         listId,
         remote.watchlist,
-        watched: remote.watched,
+        watched: watchedMapToJson(mergedWatched),
       );
       await _writeSyncMeta(
         listId,
@@ -308,6 +451,42 @@ class WatchlistRepository {
     }
     return {};
   }
+}
+
+/// Union watched maps; keep the entry with more progress (never drop local watch state).
+Map<String, WatchEntry> mergeWatchedPreferRicher(
+  Map<String, WatchEntry> remote,
+  Map<String, WatchEntry> local,
+) {
+  final merged = Map<String, WatchEntry>.from(remote);
+  for (final entry in local.entries) {
+    final existing = merged[entry.key];
+    if (existing == null) {
+      merged[entry.key] = entry.value;
+    } else {
+      merged[entry.key] = _richerWatchEntry(existing, entry.value);
+    }
+  }
+  return merged;
+}
+
+int _watchEntryRichness(WatchEntry entry) {
+  if (entry.isFullyWatched) {
+    return 1000 + (entry.rating != null ? 1 : 0) + (entry.note?.isNotEmpty == true ? 1 : 0);
+  }
+  final prog = entry.progress;
+  if (prog != null) {
+    return 100 +
+        prog.episodes.length +
+        (prog.completed == true ? 500 : 0) +
+        (prog.episodeRatings?.length ?? 0);
+  }
+  if (entry.rating != null || (entry.note?.isNotEmpty == true)) return 10;
+  return entry.isLegacyComplete ? 5 : 0;
+}
+
+WatchEntry _richerWatchEntry(WatchEntry a, WatchEntry b) {
+  return _watchEntryRichness(a) >= _watchEntryRichness(b) ? a : b;
 }
 
 final watchlistRepositoryProvider = Provider<WatchlistRepository>((ref) {

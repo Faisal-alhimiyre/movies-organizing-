@@ -191,12 +191,24 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     if (!_isOnline) return;
 
     Future(() async {
+      final session = ref.read(sessionProvider);
+      if (session == null || session.listId != listId) return;
+
+      final listName = ref.read(authRepositoryProvider).listLabel(
+                session.listId,
+                session.accountId,
+              ) ??
+          'My list';
+
       final changed = await ref
           .read(watchlistRepositoryProvider)
-          .reconcileWithCloud(listId);
+          .reconcileWithCloud(
+            listId,
+            accountId: session.accountId,
+            listName: listName,
+          );
 
       // Guard against stale reconcile after list switch or sign-out.
-      // (ref.mounted is Riverpod 3+; this project uses 2.6.x.)
       if (ref.read(sessionProvider)?.listId != listId) return;
 
       if (changed) {
@@ -230,6 +242,7 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
         snapshot.items,
         snapshot.watched,
         refresh: false,
+        flushCloud: true,
       );
     }
 
@@ -438,7 +451,11 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     return _persist(session, items, watched);
   }
 
-  void _schedulePersist(Session session, {bool refresh = false}) {
+  void _schedulePersist(
+    Session session, {
+    bool refresh = false,
+    bool flushCloud = false,
+  }) {
     _persistChain = _persistChain.then((_) async {
       if (ref.read(sessionProvider)?.listId != session.listId) return;
       final snap = state.value;
@@ -448,6 +465,7 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
         snap.items,
         snap.watched,
         refresh: refresh,
+        flushCloud: flushCloud,
       );
     });
   }
@@ -457,6 +475,7 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     List<WatchlistItem> items,
     Map<String, WatchEntry> watched, {
     bool refresh = true,
+    bool flushCloud = false,
   }) async {
     final live = ref.read(sessionProvider);
     if (live == null || live.listId != session.listId) {
@@ -489,6 +508,7 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
           watched: watchedToSave,
           cloudConfigured: cloud,
           listName: listName,
+          flushCloud: flushCloud,
         );
 
     if (refresh) {
@@ -587,7 +607,16 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
 
     final items = [...snapshot.items];
     items[index] = enriched;
-    await _persist(session, items, snapshot.watched, refresh: false);
+    state = AsyncData(
+      WatchlistSnapshot(
+        items: items,
+        watched: snapshot.watched,
+        isEmptyList: items.isEmpty,
+        syncStatus: snapshot.syncStatus,
+      ),
+    );
+
+    _schedulePersist(session, refresh: false);
   }
 
   ShareSnapshotPayload? buildSharePayload({
@@ -695,6 +724,7 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
           watched: applied.watched,
           cloudConfigured: ref.read(appConfigProvider).isSupabaseConfigured,
           listName: listName,
+          flushCloud: true,
         );
 
     ref.invalidateSelf();
@@ -744,6 +774,7 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
           watched: replaced.watched,
           cloudConfigured: ref.read(appConfigProvider).isSupabaseConfigured,
           listName: name.trim(),
+          flushCloud: true,
         );
 
     await ref.read(sessionProvider.notifier).setSession(newSession);
