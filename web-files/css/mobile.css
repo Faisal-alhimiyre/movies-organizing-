@@ -22,11 +22,17 @@
     border-radius: 12px;
   }
 
+  #itemModal {
+    align-items: flex-end;
+    justify-content: stretch;
+    padding: 0;
+  }
+
   #itemModal .modal__panel {
     width: 100%;
     max-width: 100%;
-    height: fit-content;
-    max-height: 88dvh;
+    height: auto;
+    max-height: 94dvh;
     border-radius: 20px 20px 0 0;
   }
 

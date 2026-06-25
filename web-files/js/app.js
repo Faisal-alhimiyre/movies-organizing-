@@ -4143,6 +4143,7 @@
     // Toggle class so CSS can switch between auto-height (no results / confirm)
     // and full-height (search results are visible and need to scroll).
     els.modal?.classList.toggle("modal--has-results", Boolean(hasResults));
+    syncItemModalViewport();
   }
 
   function renderTitleSearchResults() {
@@ -4361,6 +4362,7 @@
     renderSearchConfirmPreview(details);
 
     els.searchConfirmGenre?.focus();
+    syncItemModalViewport();
   }
 
   function hideSearchConfirmStep() {
@@ -4375,6 +4377,7 @@
     } else {
       els.titleSearchInput?.focus();
     }
+    syncItemModalViewport();
   }
 
   async function runTitleSearch({ append = false } = {}) {
@@ -4751,6 +4754,201 @@
     } else {
       els.formLink?.focus();
     }
+    syncItemModalViewport();
+  }
+
+  // Mobile add-title sheet: keyboard viewport + swipe-to-dismiss (title-detail parity)
+  let itemModalSavedScrollY = 0;
+  let itemModalPanelDrag = null;
+  let itemModalSwipeBound = false;
+  let itemModalViewportBound = false;
+  const ITEM_MODAL_MOBILE_MQ = "(max-width: 640px)";
+  const ITEM_MODAL_DRAG_CLOSE_PX = 120;
+  const ITEM_MODAL_DRAG_START_PX = 8;
+
+  function isItemModalMobileSheet() {
+    return window.matchMedia(ITEM_MODAL_MOBILE_MQ).matches;
+  }
+
+  function lockItemModalBackground() {
+    if (!isItemModalMobileSheet()) return;
+    itemModalSavedScrollY = window.scrollY || window.pageYOffset || 0;
+    document.documentElement.classList.add("item-modal-scroll-lock");
+    document.body.classList.add("item-modal-scroll-lock");
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${itemModalSavedScrollY}px`;
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    document.body.style.width = "100%";
+  }
+
+  function unlockItemModalBackground() {
+    if (!document.body.classList.contains("item-modal-scroll-lock")) return;
+    document.documentElement.classList.remove("item-modal-scroll-lock");
+    document.body.classList.remove("item-modal-scroll-lock");
+    document.body.style.position = "";
+    document.body.style.top = "";
+    document.body.style.left = "";
+    document.body.style.right = "";
+    document.body.style.width = "";
+    window.scrollTo(0, itemModalSavedScrollY);
+  }
+
+  function syncItemModalViewport() {
+    if (!els.modal || els.modal.hidden || !isItemModalMobileSheet()) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const top = Math.max(0, vv.offsetTop);
+    els.modal.style.top = `${top}px`;
+    els.modal.style.left = "0";
+    els.modal.style.right = "0";
+    els.modal.style.bottom = "auto";
+    els.modal.style.height = `${vv.height}px`;
+    els.modal.style.padding = "0";
+    if (els.modalPanel && !itemModalPanelDrag?.dragging) {
+      els.modalPanel.style.maxHeight = `${Math.round(vv.height * 0.94)}px`;
+    }
+  }
+
+  function resetItemModalViewport() {
+    if (!els.modal) return;
+    itemModalPanelDrag = null;
+    els.modal.style.top = "";
+    els.modal.style.left = "";
+    els.modal.style.right = "";
+    els.modal.style.bottom = "";
+    els.modal.style.height = "";
+    els.modal.style.padding = "";
+    resetItemModalDragStyles();
+    if (els.modalPanel) {
+      els.modalPanel.style.maxHeight = "";
+      els.modalPanel.style.transform = "";
+    }
+  }
+
+  function bindItemModalViewport() {
+    if (itemModalViewportBound || !window.visualViewport) return;
+    itemModalViewportBound = true;
+    const onViewportChange = () => syncItemModalViewport();
+    window.visualViewport.addEventListener("resize", onViewportChange);
+    window.visualViewport.addEventListener("scroll", onViewportChange);
+  }
+
+  function getItemModalScrollEl() {
+    const confirm = document.getElementById("searchConfirmStep");
+    if (confirm && !confirm.hidden) return confirm;
+    if (els.form && !els.form.hidden) return els.form;
+    if (els.bulkAddPanel && !els.bulkAddPanel.hidden) return els.bulkAddPanel;
+    return els.modalPanel?.querySelector(".title-search__scroll") || null;
+  }
+
+  function itemModalScrollAtTop() {
+    const scrollEl = getItemModalScrollEl();
+    return (scrollEl?.scrollTop ?? 0) <= 0;
+  }
+
+  function canStartItemModalDrag(target) {
+    if (!target?.closest) return false;
+    if (
+      target.closest(
+        "button, a, input, textarea, select, label, [role='tab'], .title-search__results button"
+      )
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  function resetItemModalDragStyles() {
+    if (!els.modal || !els.modalPanel) return;
+    els.modal.classList.remove("modal--dragging");
+    els.modalPanel.classList.remove("modal__panel--dragging");
+    els.modalPanel.style.transform = "";
+    const backdrop = els.modal.querySelector(".modal__backdrop");
+    if (backdrop) backdrop.style.opacity = "";
+  }
+
+  function onItemModalPanelTouchStart(event) {
+    if (!isItemModalMobileSheet() || els.modal.hidden || itemModalPanelDrag) return;
+    if (!canStartItemModalDrag(event.target)) return;
+
+    const onHeader = Boolean(event.target.closest(".modal__header, .add-mode-tabs"));
+    if (!itemModalScrollAtTop() && !onHeader) return;
+
+    const touch = event.changedTouches?.[0] || event.touches?.[0];
+    if (!touch) return;
+
+    itemModalPanelDrag = {
+      pointerId: touch.identifier,
+      startY: touch.clientY,
+      startX: touch.clientX,
+      dragging: false,
+    };
+  }
+
+  function onItemModalPanelTouchMove(event) {
+    if (!itemModalPanelDrag || els.modal.hidden) return;
+
+    const touch =
+      Array.from(event.changedTouches).find(
+        (t) => t.identifier === itemModalPanelDrag.pointerId
+      ) || event.touches?.[0];
+    if (!touch || touch.identifier !== itemModalPanelDrag.pointerId) return;
+
+    const dy = touch.clientY - itemModalPanelDrag.startY;
+    const dx = touch.clientX - itemModalPanelDrag.startX;
+
+    if (!itemModalPanelDrag.dragging) {
+      if (dy <= 0) return;
+      if (Math.abs(dx) > Math.abs(dy)) {
+        itemModalPanelDrag = null;
+        return;
+      }
+      if (dy < ITEM_MODAL_DRAG_START_PX) return;
+      if (!itemModalScrollAtTop()) {
+        itemModalPanelDrag = null;
+        return;
+      }
+      itemModalPanelDrag.dragging = true;
+      els.modal.classList.add("modal--dragging");
+      els.modalPanel.classList.add("modal__panel--dragging");
+    }
+
+    event.preventDefault();
+    const offset = Math.max(0, dy);
+    els.modalPanel.style.transform = `translateY(${offset}px)`;
+    const backdrop = els.modal.querySelector(".modal__backdrop");
+    if (backdrop) {
+      const fade = Math.max(0, 1 - offset / 280);
+      backdrop.style.opacity = String(0.65 * fade);
+    }
+  }
+
+  function onItemModalPanelTouchEnd(event) {
+    if (!itemModalPanelDrag) return;
+
+    const touch = Array.from(event.changedTouches).find(
+      (t) => t.identifier === itemModalPanelDrag.pointerId
+    );
+    const dy = touch ? touch.clientY - itemModalPanelDrag.startY : 0;
+    const wasDragging = itemModalPanelDrag.dragging;
+    itemModalPanelDrag = null;
+
+    resetItemModalDragStyles();
+
+    if (!wasDragging) return;
+
+    const panelHeight = els.modalPanel?.offsetHeight || 0;
+    if (dy > ITEM_MODAL_DRAG_CLOSE_PX || dy > panelHeight * 0.22) closeModal();
+  }
+
+  function setupItemModalSwipe() {
+    if (itemModalSwipeBound || !els.modalPanel) return;
+    itemModalSwipeBound = true;
+    els.modalPanel.addEventListener("touchstart", onItemModalPanelTouchStart, { passive: true });
+    els.modalPanel.addEventListener("touchmove", onItemModalPanelTouchMove, { passive: false });
+    els.modalPanel.addEventListener("touchend", onItemModalPanelTouchEnd, { passive: true });
+    els.modalPanel.addEventListener("touchcancel", onItemModalPanelTouchEnd, { passive: true });
   }
 
   function openModal(mode, item) {
@@ -4820,6 +5018,10 @@
 
     els.modal.hidden = false;
     updateBodyScrollLock();
+    lockItemModalBackground();
+    bindItemModalViewport();
+    syncItemModalViewport();
+    setupItemModalSwipe();
     closeAllCardMenus();
     if (mode === "edit") {
       els.formTitle?.focus();
@@ -4833,6 +5035,8 @@
   }
 
   function closeModal() {
+    unlockItemModalBackground();
+    resetItemModalViewport();
     els.modal.hidden = true;
     addSaveInFlight = false;
     setSearchPickLoading(false);
