@@ -71,8 +71,12 @@ class SeriesIdResolution {
       );
 
   /// Resolved via AniList (anime).
-  factory SeriesIdResolution.anilist(int anilistId) =>
-      SeriesIdResolution._(source: 'anilist', anilistId: anilistId);
+  factory SeriesIdResolution.anilist(int anilistId, {String? imdbId}) =>
+      SeriesIdResolution._(
+        source: 'anilist',
+        anilistId: anilistId,
+        imdbId: imdbId,
+      );
 
   /// Only an IMDb ID is available; TMDb resolution failed. OMDb fallback.
   factory SeriesIdResolution.omdb(String imdbId) =>

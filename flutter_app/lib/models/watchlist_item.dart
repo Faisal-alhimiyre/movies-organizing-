@@ -9,6 +9,7 @@ class WatchlistItem {
     this.summary = '',
     this.kind = '',
     this.link,
+    this.imdbLink,
     this.poster,
     this.cardPoster,
     this.selectedSeason,
@@ -33,6 +34,9 @@ class WatchlistItem {
   final String summary;
   final String kind;
   final String? link;
+
+  /// Secondary IMDb URL for anime when [link] is AniList (both badges open links).
+  final String? imdbLink;
   final String? poster;
 
   /// Season-specific poster URL — shown on the card when a season is selected.
@@ -67,6 +71,7 @@ class WatchlistItem {
         if (summary.isNotEmpty) 'summary': summary,
         if (kind.isNotEmpty) 'kind': kind,
         if (link != null) 'link': link,
+        if (imdbLink != null && imdbLink!.isNotEmpty) 'imdbLink': imdbLink,
         if (poster != null) 'poster': poster,
         if (cardPoster != null && cardPoster!.isNotEmpty)
           'cardPoster': cardPoster,

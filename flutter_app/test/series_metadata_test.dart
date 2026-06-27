@@ -433,7 +433,42 @@ void main() {
       expect(result.seasons?.first.isSynthetic, true);
     });
 
-    test('no thumbnails — uses fallbackPoster as still', () async {
+    test('partial streaming list still returns full episode count', () async {
+      final media = {
+        'id': 20,
+        'title': {'english': 'Naruto'},
+        'episodes': 220,
+        'coverImage': {'large': 'https://cover.jpg'},
+        'description': null,
+        'startDate': {'year': 2002},
+        'endDate': null,
+        'status': 'FINISHED',
+        'streamingEpisodes': List.generate(
+          26,
+          (i) => {'title': 'Clip ${i + 1}', 'thumbnail': 'https://thumb/$i.jpg'},
+        ),
+      };
+
+      final svc = SeriesMetadataService(
+        config: _testConfig,
+        cache: _FakeBox(),
+        client: MockClient((_) async => _anilistResponse(media)),
+      );
+
+      final result = await svc.fetchSeasonEpisodes(
+        resolution: SeriesIdResolution.anilist(20),
+        seasonNumber: 1,
+        locale: 'en',
+      );
+
+      expect(result.episodes, hasLength(220));
+      expect(result.episodes!.first.title, 'Clip 1');
+      expect(result.episodes![25].title, 'Clip 26');
+      expect(result.episodes![26].title, 'Episode 27');
+      expect(result.episodes![26].still, '');
+    });
+
+    test('no thumbnails — empty still on stub episodes', () async {
       final media = {
         'id': 1,
         'title': {'english': 'TestAnime'},
@@ -461,7 +496,8 @@ void main() {
         fallbackPoster: 'https://cover.jpg',
       );
 
-      expect(result.episodes!.first.still, 'https://cover.jpg');
+      expect(result.episodes, hasLength(3));
+      expect(result.episodes!.first.still, '');
     });
 
     test('episode count known, no streamingEpisodes → synthetic stubs', () async {

@@ -18,6 +18,7 @@ const ALLOWED_ACTIONS = new Set([
   "seasons",
   "episodes",
   "episodeTotals",
+  "allEpisodes",
 ]);
 
 // CORS headers — required for browser fetch from the website
@@ -153,6 +154,82 @@ function tvdbLanguage(locale: unknown): string {
   const loc = s(locale).toLowerCase();
   if (loc === "ar") return "ara";
   return "eng";
+}
+
+const TVDB_PAGE_SIZE_HINT = 20;
+const TVDB_EPISODE_ORDERS = new Set(["official", "absolute", "default", "dvd"]);
+
+function normalizeEpisodeOrder(raw: unknown, fallback = "official"): string {
+  const order = s(raw).toLowerCase();
+  return TVDB_EPISODE_ORDERS.has(order) ? order : fallback;
+}
+
+/**
+ * Paginate /series/{id}/episodes/{order}.
+ * Anime long-runners (Naruto 220, Shippuden 500) use absolute order — one
+ * continuous block numbered 1..N. Official aired order splits them into many
+ * TV seasons (Shippuden S1 = 32 eps), which breaks AniList's single-season list.
+ */
+async function paginateSeriesEpisodes(
+  seriesId: number,
+  opts: {
+    season?: number;
+    lang?: string;
+    maxPages?: number;
+    order?: string;
+  } = {},
+): Promise<unknown[]> {
+  const order = normalizeEpisodeOrder(opts.order, "official");
+  const maxPages = opts.maxPages ?? 40;
+  const wantSeason = opts.season != null && opts.season > 0;
+  const seasonParamWorks = order === "official" || order === "default";
+  const useSeasonParam = wantSeason && seasonParamWorks;
+  const allRaw: unknown[] = [];
+  let page = 0;
+  let useLang = Boolean(opts.lang) && !useSeasonParam;
+
+  while (page < maxPages) {
+    let data: any;
+    try {
+      let path: string;
+      if (useSeasonParam) {
+        path = `/series/${seriesId}/episodes/${order}?season=${opts.season}&page=${page}`;
+      } else if (useLang && opts.lang) {
+        path = `/series/${seriesId}/episodes/${order}/${opts.lang}?page=${page}`;
+      } else {
+        path = `/series/${seriesId}/episodes/${order}?page=${page}`;
+      }
+      data = await tvdbGet(path);
+    } catch (err: unknown) {
+      if (useLang && page === 0) {
+        useLang = false;
+        continue;
+      }
+      throw err;
+    }
+
+    const eps: unknown[] = a(data?.data?.episodes);
+    if (!eps.length) break;
+    allRaw.push(...eps);
+
+    const hasNext = Boolean(data?.links?.next);
+    if (hasNext) {
+      page++;
+      continue;
+    }
+    if (useSeasonParam) break;
+    if (eps.length >= 100) {
+      page++;
+      continue;
+    }
+    if (eps.length >= TVDB_PAGE_SIZE_HINT) {
+      page++;
+      continue;
+    }
+    break;
+  }
+
+  return allRaw;
 }
 
 /** Fetch a translation record; returns null when unavailable. */
@@ -347,53 +424,39 @@ async function actionEpisodes(
   p: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   const id = n(p.tvdbId);
+  const allSeasons = p.all === true || p.allSeasons === true;
   const season = n(p.season);
   if (!id || id <= 0 || !Number.isInteger(id)) return { error: "invalid_tvdb_id" };
-  if (season == null || season < 0) return { error: "invalid_season" };
+  if (!allSeasons && (season == null || season < 0)) return { error: "invalid_season" };
   const lang = tvdbLanguage(p.locale);
+  const order = normalizeEpisodeOrder(p.order, "official");
 
-  const allEps: unknown[] = [];
-  let page = 0;
-  let useLang = true;
+  const allEps = allSeasons
+    ? await paginateSeriesEpisodes(id, { lang, maxPages: 40, order })
+    : await paginateSeriesEpisodes(id, {
+      // ?season= queries return untranslated episode text; use the lang
+      // episode list and filter locally so English/Arabic overviews resolve.
+      lang,
+      maxPages: 10,
+      order,
+    });
 
-  while (true) {
-    let data: any;
-    try {
-      const path = useLang
-        ? `/series/${id}/episodes/official/${lang}?season=${season}&page=${page}`
-        : `/series/${id}/episodes/official?season=${season}&page=${page}`;
-      data = await tvdbGet(path);
-    } catch (err: unknown) {
-      // Some series lack English episode translations — fall back to default language.
-      if (useLang && page === 0) {
-        useLang = false;
-        continue;
-      }
-      throw err;
-    }
-
-    const body = data?.data;
-    const eps: unknown[] = a(body?.episodes);
-    allEps.push(...eps);
-
-    if (!data?.links?.next) break;
-    page++;
-    if (page > 20) break;
-  }
-
-  // The /episodes/official/{lang} path ignores the season query param and can
-  // return the entire series. Always keep only the requested season.
-  const seasonFiltered = allEps.filter((ep: any) => {
-    const sn = n(ep.seasonNumber);
-    return sn != null && sn === season;
-  });
+  const seasonFiltered = allSeasons
+    ? allEps
+    : allEps.filter((ep: any) => {
+      const sn = n(ep.seasonNumber);
+      return sn == null || sn === season;
+    });
 
   const episodes = seasonFiltered
     .map((ep: any) => {
       const epNum = n(ep.number);
-      if (epNum == null) return null;
-      const airDate = s(ep.aired) || null;
       const seasonNum = n(ep.seasonNumber) ?? season;
+      if (epNum == null) return null;
+      if (allSeasons && order !== "absolute" && (seasonNum == null || seasonNum <= 0)) {
+        return null;
+      }
+      const airDate = s(ep.aired) || null;
       return {
         source: "tvdb",
         tvdbEpId: n(ep.id),
@@ -412,11 +475,26 @@ async function actionEpisodes(
       };
     })
     .filter(Boolean)
-    .sort((a: any, b: any) => a.episodeNumber - b.episodeNumber);
+    .sort((a: any, b: any) => {
+      if (order === "absolute") {
+        return a.episodeNumber - b.episodeNumber;
+      }
+      if (allSeasons && a.seasonNumber !== b.seasonNumber) {
+        return a.seasonNumber - b.seasonNumber;
+      }
+      return a.episodeNumber - b.episodeNumber;
+    });
 
-  await enrichEpisodeStills(episodes as Array<{ tvdbEpId: number | null; still: string }>);
+  if (!allSeasons || !shouldSkipBulkStillEnrichment(episodes.length)) {
+    await enrichEpisodeStills(episodes as Array<{ tvdbEpId: number | null; still: string }>);
+  }
 
   return { source: "tvdb", tvdbId: id, season, episodes };
+}
+
+function shouldSkipBulkStillEnrichment(count: number): boolean {
+  // Per-episode still fetches for 200–500 eps can exceed edge CPU limits in the browser.
+  return count > 100;
 }
 
 // ── Action: episodeTotals ─────────────────────────────────────────────────
@@ -433,37 +511,14 @@ async function actionEpisodeTotals(
   const lang = tvdbLanguage(p.locale);
 
   const seasonCounts: Record<string, number> = {};
-  let page = 0;
-  let useLang = true;
-
-  while (true) {
-    let data: any;
-    try {
-      const path = useLang
-        ? `/series/${id}/episodes/official/${lang}?page=${page}`
-        : `/series/${id}/episodes/official?page=${page}`;
-      data = await tvdbGet(path);
-    } catch (err: unknown) {
-      if (useLang && page === 0) {
-        useLang = false;
-        continue;
-      }
-      throw err;
-    }
-
-    const eps: unknown[] = a(data?.data?.episodes);
-    for (const raw of eps) {
-      const ep = raw as Record<string, unknown>;
-      const sn = n(ep.seasonNumber);
-      const epNum = n(ep.number);
-      if (sn == null || sn <= 0 || epNum == null) continue;
-      const key = String(sn);
-      seasonCounts[key] = (seasonCounts[key] || 0) + 1;
-    }
-
-    if (!data?.links?.next) break;
-    page++;
-    if (page > 40) break;
+  const allEps = await paginateSeriesEpisodes(id, { lang, maxPages: 40, order: "official" });
+  for (const raw of allEps) {
+    const ep = raw as Record<string, unknown>;
+    const sn = n(ep.seasonNumber);
+    const epNum = n(ep.number);
+    if (sn == null || sn <= 0 || epNum == null) continue;
+    const key = String(sn);
+    seasonCounts[key] = (seasonCounts[key] || 0) + 1;
   }
 
   let episodeTotal = 0;
@@ -472,6 +527,64 @@ async function actionEpisodeTotals(
   }
 
   return { source: "tvdb", tvdbId: id, episodeTotal, seasonCounts };
+}
+
+// ── Action: allEpisodes ───────────────────────────────────────────────────
+/**
+ * Return all episodes in one continuous list (absolute order by default).
+ * Matches AniList's single-season anime model (Naruto 220, Shippuden 500).
+ */
+async function actionAllEpisodes(
+  p: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const id = n(p.tvdbId);
+  if (!id || id <= 0 || !Number.isInteger(id)) return { error: "invalid_tvdb_id" };
+  const lang = tvdbLanguage(p.locale);
+  const order = normalizeEpisodeOrder(p.order, "absolute");
+
+  const allRaw = await paginateSeriesEpisodes(id, { lang, maxPages: 40, order });
+
+  const episodes = allRaw
+    .map((raw) => {
+      const ep = raw as Record<string, unknown>;
+      const seasonNum = n(ep.seasonNumber);
+      const epNum = n(ep.number);
+      if (epNum == null) return null;
+      if (order !== "absolute" && (seasonNum == null || seasonNum <= 0)) return null;
+      const airDate = s(ep.aired) || null;
+      return {
+        source: "tvdb",
+        tvdbEpId: n(ep.id),
+        seriesTvdbId: id,
+        seasonNumber: seasonNum,
+        episodeNumber: epNum,
+        title: s(ep.name) || `Episode ${epNum}`,
+        overview: s(ep.overview),
+        still: imgUrl(ep.image),
+        runtimeMinutes: n(ep.runtime),
+        airDate,
+        isAired: isAired(airDate),
+        progressKey: `${seasonNum}:${epNum}`,
+      };
+    })
+    .filter(Boolean)
+    .sort((a: any, b: any) => {
+      if (order === "absolute") {
+        return a.episodeNumber - b.episodeNumber;
+      }
+      if (a.seasonNumber !== b.seasonNumber) {
+        return a.seasonNumber - b.seasonNumber;
+      }
+      return a.episodeNumber - b.episodeNumber;
+    });
+
+  if (!shouldSkipBulkStillEnrichment(episodes.length)) {
+    await enrichEpisodeStills(
+      episodes as Array<{ tvdbEpId: number | null; still: string }>,
+    );
+  }
+
+  return { source: "tvdb", tvdbId: id, order, episodes };
 }
 
 // ── Request handler ───────────────────────────────────────────────────────
@@ -516,6 +629,7 @@ Deno.serve(async (req: Request) => {
       case "seasons":  result = await actionSeasons(body);  break;
       case "episodes": result = await actionEpisodes(body); break;
       case "episodeTotals": result = await actionEpisodeTotals(body); break;
+      case "allEpisodes": result = await actionAllEpisodes(body); break;
       default:         result = { error: "unsupported_action" };
     }
 

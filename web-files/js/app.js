@@ -71,6 +71,9 @@
     "Sports & Competition": "Sports",
     "Science & Adventure": "Adventure",
     "Psychological & Mystery": "Thriller",
+    "Sci-Fi": "Science Fiction",
+    "Sci-fi": "Science Fiction",
+    "sci-fi": "Science Fiction",
   };
 
   const STANDARD_GENRES = window.STANDARD_GENRES || [];
@@ -339,6 +342,8 @@
     formLeadAdd: document.getElementById("formLeadAdd"),
     formLeadChips: document.getElementById("formLeadChips"),
     formLink: document.getElementById("formLink"),
+    formImdbLink: document.getElementById("formImdbLink"),
+    formImdbLinkField: document.getElementById("formImdbLinkField"),
     formLinkStatus: document.getElementById("formLinkStatus"),
     formLinkPreview: document.getElementById("formLinkPreview"),
     formLinkPreviewHint: document.getElementById("formLinkPreviewHint"),
@@ -887,6 +892,56 @@
     return [];
   }
 
+  function anilistUrlForItem(item) {
+    const WM = window.WatchlistMetadata;
+    const link = item?.link || "";
+    if (WM?.extractAnilistId?.(link)) return link;
+    if (WM?.extractMalId?.(link)) return link;
+    return "";
+  }
+
+  function imdbUrlForItem(item) {
+    const WM = window.WatchlistMetadata;
+    const imdbLink = item?.imdbLink || "";
+    if (WM?.extractImdbId?.(imdbLink)) return imdbLink;
+    const link = item?.link || "";
+    if (WM?.extractImdbId?.(link)) return link;
+    return "";
+  }
+
+  async function backfillAnimeLinksForForm(item) {
+    if (!item || normalizeContentType(item.contentType) !== "anime") return;
+
+    if (!els.formLink?.value.trim()) {
+      const match = await window.WatchlistMetadata?.fetchAnilistMatchByTitle?.(
+        item.title,
+        item.year
+      );
+      if (match?.anilistId) {
+        els.formLink.value = `https://anilist.co/anime/${match.anilistId}/`;
+      }
+    }
+
+    if (!els.formImdbLink?.value.trim()) {
+      const imdbId = getImdbId(item);
+      if (imdbId) {
+        els.formImdbLink.value = `https://www.imdb.com/title/${imdbId}/`;
+      } else if (els.formLink.value.trim()) {
+        const anilistId = window.WatchlistMetadata?.extractAnilistId?.(
+          els.formLink.value
+        );
+        if (anilistId) {
+          const linked = await window.WatchlistSeriesMetadata?.resolveLinkedImdbId?.({
+            anilistId: Number(anilistId),
+          });
+          if (linked) {
+            els.formImdbLink.value = `https://www.imdb.com/title/${linked}/`;
+          }
+        }
+      }
+    }
+  }
+
   function normalizeLink(url) {
     const trimmed = (url || "").trim();
     if (!trimmed) return "";
@@ -909,6 +964,16 @@
     return "movies";
   }
 
+  function updateFormImdbLinkVisibility(contentType) {
+    if (!els.formImdbLinkField) return;
+    const show = normalizeContentType(contentType) === "anime";
+    els.formImdbLinkField.hidden = !show;
+    const linkLabel = els.formLink?.closest(".form-field")?.querySelector(".form-field__label");
+    if (linkLabel) {
+      linkLabel.textContent = show ? "AniList link" : "Link";
+    }
+  }
+
   function syncContentTypePicker(picker, hiddenInput, value) {
     if (!picker || !hiddenInput) return;
     const normalized = normalizeContentType(value);
@@ -918,6 +983,12 @@
       btn.classList.toggle("content-type-picker__btn--active", active);
       btn.setAttribute("aria-pressed", String(active));
     });
+    if (picker === els.formTypePicker) {
+      updateFormImdbLinkVisibility(normalized);
+    }
+    if (picker === els.searchConfirmTypePicker) {
+      void refreshSearchConfirmForType();
+    }
   }
 
   function initContentTypePicker(picker, hiddenInput) {
@@ -990,6 +1061,7 @@
       runtime: meta.runtime || "",
       seasonCount: meta.seasonCount || null,
       episodeCount: meta.episodeCount || null,
+      sourceGenres: meta.genres || [],
     };
   }
 
@@ -1065,6 +1137,35 @@
     }
 
     applyMetadataToManualForm(meta);
+    if (
+      normalizeContentType(els.formType?.value) === "anime" &&
+      els.formImdbLink &&
+      !els.formImdbLink.value.trim()
+    ) {
+      if (meta.imdbId) {
+        els.formImdbLink.value = `https://www.imdb.com/title/${meta.imdbId}/`;
+      } else if (window.WatchlistMetadata?.isAnilistLink?.(link)) {
+        const anilistId = window.WatchlistMetadata.extractAnilistId(link);
+        const linked = anilistId
+          ? await window.WatchlistSeriesMetadata?.resolveLinkedImdbId?.({ anilistId })
+          : null;
+        if (linked) {
+          els.formImdbLink.value = `https://www.imdb.com/title/${linked}/`;
+        }
+      }
+    }
+    if (els.formImdbLink?.value.trim()) {
+      const imdbId = window.WatchlistMetadata?.extractImdbId?.(
+        els.formImdbLink.value
+      );
+      if (imdbId) {
+        const imdbMeta = await window.WatchlistMetadata?.getMetadata?.(imdbId);
+        if (imdbMeta?.rating) {
+          state.manualLinkMeta = state.manualLinkMeta || {};
+          state.manualLinkMeta.imdbRating = imdbMeta.rating;
+        }
+      }
+    }
     setFormLinkStatus("");
     setFormLinkPreview(meta);
   }
@@ -1600,6 +1701,7 @@
             leads,
             lead: leads.join(", "),
             link: normalizeLink(entryClean.link),
+            imdbLink: normalizeLink(entryClean.imdbLink),
             secondaryGenres: normalizeSecondaryGenres(
               primaryGenre,
               entryClean.secondaryGenres || []
@@ -1634,6 +1736,7 @@
 
       if (item.altTitle) entry.altTitle = item.altTitle;
       if (item.link) entry.link = item.link;
+      if (item.imdbLink) entry.imdbLink = item.imdbLink;
       if (item.poster) entry.poster = item.poster;
       if (item.imdbRating) entry.imdbRating = item.imdbRating;
       if (item.anilistRating) entry.anilistRating = item.anilistRating;
@@ -1645,6 +1748,9 @@
       if (item.addedAt) entry.addedAt = item.addedAt;
       if (item.secondaryGenres?.length) {
         entry.secondaryGenres = item.secondaryGenres;
+      }
+      if (item.sourceGenres?.length) {
+        entry.sourceGenres = item.sourceGenres;
       }
       if (item.cardPoster) entry.cardPoster = item.cardPoster;
       if (item.lastSelectedSeason != null) entry.lastSelectedSeason = item.lastSelectedSeason;
@@ -2728,7 +2834,7 @@
   }
 
   function getImdbId(item) {
-    return window.WatchlistMetadata?.extractImdbId(item.link) || null;
+    return window.WatchlistMetadata?.extractImdbId(item.imdbLink || item.link) || null;
   }
 
   function getAnilistId(item) {
@@ -2988,7 +3094,7 @@
       }
       if (meta) {
         const before = itemHasTitleMeta(item);
-        window.WatchlistMetadata.applyTitleMetaFromDetails(meta, item);
+        window.WatchlistMetadata.applyTitleMetaFromDetails(meta, item, item.contentType);
         if (!before && itemHasTitleMeta(item)) changed = true;
       }
       if (changed) {
@@ -3031,7 +3137,7 @@
         }
         if (meta) {
           const before = itemHasTitleMeta(item);
-          window.WatchlistMetadata.applyTitleMetaFromDetails(meta, item);
+          window.WatchlistMetadata.applyTitleMetaFromDetails(meta, item, item.contentType);
           if (!before && itemHasTitleMeta(item)) changed = true;
         }
         if (changed) {
@@ -3114,7 +3220,7 @@
         if (meta) {
           const before = itemHasTitleMeta(item);
           const beforeRuntime = item.runtime || "";
-          window.WatchlistMetadata.applyTitleMetaFromDetails(meta, item);
+          window.WatchlistMetadata.applyTitleMetaFromDetails(meta, item, item.contentType);
           if (
             (!before && itemHasTitleMeta(item)) ||
             (!beforeRuntime && item.runtime)
@@ -3139,6 +3245,7 @@
   }
 
   function itemNeedsEpisodeTotalBackfill(item) {
+    if (itemNeedsSeriesBadgeRefresh(item)) return true;
     if (item?.contentType !== "tvSeries" && item?.contentType !== "anime") {
       return false;
     }
@@ -3148,6 +3255,25 @@
       getImdbId(item) ||
         (item?.link && window.WatchlistMetadata?.isSupportedLink?.(item.link))
     );
+  }
+
+  /** Stale counts for live-action TV only — anime uses AniList (1 season / N eps is normal). */
+  function itemNeedsSeriesBadgeRefresh(item) {
+    if (item?.contentType !== "tvSeries") {
+      return false;
+    }
+    if (
+      !item?.link ||
+      !window.WatchlistMetadata?.isSupportedLink?.(item.link)
+    ) {
+      return false;
+    }
+    const seasons = parseInt(String(item?.seasonCount || "").trim(), 10);
+    const episodes = parseInt(String(item?.episodeCount || "").trim(), 10);
+    if (!Number.isFinite(seasons) && Number.isFinite(episodes) && episodes > 0) {
+      return true;
+    }
+    return false;
   }
 
   function applyBadgePatches(item, patches) {
@@ -3163,12 +3289,31 @@
         changed = true;
         continue;
       }
+      if (key === "sourceGenres") {
+        if (!Array.isArray(value) || !value.length) continue;
+        const prev = JSON.stringify(item.sourceGenres || []);
+        const next = JSON.stringify(value);
+        if (prev === next) continue;
+        item.sourceGenres = value;
+        changed = true;
+        continue;
+      }
       if (item[key] !== value) {
         item[key] = value;
         changed = true;
       }
     }
     return changed;
+  }
+
+  function itemNeedsAnimeProviderRefresh(item) {
+    if (item?.contentType !== "anime") return false;
+    const WM = window.WatchlistMetadata;
+    return Boolean(
+      WM?.extractAnilistId?.(item?.link) ||
+        WM?.extractMalId?.(item?.link) ||
+        getImdbId(item)
+    );
   }
 
   async function enrichItemBadges(itemId) {
@@ -3180,7 +3325,21 @@
     if (item.contentType !== "tvSeries" && item.contentType !== "anime") return;
 
     const episodes = parseInt(String(item.episodeCount || "").trim(), 10);
-    if (Number.isFinite(episodes) && episodes > 0 && itemHasTitleMeta(item)) return;
+    const needsAnimeRefresh = itemNeedsAnimeProviderRefresh(item);
+    const needsImdbRating =
+      item.contentType === "anime" &&
+      getImdbId(item) &&
+      !item.imdbRating;
+    if (
+      !needsAnimeRefresh &&
+      !needsImdbRating &&
+      !itemNeedsSeriesBadgeRefresh(item) &&
+      Number.isFinite(episodes) &&
+      episodes > 0 &&
+      itemHasTitleMeta(item)
+    ) {
+      return;
+    }
 
     try {
       const locale = window.WatchlistI18n?.getLang?.() || "en";
@@ -3536,7 +3695,7 @@
       }
 
       if (meta) {
-        window.WatchlistMetadata?.applyTitleMetaFromDetails(meta, item);
+        window.WatchlistMetadata?.applyTitleMetaFromDetails(meta, item, item.contentType);
         if (meta.poster) {
           item.poster = meta.poster;
           setCardPoster(card, meta.poster);
@@ -4042,7 +4201,18 @@
   }
 
   function renderSearchConfirmPreview(details) {
-    renderTitlePreview(els.searchConfirmPreview, details);
+    const contentType = normalizeContentType(
+      els.searchConfirmType?.value || details?.contentType || "movies"
+    );
+    const preview = { ...details, contentType };
+    if (
+      contentType === "anime" &&
+      String(preview.mediaType || preview.omdbType || "").toLowerCase() !== "movie" &&
+      !preview.seasonCount
+    ) {
+      preview.seasonCount = 1;
+    }
+    renderTitlePreview(els.searchConfirmPreview, preview);
   }
 
   function populateSearchConfirmGenreSelect(selected) {
@@ -4326,7 +4496,22 @@
     render();
   }
 
-  function showSearchConfirmStep(details) {
+  async function refreshSearchConfirmForType() {
+    const details = state.searchPickDetails;
+    if (!details || !els.searchConfirmType) return;
+    const contentType = normalizeContentType(els.searchConfirmType.value);
+    if (contentType !== "anime") {
+      renderSearchConfirmPreview(details);
+      return;
+    }
+    const enriched = await window.WatchlistMetadata.ensureAnimeDetails(details, {
+      forceAnime: true,
+    });
+    state.searchPickDetails = enriched;
+    renderSearchConfirmPreview(enriched);
+  }
+
+  async function showSearchConfirmStep(details) {
     if (!els.searchAddStep || !els.searchConfirmStep || !details) return;
 
     setModalSearchMode(false);
@@ -4336,7 +4521,9 @@
     els.searchAddStep.hidden = true;
     els.searchConfirmStep.hidden = false;
 
+    const searchTabAnime = els.titleSearchType?.value === "anime";
     const defaultType =
+      (searchTabAnime ? "anime" : null) ||
       details.contentType ||
       (state.type !== "all" ? state.type : "movies");
     const contentType = normalizeContentType(defaultType);
@@ -4359,7 +4546,16 @@
         ? suggested.slice(1).filter((genre) => genre.toLowerCase() !== "animation")
         : suggested.slice(1)
     );
-    renderSearchConfirmPreview(details);
+
+    let previewDetails = details;
+    if (contentType === "anime") {
+      previewDetails = await window.WatchlistMetadata.ensureAnimeDetails(details, {
+        forceAnime: true,
+      });
+      state.searchPickDetails = previewDetails;
+    }
+
+    renderSearchConfirmPreview(previewDetails);
 
     els.searchConfirmGenre?.focus();
     syncItemModalViewport();
@@ -4473,9 +4669,18 @@
     setSearchPickLoading(true);
     setTitleSearchStatus(t("search.loadingDetails"));
     try {
+      const preferAnime = els.titleSearchType?.value === "anime";
       let details = await window.WatchlistMetadata.getDetailsForPick(pick, {
         searchQuery: state.searchQuery,
+        preferAnime,
       });
+      if (preferAnime && details) {
+        details = await window.WatchlistMetadata.ensureAnimeDetails(details, {
+          pick,
+          preferAnime: true,
+          forceAnime: true,
+        });
+      }
       if (!details?.title) {
         setTitleSearchStatus(t("search.loadFailed"), { error: true });
         return;
@@ -4524,9 +4729,18 @@
 
     let details = null;
     try {
+      const preferAnime = els.titleSearchType?.value === "anime";
       details = await window.WatchlistMetadata.getDetailsForPick(pick, {
         searchQuery: state.searchQuery,
+        preferAnime,
       });
+      if (preferAnime && details) {
+        details = await window.WatchlistMetadata.ensureAnimeDetails(details, {
+          pick,
+          preferAnime: true,
+          forceAnime: true,
+        });
+      }
     } catch (_) {}
 
     if (!details?.title) {
@@ -4560,7 +4774,10 @@
       STANDARD_GENRES,
       contentType
     ) || [];
-    const genre = suggested[0] || STANDARD_GENRES[0];
+    const genre =
+      suggested[0] ||
+      window.WatchlistMetadata?.defaultGenreForContentType?.(contentType) ||
+      "Drama";
 
     const item = buildItemFromSearchDetails(details, {
       contentType,
@@ -4639,16 +4856,24 @@
       title: details.title.trim(),
       leads,
       lead: leads.join(", "),
-      link: window.WatchlistMetadata?.defaultLinkForDetails(details) || "",
+      link:
+        contentType === "anime" && details.anilistId
+          ? `https://anilist.co/anime/${details.anilistId}/`
+          : window.WatchlistMetadata?.defaultLinkForDetails(details, contentType) || "",
       summary: details.plot || "",
       kind: contentType === "movies" ? "movie" : "series",
       secondaryGenres,
     };
 
+    if (contentType === "anime" && details.imdbId) {
+      item.imdbLink = `https://www.imdb.com/title/${details.imdbId}/`;
+    }
+
     if (details.poster) item.poster = details.poster;
     applyRatingsFromDetails(details, item);
     if (details.year) item.year = details.year;
-    window.WatchlistMetadata?.applyTitleMetaFromDetails(details, item);
+    window.WatchlistMetadata?.applyTitleMetaFromDetails(details, item, contentType);
+    if (details.genres?.length) item.sourceGenres = details.genres;
     // Save external IDs so detail/season sheets can use them without re-fetching
     if (details.imdbId) item.imdbId = details.imdbId;
     if (details.tmdbId) item.tmdbId = details.tmdbId;
@@ -4674,7 +4899,14 @@
       return;
     }
 
-    const item = buildItemFromSearchDetails(details, {
+    let resolvedDetails = details;
+    if (contentType === "anime") {
+      resolvedDetails = await window.WatchlistMetadata.ensureAnimeDetails(details, {
+        forceAnime: true,
+      });
+    }
+
+    const item = buildItemFromSearchDetails(resolvedDetails, {
       contentType,
       genre,
       secondaryGenres: state.searchConfirmSecondary,
@@ -4762,6 +4994,7 @@
   let itemModalPanelDrag = null;
   let itemModalSwipeBound = false;
   let itemModalViewportBound = false;
+  let itemModalTouchBlockBound = false;
   const ITEM_MODAL_MOBILE_MQ = "(max-width: 640px)";
   const ITEM_MODAL_DRAG_CLOSE_PX = 120;
   const ITEM_MODAL_DRAG_START_PX = 8;
@@ -4782,43 +5015,47 @@
     document.body.style.width = "100%";
   }
 
+  function restorePageScrollY(y) {
+    const root = document.documentElement;
+    const prev = root.style.scrollBehavior;
+    root.style.scrollBehavior = "auto";
+    window.scrollTo(0, y);
+    root.style.scrollBehavior = prev;
+  }
+
   function unlockItemModalBackground() {
     if (!document.body.classList.contains("item-modal-scroll-lock")) return;
     document.documentElement.classList.remove("item-modal-scroll-lock");
     document.body.classList.remove("item-modal-scroll-lock");
+    const y = itemModalSavedScrollY;
     document.body.style.position = "";
     document.body.style.top = "";
     document.body.style.left = "";
     document.body.style.right = "";
     document.body.style.width = "";
-    window.scrollTo(0, itemModalSavedScrollY);
+    restorePageScrollY(y);
   }
 
   function syncItemModalViewport() {
     if (!els.modal || els.modal.hidden || !isItemModalMobileSheet()) return;
     const vv = window.visualViewport;
     if (!vv) return;
-    const top = Math.max(0, vv.offsetTop);
-    els.modal.style.top = `${top}px`;
-    els.modal.style.left = "0";
-    els.modal.style.right = "0";
-    els.modal.style.bottom = "auto";
-    els.modal.style.height = `${vv.height}px`;
-    els.modal.style.padding = "0";
+
+    // Keep the overlay full-screen; only shrink the sheet and pin the frozen backdrop.
+    const offsetTop = Math.max(0, vv.offsetTop);
+    if (document.body.classList.contains("item-modal-scroll-lock")) {
+      document.body.style.top = `-${itemModalSavedScrollY + offsetTop}px`;
+    }
+
     if (els.modalPanel && !itemModalPanelDrag?.dragging) {
-      els.modalPanel.style.maxHeight = `${Math.round(vv.height * 0.94)}px`;
+      const maxH = Math.max(160, Math.round(vv.height * 0.94));
+      els.modalPanel.style.maxHeight = `${maxH}px`;
     }
   }
 
   function resetItemModalViewport() {
     if (!els.modal) return;
     itemModalPanelDrag = null;
-    els.modal.style.top = "";
-    els.modal.style.left = "";
-    els.modal.style.right = "";
-    els.modal.style.bottom = "";
-    els.modal.style.height = "";
-    els.modal.style.padding = "";
     resetItemModalDragStyles();
     if (els.modalPanel) {
       els.modalPanel.style.maxHeight = "";
@@ -4826,12 +5063,49 @@
     }
   }
 
+  function onItemModalDocumentTouchMove(event) {
+    if (els.modal.hidden || !isItemModalMobileSheet()) return;
+    const target = event.target;
+    if (!target?.closest) return;
+
+    // Allow scroll only inside the sheet's scroll regions.
+    if (
+      target.closest(
+        "#itemModal .title-search__scroll, #itemModal .modal__form, " +
+          "#itemModal .modal__bulk, #itemModal .title-search-confirm"
+      )
+    ) {
+      return;
+    }
+
+    // Block background / backdrop scroll chaining (iOS ignores overflow:hidden).
+    event.preventDefault();
+  }
+
+  function bindItemModalTouchBlock() {
+    if (itemModalTouchBlockBound) return;
+    itemModalTouchBlockBound = true;
+    document.addEventListener("touchmove", onItemModalDocumentTouchMove, {
+      passive: false,
+    });
+  }
+
+  function unbindItemModalTouchBlock() {
+    if (!itemModalTouchBlockBound) return;
+    itemModalTouchBlockBound = false;
+    document.removeEventListener("touchmove", onItemModalDocumentTouchMove);
+  }
+
   function bindItemModalViewport() {
     if (itemModalViewportBound || !window.visualViewport) return;
     itemModalViewportBound = true;
-    const onViewportChange = () => syncItemModalViewport();
-    window.visualViewport.addEventListener("resize", onViewportChange);
-    window.visualViewport.addEventListener("scroll", onViewportChange);
+    window.visualViewport.addEventListener("resize", syncItemModalViewport);
+  }
+
+  function unbindItemModalViewport() {
+    if (!itemModalViewportBound || !window.visualViewport) return;
+    itemModalViewportBound = false;
+    window.visualViewport.removeEventListener("resize", syncItemModalViewport);
   }
 
   function getItemModalScrollEl() {
@@ -4999,7 +5273,12 @@
       els.formGenre.value = item.genre;
       els.formTitle.value = item.title;
       setFormLeads(item.leads || parseLeads(item));
-      els.formLink.value = item.link || "";
+      els.formLink.value = anilistUrlForItem(item);
+      if (els.formImdbLink) {
+        els.formImdbLink.value = imdbUrlForItem(item);
+      }
+      updateFormImdbLinkVisibility(normalizeContentType(item.contentType));
+      void backfillAnimeLinksForForm(item);
       els.formSummary.value = item.summary || parseSummary(item);
       setFormSecondary(item.secondaryGenres || []);
     } else {
@@ -5020,6 +5299,7 @@
     updateBodyScrollLock();
     lockItemModalBackground();
     bindItemModalViewport();
+    bindItemModalTouchBlock();
     syncItemModalViewport();
     setupItemModalSwipe();
     closeAllCardMenus();
@@ -5035,6 +5315,8 @@
   }
 
   function closeModal() {
+    unbindItemModalTouchBlock();
+    unbindItemModalViewport();
     unlockItemModalBackground();
     resetItemModalViewport();
     els.modal.hidden = true;
@@ -5775,12 +6057,17 @@
     const genre = normalizeGenre(els.formGenre.value.trim());
     const title = els.formTitle.value.trim();
     const leads = [...state.formLeads];
-    const link = normalizeLink(els.formLink.value);
+    const anilistLink = normalizeLink(els.formLink.value);
+    const imdbLink = normalizeLink(els.formImdbLink?.value);
     const summary = els.formSummary.value.trim();
     const existing = state.editingId
       ? state.items.find((i) => i.id === state.editingId)
       : null;
     const kind = formKindForItem(contentType, existing?.kind);
+    const linksChanged =
+      existing &&
+      (normalizeLink(existing.link || "") !== anilistLink ||
+        normalizeLink(existing.imdbLink || "") !== imdbLink);
 
     const secondaryGenres = normalizeSecondaryGenres(
       genre,
@@ -5793,7 +6080,8 @@
       title,
       leads,
       lead: leads.join(", "),
-      link,
+      link: contentType === "anime" ? anilistLink : (anilistLink || imdbLink),
+      imdbLink: contentType === "anime" ? imdbLink : undefined,
       summary,
       kind,
       secondaryGenres,
@@ -5809,11 +6097,16 @@
       if (existing?.year && !item.year) item.year = existing.year;
       if (existing?.ageRating && !item.ageRating) item.ageRating = existing.ageRating;
       if (existing?.runtime && !item.runtime) item.runtime = existing.runtime;
-      if (existing?.seasonCount && !item.seasonCount) {
-        item.seasonCount = existing.seasonCount;
+      if (!linksChanged) {
+        if (existing?.seasonCount && !item.seasonCount) {
+          item.seasonCount = existing.seasonCount;
+        }
+        if (existing?.episodeCount && !item.episodeCount) {
+          item.episodeCount = existing.episodeCount;
+        }
       }
-      if (existing?.episodeCount && !item.episodeCount) {
-        item.episodeCount = existing.episodeCount;
+      if (existing?.sourceGenres?.length && !linksChanged) {
+        item.sourceGenres = existing.sourceGenres;
       }
       stampItemAddedAt(item, { existing });
     } else {
@@ -5837,10 +6130,13 @@
       if (state.manualLinkMeta.episodeCount) {
         item.episodeCount = state.manualLinkMeta.episodeCount;
       }
+      if (state.manualLinkMeta.sourceGenres?.length) {
+        item.sourceGenres = state.manualLinkMeta.sourceGenres;
+      }
       item.posterBroken = false;
     }
 
-    if (existing && normalizeLink(existing.link) !== link) {
+    if (existing && normalizeLink(existing.link) !== anilistLink) {
       delete item.poster;
       item.posterBroken = false;
     }
@@ -6031,9 +6327,7 @@
       closeModal();
       updateGenreOptions();
       render();
-      if (!wasEdit) {
-        queueItemBadgeEnrichment(item.id);
-      }
+      queueItemBadgeEnrichment(item.id);
     } finally {
       addSaveInFlight = false;
       setButtonLoading(saveBtn, false);
@@ -7697,8 +7991,10 @@
       }
       saveData();
     },
+    queueItemBadgeEnrichment,
     cardDisplayPoster,
     cardDisplayTitle,
+    normalizeGenre,
   };
 
   if (document.getElementById("mainContent")) {

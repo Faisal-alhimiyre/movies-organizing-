@@ -266,6 +266,17 @@ async function actionDetails(
     .map((g) => s(g.name))
     .filter(Boolean);
 
+  let genreNames = genres;
+  if (lang === "ar-SA" && enJson) {
+    const enGenres = (Array.isArray(enJson.genres)
+      ? (enJson.genres as Record<string, unknown>[])
+      : []
+    )
+      .map((g) => s(g.name))
+      .filter(Boolean);
+    if (enGenres.length) genreNames = enGenres;
+  }
+
   const externalIds = json.external_ids as Record<string, unknown> | undefined;
   const imdbId =
     s(externalIds?.imdb_id) || s(json.imdb_id) || null;
@@ -334,7 +345,7 @@ async function actionDetails(
       poster: poster ? `https://image.tmdb.org/t/p/w500${poster}` : "",
       rating,
       actors,
-      genres,
+      genres: genreNames,
       mediaType: mediaType === "tv" ? "series" : "movie",
       omdbType: mediaType === "tv" ? "series" : "movie",
       ageRating,

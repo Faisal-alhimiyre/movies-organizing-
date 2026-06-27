@@ -1,6 +1,8 @@
+import '../../../core/utils/item_links.dart';
 import '../../../models/metadata_detail.dart';
 import '../../../models/watchlist_item.dart';
 import '../../../repositories/metadata/genre_mapper.dart';
+import '../../../repositories/metadata/metadata_service.dart';
 import '../../../core/utils/watchlist_parser.dart';
 
 WatchlistItem buildItemFromMetadata({
@@ -46,6 +48,20 @@ WatchlistItem buildItemFromMetadata({
     year = int.tryParse(yearRaw.substring(0, 4));
   }
 
+  String? link;
+  String? imdbLink;
+  if (contentType == 'anime') {
+    if (details.anilistId != null) {
+      link = 'https://anilist.co/anime/${details.anilistId}/';
+    }
+    if (details.imdbId != null && details.imdbId!.isNotEmpty) {
+      imdbLink = imdbUrlFromId(details.imdbId!);
+    }
+    link ??= imdbLink ?? defaultLinkForDetails(details);
+  } else {
+    link = defaultLinkForDetails(details);
+  }
+
   return WatchlistItem(
     id: makeItemId(contentType, normalizedGenre, details.title.trim()),
     contentType: contentType,
@@ -54,7 +70,8 @@ WatchlistItem buildItemFromMetadata({
     lead: leads.join(', '),
     summary: details.plot,
     kind: contentType == 'movies' ? 'movie' : 'series',
-    link: defaultLinkForDetails(details),
+    link: link?.isNotEmpty == true ? link : null,
+    imdbLink: imdbLink?.isNotEmpty == true ? imdbLink : null,
     poster: details.poster.isNotEmpty ? details.poster : null,
     imdbRating: imdbRating,
     anilistRating: anilistRating,

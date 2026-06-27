@@ -19,18 +19,36 @@ const kLeadGold = Color(0xFFD9B96A);
 // ══════════════════════════════════════════════════════════════════════════════
 
 class ContentTypeBadge extends StatelessWidget {
-  const ContentTypeBadge({super.key, required this.contentType});
+  const ContentTypeBadge({
+    super.key,
+    required this.contentType,
+    this.kind,
+  });
 
   final String contentType;
+  final String? kind;
 
   @override
   Widget build(BuildContext context) {
     final tc = Theme.of(context).extension<AppTypeColors>();
-    final (fg, bg, label) = _resolve(contentType, tc);
+    final (fg, bg, label) = _resolve(contentType, kind, tc);
     return _BadgePill(label: label, fg: fg, bg: bg);
   }
 
-  static (Color, Color, String) _resolve(String type, AppTypeColors? tc) {
+  static (Color, Color, String) _resolve(
+    String type,
+    String? kind,
+    AppTypeColors? tc,
+  ) {
+    final normalizedKind = kind?.trim().toLowerCase() ?? '';
+    if (normalizedKind == 'film series') {
+      return (
+        tc?.franchise ?? const Color(0xFF6BC9A8),
+        tc?.franchiseDim ?? const Color(0x266BC9A8),
+        'FRANCHISE',
+      );
+    }
+
     switch (type) {
       case 'movie':
         return (
@@ -273,6 +291,17 @@ class _TitleMetaBadge extends StatelessWidget {
               const Color(0xFFA5B4FC),
               const Color(0x1AA5B4FC),
               const Color(0x4DA5B4FC),
+            ),
+      TitleMetaBadgeKind.episodes => solid
+          ? (
+              const Color(0xFF86EFAC),
+              const Color(0xF2051A0E),
+              const Color(0x7386EFAC),
+            )
+          : (
+              const Color(0xFF86EFAC),
+              const Color(0x1A86EFAC),
+              const Color(0x4D86EFAC),
             ),
     };
 

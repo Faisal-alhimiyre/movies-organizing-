@@ -21,6 +21,13 @@ void main() {
       expect(suggestGenres(['Ecchi'], 'anime'), ['Action']);
     });
 
+    test('maps Arabic TMDB genres for Turkish TV', () {
+      expect(
+        suggestGenres(['دراما', 'جريمة', 'عائلي'], 'tvSeries'),
+        ['Drama', 'Crime', 'Family'],
+      );
+    });
+
     test('keeps Animation for movies', () {
       expect(
         suggestGenres(['Animation', 'Family'], 'movies'),
@@ -48,6 +55,21 @@ void main() {
   group('mapGenreToStandard', () {
     test('maps sci-fi alias', () {
       expect(mapGenreToStandard('Sci-Fi'), 'Science Fiction');
+    });
+
+    test('maps TMDB Arabic drama label', () {
+      expect(mapGenreToStandard('دراما'), 'Drama');
+      expect(mapGenreToStandard('جريمة'), 'Crime');
+    });
+  });
+
+  group('defaultGenreForContentType', () {
+    test('uses Drama for TV when mapping fails', () {
+      expect(defaultGenreForContentType('tvSeries'), 'Drama');
+    });
+
+    test('uses Action for anime when mapping fails', () {
+      expect(defaultGenreForContentType('anime'), 'Action');
     });
   });
 

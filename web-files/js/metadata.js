@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const CACHE_KEY = "watchlist-metadata-cache-v4";
+  const CACHE_KEY = "watchlist-metadata-cache-v5";
   const ANILIST_API = "https://graphql.anilist.co";
   const TMDB_IMAGE = "https://image.tmdb.org/t/p/w500";
   const TMDB_IMAGE_SM = "https://image.tmdb.org/t/p/w92";
@@ -29,6 +29,28 @@
     horror: "Horror",
     mecha: "Science Fiction",
     music: "Family",
+    // TMDB Arabic (ar-SA) genre labels
+    دراما: "Drama",
+    جريمة: "Crime",
+    عائلي: "Family",
+    كوميديا: "Comedy",
+    رعب: "Horror",
+    غموض: "Mystery",
+    رومانسي: "Romance",
+    رومانسية: "Romance",
+    أكشن: "Action",
+    اكشن: "Action",
+    مغامرة: "Adventure",
+    وثائقي: "Documentary",
+    فانتازيا: "Fantasy",
+    خيال: "Fantasy",
+    "خيال علمي": "Science Fiction",
+    إثارة: "Thriller",
+    اثارة: "Thriller",
+    حرب: "War",
+    رياضة: "Sports",
+    تاريخي: "Historical",
+    غربي: "Western",
   };
 
   const ANILIST_GENRE_MAP = {
@@ -225,7 +247,7 @@
     if (!trimmed) return null;
 
     const lower = trimmed.toLowerCase();
-    const alias = GENRE_ALIASES[lower];
+    const alias = GENRE_ALIASES[lower] || GENRE_ALIASES[trimmed];
     if (alias && standardGenres.includes(alias)) return alias;
 
     const exact = standardGenres.find((genre) => genre.toLowerCase() === lower);
@@ -239,6 +261,13 @@
     if (partial) return partial;
 
     return null;
+  }
+
+  /** When genre mapping fails, avoid Action (STANDARD_GENRES[0]) for live-action TV. */
+  function defaultGenreForContentType(contentType = "") {
+    const type = normalizeSuggestContentType(contentType);
+    if (type === "anime") return ANIME_GENRE_FALLBACK;
+    return "Drama";
   }
 
   function mapAnilistGenre(genre, standardGenres) {
@@ -295,12 +324,19 @@
     return "movies";
   }
 
-  function defaultLinkForDetails(details) {
+  function defaultLinkForDetails(details, contentType = "") {
+    const ct =
+      contentType ||
+      (details?.contentType ? String(details.contentType) : "") ||
+      inferContentType(details?.mediaType || details?.omdbType, details?.genres || []);
+    if (ct === "anime" && details?.anilistId) {
+      return `https://anilist.co/anime/${details.anilistId}/`;
+    }
+    if (details?.anilistId && !details?.imdbId) {
+      return `https://anilist.co/anime/${details.anilistId}/`;
+    }
     if (details?.imdbId) {
       return `https://www.imdb.com/title/${details.imdbId}/`;
-    }
-    if (details?.anilistId) {
-      return `https://anilist.co/anime/${details.anilistId}/`;
     }
     const existing = String(details?.link || "").trim();
     if (existing) return existing;
@@ -603,16 +639,18 @@
         badges.push({ kind: "duration", label: episodeDuration });
       }
     } else if (type === "anime") {
+      const isMovie =
+        String(meta.mediaType || meta.omdbType || "").toLowerCase() === "movie";
       if (episodeCount) {
         badges.push({
           kind: "episodes",
           label: _episodesBadgeLabel(episodeCount),
         });
       }
-      if (seasonCount) {
+      if (!isMovie) {
         badges.push({
           kind: "seasons",
-          label: _seasonsBadgeLabel(seasonCount),
+          label: _seasonsBadgeLabel(seasonCount || 1),
         });
       }
       if (episodeDuration) {
@@ -627,10 +665,26 @@
     return buildTitleMetaBadges(meta, contentType).map((badge) => badge.label);
   }
 
-  function applyTitleMetaFromDetails(details, target) {
+  function applyTitleMetaFromDetails(details, target, contentType = "") {
     if (!details || !target) return;
+    const ct = contentType || target.contentType || "";
     if (details.ageRating) target.ageRating = details.ageRating;
     if (details.runtime) target.runtime = details.runtime;
+    if (ct === "anime") {
+      const fromAnilist =
+        details.source === "anilist" ||
+        details.anilistId ||
+        String(details.link || "").includes("anilist.co");
+      if (fromAnilist && details.episodeCount) {
+        target.episodeCount = details.episodeCount;
+      }
+      if (details.seasonCount) {
+        target.seasonCount = details.seasonCount;
+      } else if (details.mediaType !== "movie" && details.omdbType !== "movie") {
+        target.seasonCount = 1;
+      }
+      return;
+    }
     if (details.seasonCount) target.seasonCount = details.seasonCount;
     if (details.episodeCount) target.episodeCount = details.episodeCount;
   }
@@ -729,6 +783,7 @@
     const format = String(media.format || "").toUpperCase();
     const mediaType =
       format === "MOVIE" || format === "ONE_SHOT" ? "movie" : "anime";
+    const isAnimeSeries = mediaType === "anime";
 
     return buildDetailPayload({
       source: "anilist",
@@ -744,10 +799,85 @@
       genres: media.genres || [],
       mediaType,
       omdbType: mediaType,
+      contentType: mediaType === "movie" ? "movies" : "anime",
       ageRating: media.isAdult ? "18+" : "",
       runtime: media.duration ? formatRuntimeMinutes(media.duration) : "",
       episodeCount: parsePositiveInt(media.episodes),
+      seasonCount: isAnimeSeries ? 1 : null,
     });
+  }
+
+  /**
+   * For anime, use AniList metadata (poster, seasons via sequels, episode total).
+   * Replaces TMDB/IMDb picks when searching or confirming as anime.
+   */
+  async function ensureAnimeDetails(details, options = {}) {
+    if (!details?.title) return details;
+    const force =
+      options.forceAnime === true ||
+      options.preferAnime === true ||
+      details.contentType === "anime" ||
+      details.mediaType === "anime";
+
+    if (!force && !options.pick?.anilistId && !details.anilistId) {
+      return details;
+    }
+
+    let anilistId =
+      options.pick?.anilistId || details.anilistId || null;
+
+    if (!anilistId) {
+      const match = await fetchAnilistMatchByTitle(details.title, details.year);
+      anilistId = match?.anilistId || null;
+    }
+
+    if (!anilistId) {
+      return {
+        ...details,
+        contentType: "anime",
+        seasonCount: details.seasonCount || 1,
+      };
+    }
+
+    const anilist = await fetchAnilistById(anilistId);
+    if (!anilist) return details;
+
+    let imdbId = details.imdbId || null;
+    if (!imdbId && window.WatchlistSeriesMetadata?.resolveLinkedImdbId) {
+      imdbId = await window.WatchlistSeriesMetadata.resolveLinkedImdbId({
+        anilistId: Number(anilistId),
+      });
+    }
+
+    const isMovie =
+      anilist.mediaType === "movie" ||
+      String(anilist.omdbType || "").toLowerCase() === "movie";
+
+    let seasonCount = isMovie ? null : 1;
+    let episodeCount = anilist.episodeCount || details.episodeCount || null;
+    if (!isMovie && window.WatchlistSeriesMetadata?.fetchTitleSeriesCounts) {
+      const locale = window.WatchlistI18n?.getLang?.() || "en";
+      const counts = await window.WatchlistSeriesMetadata.fetchTitleSeriesCounts(
+        {
+          contentType: "anime",
+          link: `https://anilist.co/anime/${anilistId}/`,
+          poster: anilist.poster || details.poster || "",
+        },
+        locale
+      );
+      if (counts?.seasonCount > 0) seasonCount = counts.seasonCount;
+      if (counts?.episodeCount > 0) episodeCount = counts.episodeCount;
+    }
+
+    return {
+      ...anilist,
+      imdbId,
+      contentType: isMovie ? "movies" : "anime",
+      seasonCount,
+      episodeCount,
+      title: details.title || anilist.title,
+      plot: anilist.plot || details.plot,
+    };
   }
 
   async function fetchAnilistById(anilistId) {
@@ -982,6 +1112,8 @@
           localPayload.runtime ||
           enPayload.runtime
       ),
+      genres:
+        enPayload?.genres?.length > 0 ? enPayload.genres : localPayload.genres,
     };
   }
 
@@ -1190,17 +1322,34 @@
     if (!pick) return null;
 
     const titleLocale = detectQueryTitleLocale(options.searchQuery || "");
+    const preferAnime = options.preferAnime === true;
 
-    if (pick.anilistId) {
-      return fetchAnilistById(pick.anilistId);
+    if (pick.anilistId || preferAnime) {
+      if (pick.anilistId) {
+        return fetchAnilistById(pick.anilistId);
+      }
+      if (preferAnime && pick.title) {
+        const match = await fetchAnilistMatchByTitle(pick.title, pick.year);
+        if (match?.anilistId) {
+          return fetchAnilistById(match.anilistId);
+        }
+      }
     }
 
     if (pick.tmdbType && pick.tmdbId) {
-      return fetchTmdbDetails(pick.tmdbType, pick.tmdbId, titleLocale);
+      const tmdb = await fetchTmdbDetails(pick.tmdbType, pick.tmdbId, titleLocale);
+      if (preferAnime && tmdb) {
+        return ensureAnimeDetails(tmdb, { pick, preferAnime: true, forceAnime: true });
+      }
+      return tmdb;
     }
 
     if (pick.imdbId) {
-      return getMetadata(pick.imdbId);
+      const meta = await getMetadata(pick.imdbId);
+      if (preferAnime && meta) {
+        return ensureAnimeDetails(meta, { pick, preferAnime: true, forceAnime: true });
+      }
+      return meta;
     }
 
     return null;
@@ -1349,6 +1498,7 @@
     fetchAnilistScoreByTitle,
     searchTitles,
     suggestGenres,
+    defaultGenreForContentType,
     inferContentType,
     resolveMetadataFromLink,
     defaultLinkForDetails,
@@ -1356,6 +1506,7 @@
     formatAgeRatingDisplay,
     ageRatingSortRank,
     buildTitleMetaBadges,
+    ensureAnimeDetails,
     applyTitleMetaFromDetails,
     isAnilistLink,
     isMalLink,

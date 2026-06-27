@@ -526,7 +526,43 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     if (result.syncStatus == SyncDisplayStatus.error) {
       return 'watchlist.syncFailed';
     }
+    if (result.syncStatus == SyncDisplayStatus.pending) {
+      unawaited(_schedulePostCloudSync(session));
+    }
     return null;
+  }
+
+  /// After debounced cloud push, flush + reconcile so sync chip clears (web onComplete).
+  Future<void> _schedulePostCloudSync(Session session) async {
+    await Future<void>.delayed(const Duration(milliseconds: 950));
+    if (ref.read(sessionProvider)?.listId != session.listId) return;
+
+    final repo = ref.read(watchlistRepositoryProvider);
+    await repo.flushCloudPush(session.listId);
+    if (ref.read(sessionProvider)?.listId != session.listId) return;
+
+    final listName = ref.read(authRepositoryProvider).listLabel(
+              session.listId,
+              session.accountId,
+            ) ??
+        'My list';
+
+    await repo.reconcileWithCloud(
+      session.listId,
+      accountId: session.accountId,
+      listName: listName,
+    );
+
+    if (ref.read(sessionProvider)?.listId != session.listId) return;
+
+    final cloud = ref.read(appConfigProvider).isSupabaseConfigured;
+    final fresh = ref.read(watchlistRepositoryProvider).readSnapshot(
+          session.listId,
+          cloudConfigured: cloud,
+        );
+    state = AsyncData(
+      fresh.copyWith(syncStatus: SyncDisplayStatus.saved),
+    );
   }
 
   Future<void> reload() async {

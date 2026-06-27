@@ -1,3 +1,5 @@
+import 'dart:ui' show PlatformDispatcher;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,6 +9,7 @@ import '../../../core/services/session_service.dart';
 import '../../../models/metadata_detail.dart';
 import '../../../models/watchlist_item.dart';
 import '../../../repositories/metadata/metadata_service.dart';
+import '../../../repositories/metadata/series_metadata_service.dart';
 import 'title_meta_backfill.dart';
 import 'watchlist_controller.dart';
 import 'year_backfill.dart';
@@ -73,9 +76,15 @@ class TitleMetaBackfillController extends Notifier<TitleMetaBackfillProgress> {
     if (queue.isEmpty) return;
 
     final config = ref.read(appConfigProvider);
-    if (!config.hasOmdbKey && !config.hasTmdbKey) {
+    if (!config.hasOmdbKey &&
+        !config.hasTmdbKey &&
+        !config.isSupabaseConfigured) {
       final needsMovieApi = queue.any((item) => getImdbIdFromItem(item) != null);
-      if (needsMovieApi) return;
+      final needsSeriesApi = queue.any(
+        (item) =>
+            item.contentType == 'tvSeries' || item.contentType == 'anime',
+      );
+      if (needsMovieApi || needsSeriesApi) return;
     }
 
     _runScheduled = true;
@@ -99,6 +108,9 @@ class TitleMetaBackfillController extends Notifier<TitleMetaBackfillProgress> {
     state = TitleMetaBackfillProgress(running: true, total: queue.length);
 
     final metadata = ref.read(metadataServiceProvider);
+    final seriesMetadata = ref.read(seriesMetadataServiceProvider);
+    final locale =
+        PlatformDispatcher.instance.locale.languageCode == 'ar' ? 'ar' : 'en';
     final controller = ref.read(watchlistControllerProvider.notifier);
     var items = [...allItems];
     var done = 0;
@@ -124,7 +136,22 @@ class TitleMetaBackfillController extends Notifier<TitleMetaBackfillProgress> {
         if (meta != null) {
           final index = items.indexWhere((entry) => entry.id == item.id);
           if (index != -1) {
-            final merged = mergeTitleMetaFromDetail(items[index], meta);
+            var merged = mergeTitleMetaFromDetail(items[index], meta);
+            if (item.contentType == 'tvSeries' ||
+                item.contentType == 'anime') {
+              final counts = await seriesMetadata.fetchTitleSeriesCounts(
+                items[index],
+                locale: locale,
+              );
+              if (counts != null) {
+                merged = mergeTitleMetaFromDetail(
+                  items[index],
+                  meta,
+                  seasonCount: counts.seasonCount,
+                  episodeCount: counts.episodeCount,
+                );
+              }
+            }
             if (itemHasTitleMeta(merged)) {
               items[index] = merged;
               updated += 1;
@@ -135,6 +162,43 @@ class TitleMetaBackfillController extends Notifier<TitleMetaBackfillProgress> {
                   watched: watched,
                 );
               }
+            }
+          }
+        } else if (item.contentType == 'tvSeries' ||
+            item.contentType == 'anime') {
+          final counts = await seriesMetadata.fetchTitleSeriesCounts(
+            item,
+            locale: locale,
+          );
+          if (counts != null) {
+            final index = items.indexWhere((entry) => entry.id == item.id);
+            if (index != -1) {
+              final current = items[index];
+              items[index] = WatchlistItem(
+                id: current.id,
+                contentType: current.contentType,
+                genre: current.genre,
+                title: current.title,
+                lead: current.lead,
+                summary: current.summary,
+                kind: current.kind,
+                link: current.link,
+                poster: current.poster,
+                cardPoster: current.cardPoster,
+                selectedSeason: current.selectedSeason,
+                selectedSeasonName: current.selectedSeasonName,
+                noSpecials: current.noSpecials,
+                imdbRating: current.imdbRating,
+                anilistRating: current.anilistRating,
+                ageRating: current.ageRating,
+                runtime: current.runtime,
+                seasonCount: counts.seasonCount ?? current.seasonCount,
+                episodeCount: counts.episodeCount ?? current.episodeCount,
+                year: current.year,
+                addedAt: current.addedAt,
+                secondaryGenres: current.secondaryGenres,
+              );
+              updated += 1;
             }
           }
         }

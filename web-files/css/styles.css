@@ -2957,12 +2957,19 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   html.item-modal-scroll-lock body {
     overflow: hidden;
     overscroll-behavior: none;
+    touch-action: none;
   }
 
   #itemModal {
+    position: fixed;
+    inset: 0;
     align-items: flex-end;
     justify-content: stretch;
     padding: 0;
+  }
+
+  #itemModal .modal__backdrop {
+    touch-action: none;
   }
 
   #itemModal .modal__panel {

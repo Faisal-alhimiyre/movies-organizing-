@@ -22,6 +22,28 @@ const _genreAliases = {
   'horror': 'Horror',
   'mecha': 'Science Fiction',
   'music': 'Family',
+  // TMDB Arabic (ar-SA) genre labels
+  'دراما': 'Drama',
+  'جريمة': 'Crime',
+  'عائلي': 'Family',
+  'كوميديا': 'Comedy',
+  'رعب': 'Horror',
+  'غموض': 'Mystery',
+  'رومانسي': 'Romance',
+  'رومانسية': 'Romance',
+  'أكشن': 'Action',
+  'اكشن': 'Action',
+  'مغامرة': 'Adventure',
+  'وثائقي': 'Documentary',
+  'فانتازيا': 'Fantasy',
+  'خيال': 'Fantasy',
+  'خيال علمي': 'Science Fiction',
+  'إثارة': 'Thriller',
+  'اثارة': 'Thriller',
+  'حرب': 'War',
+  'رياضة': 'Sports',
+  'تاريخي': 'Historical',
+  'غربي': 'Western',
 };
 
 const _anilistGenreMap = {
@@ -39,7 +61,7 @@ String? mapGenreToStandard(String rawGenre) {
   if (trimmed.isEmpty) return null;
 
   final lower = trimmed.toLowerCase();
-  final alias = _genreAliases[lower];
+  final alias = _genreAliases[lower] ?? _genreAliases[trimmed];
   if (alias != null && standardGenres.contains(alias)) return alias;
 
   for (final genre in standardGenres) {
@@ -97,6 +119,12 @@ List<String> suggestGenres(
   if (withoutAnimation.isNotEmpty) return withoutAnimation;
   if (mapped.isNotEmpty) return mapped;
   return [animeGenreFallback];
+}
+
+/// When genre mapping fails, avoid Action (standardGenres[0]) for live-action TV.
+String defaultGenreForContentType(String contentType) {
+  if (contentType == 'anime') return animeGenreFallback;
+  return 'Drama';
 }
 
 bool _isAnimatedContent(List<String> genres) {

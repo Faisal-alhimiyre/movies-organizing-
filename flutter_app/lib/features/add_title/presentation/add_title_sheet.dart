@@ -187,8 +187,9 @@ class _AddTitleSheetState extends ConsumerState<AddTitleSheet>
 
     final contentType = details.contentType;
     final suggested = suggestGenres(details.genres, contentType);
-    final genre =
-        suggested.isNotEmpty ? suggested.first : standardGenres.first;
+    final genre = suggested.isNotEmpty
+        ? suggested.first
+        : defaultGenreForContentType(contentType);
     final secondary = normalizeSecondaryGenres(
       genre,
       suggested.where((g) => g != genre).toList(),
@@ -263,8 +264,9 @@ class _AddTitleSheetState extends ConsumerState<AddTitleSheet>
     }
 
     final suggested = suggestGenres(details.genres, details.contentType);
-    final primary =
-        suggested.isNotEmpty ? suggested.first : standardGenres.first;
+    final primary = suggested.isNotEmpty
+        ? suggested.first
+        : defaultGenreForContentType(details.contentType);
     setState(() {
       _loadingDetails = false;
       _confirmDetails = details;

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -9,7 +11,9 @@ import '../../../../core/widgets/content_badges.dart';
 import '../../../../l10n/l10n.dart';
 import '../../../../models/metadata_detail.dart';
 import '../../../../models/watchlist_item.dart';
+import '../../../../core/utils/item_links.dart';
 import '../../../../repositories/metadata/metadata_service.dart';
+import '../../../../repositories/metadata/series_metadata_service.dart';
 import '../../application/title_meta_backfill.dart';
 import '../../../../repositories/watchlist_repository.dart';
 import '../../application/watchlist_controller.dart';
@@ -128,18 +132,65 @@ class _ItemDetailSheetState extends ConsumerState<ItemDetailSheet> {
     super.initState();
     _item = widget.item;
     _loadTitleMetaIfNeeded();
+    unawaited(_normalizeAnimeLinks(widget.item));
+  }
+
+  Future<void> _normalizeAnimeLinks(WatchlistItem item) async {
+    if (item.contentType != 'anime') return;
+
+    final svc = ref.read(seriesMetadataServiceProvider);
+    final resolution = await svc.resolveSeriesId(item);
+    final anilistId = resolution.anilistId;
+    if (anilistId == null || !mounted) return;
+
+    final anilistLink = 'https://anilist.co/anime/$anilistId/';
+    final imdbId = resolution.imdbId ?? getImdbIdFromItem(item);
+    final nextImdbLink =
+        imdbId != null ? imdbUrlFromId(imdbId) : item.imdbLink;
+
+    if (item.link == anilistLink && item.imdbLink == nextImdbLink) return;
+
+    final merged = WatchlistItem(
+      id: item.id,
+      contentType: item.contentType,
+      genre: item.genre,
+      title: item.title,
+      lead: item.lead,
+      summary: item.summary,
+      kind: item.kind,
+      link: anilistLink,
+      imdbLink: nextImdbLink,
+      poster: item.poster,
+      cardPoster: item.cardPoster,
+      selectedSeason: item.selectedSeason,
+      selectedSeasonName: item.selectedSeasonName,
+      noSpecials: item.noSpecials,
+      imdbRating: item.imdbRating,
+      anilistRating: item.anilistRating,
+      ageRating: item.ageRating,
+      runtime: item.runtime,
+      seasonCount: item.seasonCount,
+      episodeCount: item.episodeCount,
+      year: item.year,
+      addedAt: item.addedAt,
+      secondaryGenres: item.secondaryGenres,
+    );
+
+    setState(() => _item = merged);
+    await ref.read(watchlistControllerProvider.notifier).upsertItem(merged);
   }
 
   Future<void> _loadTitleMetaIfNeeded() async {
     final needsMeta = !itemHasTitleMeta(widget.item);
     final needsEpisodeRuntime = itemNeedsEpisodeRuntime(widget.item);
-    if (!needsMeta && !needsEpisodeRuntime) return;
+    final needsRatings = _needsExternalRatingsBackfill(widget.item);
+    if (!needsMeta && !needsEpisodeRuntime && !needsRatings) return;
     final link = widget.item.link?.trim();
     if (link == null || link.isEmpty) return;
 
     final metadata = ref.read(metadataServiceProvider);
     MetadataDetail? meta;
-    final imdbId = MetadataService.extractImdbId(link);
+    final imdbId = getImdbIdFromItem(widget.item);
     if (imdbId != null) {
       meta = await metadata.getMetadata(imdbId, forceRefresh: true);
     } else if (MetadataService.isSupportedLink(link)) {
@@ -148,7 +199,11 @@ class _ItemDetailSheetState extends ConsumerState<ItemDetailSheet> {
     if (!mounted || meta == null) return;
 
     final merged = mergeTitleMetaFromDetail(widget.item, meta);
-    if (!itemHasTitleMeta(merged) && !itemNeedsEpisodeRuntime(merged)) return;
+    final changed = merged != widget.item &&
+        (itemHasTitleMeta(merged) ||
+            itemNeedsEpisodeRuntime(merged) ||
+            _needsExternalRatingsBackfill(merged));
+    if (!changed) return;
 
     setState(() => _item = merged);
 
@@ -499,7 +554,10 @@ class _DetailContent extends StatelessWidget {
                     spacing: 5,
                     runSpacing: 5,
                     children: [
-                      ContentTypeBadge(contentType: item.contentType),
+                      ContentTypeBadge(
+                        contentType: item.contentType,
+                        kind: item.kind,
+                      ),
                       if (item.year != null)
                         ContentYearBadge(label: item.year.toString()),
                       ContentTitleMetaBadges.fromItem(item),
@@ -941,8 +999,8 @@ class _ExternalRatingsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final imdb = _formatImdb(item.imdbRating);
     final anilist = _formatAnilist(item.anilistRating);
-    final imdbUrl = _imdbUrl(item.link);
-    final anilistUrl = _anilistUrl(item.link);
+    final imdbUrl = imdbUrlForItem(item);
+    final anilistUrl = anilistUrlForItem(item);
 
     return Wrap(
       spacing: 8,
@@ -973,6 +1031,15 @@ class _ExternalRatingsRow extends StatelessWidget {
       ],
     );
   }
+}
+
+bool _needsExternalRatingsBackfill(WatchlistItem item) {
+  if (item.contentType == 'anime') {
+    final anilist = item.anilistRating?.trim();
+    return anilist == null || anilist.isEmpty;
+  }
+  final imdb = item.imdbRating?.trim();
+  return imdb == null || imdb.isEmpty;
 }
 
 bool _hasExternalRatings(WatchlistItem item) {
@@ -1011,22 +1078,4 @@ Future<void> _openUrl(String url) async {
   final uri = Uri.tryParse(url);
   if (uri == null) return;
   await launchUrl(uri, mode: LaunchMode.externalApplication);
-}
-
-/// Returns the IMDb URL from the item's link if it points to IMDb.
-String? _imdbUrl(String? link) {
-  final raw = link?.trim();
-  if (raw == null || raw.isEmpty) return null;
-  if (raw.contains('imdb.com')) return raw.contains('://') ? raw : 'https://$raw';
-  final imdbId = MetadataService.extractImdbId(raw);
-  if (imdbId != null) return 'https://www.imdb.com/title/$imdbId/';
-  return null;
-}
-
-/// Returns the AniList URL from the item's link if it points to AniList.
-String? _anilistUrl(String? link) {
-  final raw = link?.trim();
-  if (raw == null || raw.isEmpty) return null;
-  if (raw.contains('anilist.co')) return raw.contains('://') ? raw : 'https://$raw';
-  return null;
 }

@@ -183,12 +183,41 @@
 
   function persistRegularEpisodeTotal() {
     if (!_item?.id) return;
+    const regular = (_seriesResult?.seasons || []).filter(
+      (s) => s.seasonNumber > 0 && !s.isSpecials
+    );
+    const seasonCount = regular.length;
     const total = regularEpisodeTotalFromSeasons();
-    if (!total) return;
-    const previous = Number(_item.episodeCount);
-    if (Number.isFinite(previous) && previous === total) return;
-    _item.episodeCount = total;
-    window.WatchlistApp?.patchItem?.(_item.id, { episodeCount: total });
+    const patches = {};
+    const isAnime = _item?.contentType === "anime";
+    const anilistTotal = parseInt(
+      String(_seriesResult?.series?.totalEpisodes || "").trim(),
+      10
+    );
+    const multiSeasonAnime =
+      isAnime && regular.length > 1;
+
+    if (multiSeasonAnime) {
+      patches.seasonCount = regular.length;
+      if (total > 0) patches.episodeCount = total;
+    } else if (isAnime && Number.isFinite(anilistTotal) && anilistTotal > 0) {
+      patches.seasonCount = 1;
+      patches.episodeCount = anilistTotal;
+    } else {
+      if (seasonCount > 0) patches.seasonCount = seasonCount;
+      if (total > 0) patches.episodeCount = total;
+    }
+    if (!Object.keys(patches).length) return;
+
+    let changed = false;
+    for (const [key, value] of Object.entries(patches)) {
+      if (Number(_item[key]) === value) continue;
+      _item[key] = value;
+      changed = true;
+    }
+    if (changed) {
+      window.WatchlistApp?.patchItem?.(_item.id, patches);
+    }
   }
 
   /**
@@ -450,8 +479,19 @@
     if (Array.isArray(result.episodes) && result.episodes.length > 0) {
       const seasonEps = result.episodes.filter((ep) => ep.seasonNumber === seasonNum);
       const airedCount = seasonEps.filter((ep) => ep.isAired !== false).length;
-      if (airedCount > 0 && season.episodeCount !== airedCount) {
-        season.episodeCount = airedCount;
+      const metaFloor = parseInt(String(season.episodeCount || "").trim(), 10);
+      const seriesFloor =
+        _item?.contentType === "anime" && seasonNum === 1
+          ? parseInt(String(_seriesResult?.series?.totalEpisodes || "").trim(), 10)
+          : null;
+      const floor = Number.isFinite(metaFloor) && metaFloor > 0
+        ? metaFloor
+        : Number.isFinite(seriesFloor) && seriesFloor > 0
+          ? seriesFloor
+          : 0;
+      const nextCount = Math.max(airedCount, floor);
+      if (nextCount > 0 && season.episodeCount !== nextCount) {
+        season.episodeCount = nextCount;
         changed = true;
       }
     }
@@ -636,6 +676,28 @@
 
   // ─── Metadata loading ─────────────────────────────────────────────────────
 
+  /** Legacy anime rows may store IMDb as primary link — resolve AniList before seasons load. */
+  async function ensureAnimeItemLink() {
+    if (_item?.contentType !== "anime") return;
+    const WM = window.WatchlistMetadata;
+    const link = String(_item?.link || "").trim();
+    if (WM?.extractAnilistId?.(link) || WM?.extractMalId?.(link)) return;
+
+    const match = await WM?.fetchAnilistMatchByTitle?.(_item.title, _item.year);
+    if (!match?.anilistId) return;
+
+    const anilistLink = `https://anilist.co/anime/${match.anilistId}/`;
+    const patches = { link: anilistLink, anilistId: match.anilistId };
+    const imdbId = WM?.extractImdbId?.(link);
+    if (imdbId && !_item.imdbLink) {
+      patches.imdbLink = link.startsWith("http")
+        ? link
+        : `https://www.imdb.com/title/${imdbId}/`;
+    }
+    _item = { ..._item, ...patches };
+    if (_item.id) window.WatchlistApp?.patchItem?.(_item.id, patches);
+  }
+
   async function loadSeriesMetadata() {
     const tok = _token;
     const meta = window.WatchlistSeriesMetadata;
@@ -649,17 +711,21 @@
         "[title-seasons] API config —",
         "TMDb:", WM?.hasTmdbKey?.() ? "yes" : "no",
         "| OMDb:", WM?.hasOmdbKey?.() ? "yes" : "no",
-        "| AniList: yes (public)"
+        "| AniList: yes (public)",
+        "| TVDB:", (window.WATCHLIST_CONFIG?.supabaseUrl && window.WatchlistTvdb) ? "yes" : "no",
       );
     }
 
     // Resolve the series identity (IMDb → TMDb/OMDb, AniList, MAL → AniList)
+    await ensureAnimeItemLink();
     const resolution = await meta.resolveSeriesId(_item);
     if (!isValid(tok)) return;
 
     _resolution = resolution;
     const WM = window.WatchlistMetadata;
-    const linkImdb = WM?.extractImdbId?.(_item?.link);
+    const linkImdb =
+      WM?.extractImdbId?.(_item?.imdbLink) ||
+      WM?.extractImdbId?.(_item?.link);
     if (linkImdb && !_resolution.imdbId) {
       _resolution = { ..._resolution, imdbId: linkImdb };
     }
@@ -736,25 +802,45 @@
     );
     if (!isValid(tok) || _selectedSeason !== seasonNum) return;
 
-    _episodesResult = { ...result, seasonNum };
+    _episodesResult = {
+      ...result,
+      seasonNum,
+      episodes: (result.episodes || []).map((ep) => ({
+        ...ep,
+        seasonNumber: seasonNum,
+        progressKey: `${seasonNum}:${ep.episodeNumber}`,
+      })),
+    };
     const RS = meta.ResultState;
 
     patchSeasonFromEpisodeResult(seasonNum, result);
 
     switch (result?.state) {
       case RS.AVAILABLE:
-      case RS.OFFLINE_WITH_CACHE: {
+      case RS.OFFLINE_WITH_CACHE:
+      case RS.PARTIALLY_AVAILABLE:
+      case RS.EPISODE_DETAILS_UNAVAILABLE: {
         const eps = result.episodes || [];
-        // Season 0 with zero aired episodes → drop it from the carousel silently
-        if (seasonNum === 0) {
-          const airedCount = eps.filter((ep) => ep.isAired !== false).length;
-          if (airedCount === 0) { removeSpecialsFromCarousel(); break; }
+        if (eps.length > 0) {
+          if (seasonNum === 0) {
+            const airedCount = eps.filter((ep) => ep.isAired !== false).length;
+            if (airedCount === 0) { removeSpecialsFromCarousel(); break; }
+          }
+          renderEpisodeList(seasonNum, eps);
+          if (result.state === RS.OFFLINE_WITH_CACHE) showEpisodesStatus(t("seasons.offline"), null);
+          else if (result.state === RS.EPISODE_DETAILS_UNAVAILABLE) {
+            showEpisodesStatus(t("seasons.episodesUnavailable"), null);
+          }
+          refreshSeasonCard(seasonNum);
+          reannotateExistingEntry();
+          break;
         }
-        renderEpisodeList(seasonNum, eps);
-        if (result.state === RS.OFFLINE_WITH_CACHE) showEpisodesStatus(t("seasons.offline"), null);
-        // Refresh season card and re-annotate completion now that we have episode data
-        refreshSeasonCard(seasonNum);
-        reannotateExistingEntry();
+        if (seasonNum === 0) { removeSpecialsFromCarousel(); break; }
+        if (result.state === RS.EPISODE_DETAILS_UNAVAILABLE) {
+          showEpisodesStatus(t("seasons.episodesUnavailable"), null);
+          break;
+        }
+        showEpisodesStatus(t("seasons.episodesError"), "retry-episodes");
         break;
       }
 
@@ -971,6 +1057,7 @@
 
     updateCarouselSelection(seasonNum);
     scrollToSeasonCard(seasonNum, animate);
+    showEpisodesLoading();
     notifySeasonPresentation(seasonNum);
     loadEpisodes(seasonNum);
     updateNavButtons(_seriesResult?.seasons || []);
@@ -1151,15 +1238,46 @@
 
     if (statusEl) statusEl.hidden = true;
 
-    if (!episodes.length) {
+    const scopedEps = (episodes || []).map((ep) => ({
+      ...ep,
+      seasonNumber: seasonNum,
+      progressKey: `${seasonNum}:${ep.episodeNumber}`,
+    }));
+
+    if (!scopedEps.length) {
       listEl.innerHTML = `<div class="tds-episodes-status">${esc(t("seasons.emptySeason"))}</div>`;
       return;
     }
 
     const entry = getEntry();
-    listEl.innerHTML = episodes.map((ep) => episodeRowHtml(ep, entry)).join("");
-    updateEpisodesTitle();
-    updateSeasonActions(seasonNum);
+    const BATCH = 40;
+
+    if (scopedEps.length <= BATCH) {
+      listEl.innerHTML = scopedEps.map((ep) => episodeRowHtml(ep, entry)).join("");
+      updateEpisodesTitle();
+      updateSeasonActions(seasonNum);
+      return;
+    }
+
+    listEl.innerHTML = "";
+    let index = 0;
+
+    const appendBatch = () => {
+      const slice = scopedEps.slice(index, index + BATCH);
+      listEl.insertAdjacentHTML(
+        "beforeend",
+        slice.map((ep) => episodeRowHtml(ep, entry)).join("")
+      );
+      index += BATCH;
+      if (index < scopedEps.length) {
+        requestAnimationFrame(appendBatch);
+      } else {
+        updateEpisodesTitle();
+        updateSeasonActions(seasonNum);
+      }
+    };
+
+    requestAnimationFrame(appendBatch);
   }
 
   function formatRatingValue(value) {
@@ -1210,20 +1328,61 @@
     return vals.reduce((sum, n) => sum + n, 0) / vals.length;
   }
 
+  function isLatinDominant(text) {
+    const letters = String(text || "").match(/\p{L}/gu);
+    if (!letters?.length) return false;
+    const latin = letters.filter((c) => /[A-Za-z]/.test(c)).length;
+    return latin / letters.length >= 0.55;
+  }
+
+  function episodeOverviewForDisplay(overview) {
+    const text = String(overview || "").trim();
+    if (!text) return "";
+    const lang = getLocale();
+    if (lang === "ar") return text;
+    if (isLatinDominant(text)) return text;
+    // Show Japanese/other summaries when no English alternative exists.
+    return text;
+  }
+
   function isGenericEpisodeTitle(title, epNum) {
     const text = String(title || "").trim();
     if (!text) return true;
-    if (/^episode \d+$/i.test(text)) return true;
-    if (new RegExp(`^الحلقة\\s*${epNum}$`, "u").test(text)) return true;
+    if (/^episode\s*0*\d+$/i.test(text)) return true;
+    if (/^ep\.?\s*0*\d+$/i.test(text)) return true;
+    const num = Number(epNum);
+    if (Number.isFinite(num) && new RegExp(`^الحلقة\\s*${num}$`, "u").test(text)) {
+      return true;
+    }
     return false;
+  }
+
+  function cleanEpisodeDisplayTitle(title, epNum) {
+    let text = String(title || "").trim();
+    if (!text) return "";
+    const num = Number(epNum);
+    if (!Number.isFinite(num)) return text;
+    const patterns = [
+      new RegExp(`^episode\\s*0*${num}\\s*[-:–—|]\\s*`, "i"),
+      new RegExp(`^episode\\s*0*${num}\\s+`, "i"),
+      new RegExp(`^ep\\.?\\s*0*${num}\\s*[-:–—|]?\\s*`, "i"),
+    ];
+    for (const pattern of patterns) {
+      text = text.replace(pattern, "").trim();
+    }
+    const wrongNum = text.match(/^episode\s*0*(\d+)\s*[-:–—|]\s*/i);
+    if (wrongNum && Number(wrongNum[1]) !== num) {
+      text = text.replace(/^episode\s*0*\d+\s*[-:–—|]\s*/i, "").trim();
+    }
+    if (isGenericEpisodeTitle(text, epNum)) return "";
+    return text;
   }
 
   function episodeRowHtml(ep, entry) {
     const seasonNum = ep.seasonNumber;
     const epNum     = ep.episodeNumber;
     const watched   = P()?.isEpisodeWatched(entry, seasonNum, epNum) ?? false;
-    const isPlaceholder = isGenericEpisodeTitle(ep.title, epNum);
-    const displayTitle = isPlaceholder ? "" : ep.title;
+    const displayTitle = cleanEpisodeDisplayTitle(ep.title, epNum);
 
     const metaParts = [];
     if (ep.runtimeMinutes) metaParts.push(t("seasons.epRuntime", { n: ep.runtimeMinutes }));
@@ -1241,6 +1400,7 @@
     const still = (_spoilerPosters && seasonPoster)
       ? seasonPoster
       : (ep.still || "");
+    const overviewText = episodeOverviewForDisplay(ep.overview);
 
     return `<div class="tds-episode${watched ? " tds-episode--watched" : ""}"
       role="listitem"
@@ -1262,7 +1422,7 @@
             ? `<span class="tds-ep-source-rating" title="${esc(t("seasons.episodeRatingSource", { rating: formatRatingValue(sourceRating) }))}">${esc(formatRatingValue(sourceRating))}<span class="tds-ep-source-rating__max">/10</span></span>`
             : ""}
         </div>
-        ${ep.overview ? `<p class="tds-ep-overview">${esc(ep.overview)}</p>` : ""}
+        ${overviewText ? `<p class="tds-ep-overview">${esc(overviewText)}</p>` : ""}
         ${metaParts.length ? `<p class="tds-ep-meta">${esc(metaParts.join(" · "))}</p>` : ""}
         <div class="tds-ep-ratings"${yourRating != null ? "" : " hidden"}>
           ${yourRating != null ? `<span class="tds-rating-chip tds-rating-chip--user">${esc(t("seasons.episodeRatingYours", { rating: formatRatingValue(yourRating) }))}</span>` : ""}
@@ -1355,9 +1515,8 @@
         : `<div class="tds-episode-modal__still-placeholder" aria-hidden="true"></div>`;
     }
     if (titleEl) {
-      const displayTitle = isGenericEpisodeTitle(ep.title, ep.episodeNumber)
-        ? t("seasons.episodeNum", { n: ep.episodeNumber })
-        : (ep.title || t("seasons.episodeNum", { n: ep.episodeNumber }));
+      const displayTitle = cleanEpisodeDisplayTitle(ep.title, ep.episodeNumber)
+        || t("seasons.episodeNum", { n: ep.episodeNumber });
       titleEl.textContent = `${t("seasons.episodeNum", { n: ep.episodeNumber })} · ${displayTitle}`;
     }
     if (metaEl) {
@@ -1367,8 +1526,9 @@
       metaEl.textContent = meta.join(" · ");
     }
     if (overviewEl) {
-      if (ep.overview) {
-        overviewEl.textContent = ep.overview;
+      const overviewText = episodeOverviewForDisplay(ep.overview);
+      if (overviewText) {
+        overviewEl.textContent = overviewText;
         overviewEl.hidden = false;
       } else {
         overviewEl.hidden = true;

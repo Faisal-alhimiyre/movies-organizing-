@@ -164,6 +164,106 @@
     }
   }
 
+  /**
+   * Union season numbers from episodeTotals + seasons list.
+   * episodeTotals alone can under-report when only the first API page was counted.
+   */
+  async function collectOfficialSeasonNumbers(tvdbId, locale = "en") {
+    const nums = new Set();
+
+    try {
+      const totals = await fetchEpisodeTotals(tvdbId, locale);
+      if (totals?.seasonCounts) {
+        for (const k of Object.keys(totals.seasonCounts)) {
+          const n = parseInt(k, 10);
+          if (Number.isFinite(n) && n > 0) nums.add(n);
+        }
+      }
+    } catch (_) {}
+
+    try {
+      const seasons = await fetchSeasons(tvdbId, locale);
+      for (const s of seasons || []) {
+        if (!s.isSpecials && Number(s.seasonNumber) > 0) {
+          nums.add(Number(s.seasonNumber));
+        }
+      }
+    } catch (_) {}
+
+    return [...nums].sort((a, b) => a - b);
+  }
+
+  function dedupeSortTvdbEpisodes(raw, order = "official") {
+    const seen = new Set();
+    return (raw || [])
+      .filter((ep) => {
+        const key = ep.progressKey || `${ep.seasonNumber}:${ep.episodeNumber}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => {
+        if (order === "absolute") {
+          return a.episodeNumber - b.episodeNumber;
+        }
+        if (a.seasonNumber !== b.seasonNumber) {
+          return a.seasonNumber - b.seasonNumber;
+        }
+        return a.episodeNumber - b.episodeNumber;
+      });
+  }
+
+  /**
+   * All episodes in one list. Anime long-runners use absolute order (1..N block).
+   */
+  async function fetchAllEpisodes(tvdbId, locale = "en", options = {}) {
+    if (!tvdbId) return null;
+
+    const order = options.order || "absolute";
+    const minWanted = Number(options.expectedMin) || 0;
+
+    const normalize = (raw) =>
+      (raw || []).map((e) => ({
+        ...e,
+        still: typeof e.still === "string" ? e.still : "",
+      }));
+
+    const isEnough = (count) =>
+      count > 0 && (!minWanted || count >= Math.ceil(minWanted * 0.85));
+
+    let flat = null;
+
+    try {
+      const result = await callFunction({ action: "allEpisodes", tvdbId, locale, order });
+      if (result?.episodes?.length) {
+        flat = dedupeSortTvdbEpisodes(normalize(result.episodes), order);
+        if (isEnough(flat.length)) return flat;
+      }
+    } catch (err) {
+      const msg = String(err?.message || err);
+      if (!msg.includes("unsupported_action")) {
+        console.warn("[tvdb-service] fetchAllEpisodes failed:", msg);
+      }
+    }
+
+    try {
+      const result = await callFunction({
+        action: "episodes",
+        tvdbId,
+        locale,
+        all: true,
+        order,
+      });
+      if (result?.episodes?.length) {
+        const next = dedupeSortTvdbEpisodes(normalize(result.episodes), order);
+        if (!flat || next.length > flat.length) flat = next;
+        if (isEnough(flat.length)) return flat;
+      }
+    } catch (_) {}
+
+    return flat?.length ? flat : null;
+  }
+
   // ── Expose ────────────────────────────────────────────────────────────
   window.WatchlistTvdb = {
     resolveId,
@@ -171,5 +271,7 @@
     fetchSeasons,
     fetchEpisodes,
     fetchEpisodeTotals,
+    fetchAllEpisodes,
+    collectOfficialSeasonNumbers,
   };
 })();

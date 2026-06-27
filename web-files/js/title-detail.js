@@ -75,15 +75,24 @@
     document.body.style.width = "100%";
   }
 
+  function restorePageScrollY(y) {
+    const root = document.documentElement;
+    const prev = root.style.scrollBehavior;
+    root.style.scrollBehavior = "auto";
+    window.scrollTo(0, y);
+    root.style.scrollBehavior = prev;
+  }
+
   function unlockBackgroundScroll() {
     document.documentElement.classList.remove("td-scroll-lock");
     document.body.classList.remove("td-scroll-lock");
+    const y = _savedScrollY;
     document.body.style.position = "";
     document.body.style.top = "";
     document.body.style.left = "";
     document.body.style.right = "";
     document.body.style.width = "";
-    window.scrollTo(0, _savedScrollY);
+    restorePageScrollY(y);
   }
 
   function scrollAtTop() {
@@ -499,16 +508,39 @@
 
   // ─── Genre badges ──────────────────────────────────────────────────────────
   function genresMarkup(item) {
-    const primary = item.genre
-      ? `<span class="badge badge--genre-primary">${esc(genreLabel(item.genre))}</span>` : "";
-    const secondary = (item.secondaryGenres || [])
-      .map((g) => `<span class="badge badge--genre-secondary">${esc(genreLabel(g))}</span>`)
-      .join("");
-    const all = [primary, secondary].filter(Boolean).join("");
-    if (!all) return "";
+    const seen = new Set();
+    const parts = [];
+    const normalizeGenre = window.WatchlistApp?.normalizeGenre;
+
+    function canonicalGenre(genre) {
+      const label = String(genre || "").trim();
+      if (!label) return "";
+      if (typeof normalizeGenre === "function") {
+        const mapped = normalizeGenre(label);
+        if (mapped && mapped !== "Drama") return mapped;
+        if (window.STANDARD_GENRES?.includes?.(label)) return label;
+      }
+      return label;
+    }
+
+    function addGenre(genre, primary = false) {
+      const canonical = canonicalGenre(genre);
+      if (!canonical) return;
+      const key = canonical.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      const cls = primary ? "badge--genre-primary" : "badge--genre-secondary";
+      parts.push(`<span class="badge ${cls}">${esc(genreLabel(canonical))}</span>`);
+    }
+
+    addGenre(item.genre, true);
+    (item.secondaryGenres || []).forEach((g) => addGenre(g));
+    (item.sourceGenres || []).forEach((g) => addGenre(g));
+
+    if (!parts.length) return "";
     return `<div class="td-genres">
       <span class="td-section-label">${esc(t("detail.genres"))}</span>
-      <div class="td-badge-row td-badge-row--genres">${all}</div>
+      <div class="td-badge-row td-badge-row--genres">${parts.join("")}</div>
     </div>`;
   }
 
@@ -524,10 +556,11 @@
 
     const imdbRaw = item.imdbRating;
     const anilistRaw = item.anilistRating;
+    const imdbId =
+      window.WatchlistMetadata?.extractImdbId?.(item.imdbLink || item.link) || null;
 
     // IMDb badge
     if (imdbRaw) {
-      const imdbId = window.WatchlistMetadata?.extractImdbId?.(item.link) || null;
       const display = formatScoreDisplay(imdbRaw);
       if (display) {
         if (imdbId) {
@@ -554,6 +587,18 @@
           );
         }
       }
+    } else if (imdbId && item.imdbLink) {
+      const url = `https://www.imdb.com/title/${imdbId}/`;
+      parts.push(
+        `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer"
+           class="card__score card__score--imdb td-score-link"
+           aria-label="${esc(t("detail.openIMDb"))}"
+           title="IMDb">
+          <img class="card__score-logo card__score-logo--imdb"
+               src="assets/brand/imdb.svg"
+               width="46" height="20" alt="IMDb" />
+        </a>`
+      );
     }
 
     // AniList badge
@@ -893,6 +938,9 @@
 
     watchForAppChanges();
     attachSeasons(item);
+    if (item.contentType === "anime" || item.contentType === "tvSeries") {
+      window.WatchlistApp?.queueItemBadgeEnrichment?.(itemId);
+    }
   }
 
   function open(card) {
@@ -932,6 +980,24 @@
     _panelDrag = null;
     resetPanelDragStyles();
 
+    const returnFocus = _openerEl;
+    _openerEl = null;
+    _activeItemId = null;
+    _ignoreMutations = false;
+
+    // Move focus out before aria-hidden — close button often still has focus here.
+    const active = document.activeElement;
+    if (active && _overlay.contains(active)) {
+      active.blur();
+    }
+    if (returnFocus && document.contains(returnFocus)) {
+      try {
+        returnFocus.focus({ preventScroll: true });
+      } catch {
+        /* opener may not accept focus */
+      }
+    }
+
     _overlay.classList.remove("td-is-open");
     _overlay.setAttribute("aria-hidden", "true");
     _overlay.setAttribute("inert", "");
@@ -941,16 +1007,16 @@
     disconnectObservers();
     _topbarTitle?.classList.remove("td-topbar__title--visible");
 
-    const returnFocus = _openerEl;
-    _openerEl = null;
-    _activeItemId = null;
-    _ignoreMutations = false;
-
     _restoring = true;
     const onTransitionEnd = () => {
       _restoring = false;
       _panel?.removeEventListener("transitionend", onTransitionEnd);
-      if (returnFocus && document.contains(returnFocus)) {
+      if (
+        returnFocus &&
+        document.contains(returnFocus) &&
+        (!_overlay.contains(document.activeElement) ||
+          document.activeElement === document.body)
+      ) {
         returnFocus.focus?.({ preventScroll: true });
       }
     };

@@ -12,7 +12,9 @@ import '../../../../l10n/l10n.dart';
 import '../../../../models/metadata_detail.dart';
 import '../../../../models/watchlist_item.dart';
 import '../../../../repositories/metadata/genre_mapper.dart';
+import '../../../../core/utils/item_links.dart';
 import '../../../../repositories/metadata/metadata_service.dart';
+import '../../../../repositories/metadata/series_metadata_service.dart';
 import '../../../add_title/application/build_item_from_metadata.dart';
 import 'star_rating_picker.dart';
 
@@ -86,6 +88,7 @@ class _TitleFormSheetState extends ConsumerState<TitleFormSheet> {
   late final TextEditingController _leadController;
   late final TextEditingController _summaryController;
   late final TextEditingController _linkController;
+  late final TextEditingController _imdbLinkController;
   late final TextEditingController _noteController;
   bool _markWatched = false;
   bool _ratingChosen = false;
@@ -110,7 +113,8 @@ class _TitleFormSheetState extends ConsumerState<TitleFormSheet> {
     _titleController = TextEditingController(text: item?.title ?? '');
     _leadController = TextEditingController(text: item?.lead ?? '');
     _summaryController = TextEditingController(text: item?.summary ?? '');
-    _linkController = TextEditingController(text: item?.link ?? '');
+    _linkController = TextEditingController(text: _anilistLinkForForm(item));
+    _imdbLinkController = TextEditingController(text: _imdbLinkForForm(item));
     _markWatched = widget.watched != null;
     _ratingChosen = hasWatchRating(widget.watched);
     _ratingValue = widget.watched?.rating != null
@@ -128,6 +132,7 @@ class _TitleFormSheetState extends ConsumerState<TitleFormSheet> {
     _leadController.dispose();
     _summaryController.dispose();
     _linkController.dispose();
+    _imdbLinkController.dispose();
     _noteController.dispose();
     super.dispose();
   }
@@ -208,6 +213,34 @@ class _TitleFormSheetState extends ConsumerState<TitleFormSheet> {
       _linkPreview = meta;
       _manualLinkMeta = _manualLinkMetaFromDetails(meta);
     });
+
+    if (_contentType == 'anime' && _imdbLinkController.text.trim().isEmpty) {
+      if (meta.imdbId != null && meta.imdbId!.isNotEmpty) {
+        _imdbLinkController.text = imdbUrlFromId(meta.imdbId!);
+      } else {
+        final anilistId = MetadataService.parseAnilistId(link);
+        if (anilistId != null) {
+          final imdbId = await ref
+              .read(seriesMetadataServiceProvider)
+              .resolveLinkedImdbByAnilist(anilistId);
+          if (imdbId != null && mounted && generation == _linkLookupGeneration) {
+            _imdbLinkController.text = imdbUrlFromId(imdbId);
+          }
+        }
+      }
+    }
+  }
+
+  String? _anilistLinkForForm(WatchlistItem? item) {
+    if (item == null) return null;
+    return anilistUrlForItem(item);
+  }
+
+  String? _imdbLinkForForm(WatchlistItem? item) {
+    if (item == null) return null;
+    final stored = item.imdbLink?.trim();
+    if (stored != null && stored.isNotEmpty) return stored;
+    return imdbUrlForItem(item);
   }
 
   void _applyMetadata(MetadataDetail meta) {
@@ -295,14 +328,35 @@ class _TitleFormSheetState extends ConsumerState<TitleFormSheet> {
         .toList();
     final summary = _summaryController.text.trim();
     final linkRaw = _linkController.text.trim();
-    final link = MetadataService.normalizeLink(linkRaw);
-
-    if (linkRaw.isNotEmpty && link == null) {
-      setState(() {
-        _saving = false;
-        _errorKey = 'manual.linkFail';
-      });
-      return;
+    final imdbLinkRaw = _imdbLinkController.text.trim();
+    String? link;
+    String? imdbLink;
+    if (_contentType == 'anime') {
+      link = MetadataService.normalizeLink(linkRaw);
+      imdbLink = MetadataService.normalizeLink(imdbLinkRaw);
+      if (linkRaw.isNotEmpty && link == null) {
+        setState(() {
+          _saving = false;
+          _errorKey = 'manual.linkFail';
+        });
+        return;
+      }
+      if (imdbLinkRaw.isNotEmpty && imdbLink == null) {
+        setState(() {
+          _saving = false;
+          _errorKey = 'manual.linkFail';
+        });
+        return;
+      }
+    } else {
+      link = MetadataService.normalizeLink(linkRaw);
+      if (linkRaw.isNotEmpty && link == null) {
+        setState(() {
+          _saving = false;
+          _errorKey = 'manual.linkFail';
+        });
+        return;
+      }
     }
 
     final existing = widget.item;
@@ -319,6 +373,7 @@ class _TitleFormSheetState extends ConsumerState<TitleFormSheet> {
       summary: summary,
       kind: normalizeKind(existing?.kind ?? '', _contentType),
       link: link,
+      imdbLink: imdbLink,
       poster:
           _resolvePoster(existing, manualMeta, normalizedExistingLink, link),
       imdbRating: manualMeta?.imdbRating ?? existing?.imdbRating,
@@ -444,14 +499,18 @@ class _TitleFormSheetState extends ConsumerState<TitleFormSheet> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
-                        l10n.manualLinkHint,
+                        _contentType == 'anime'
+                            ? l10n.manualAnimeLinkHint
+                            : l10n.manualLinkHint,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 12),
                       TextFormField(
                         controller: _linkController,
                         decoration: InputDecoration(
-                          labelText: l10n.fieldLink,
+                          labelText: _contentType == 'anime'
+                              ? l10n.fieldAnilistLink
+                              : l10n.fieldLink,
                           hintText: l10n.manualLinkPlaceholder,
                           suffixIcon: _linkLookingUp
                               ? const Padding(
@@ -469,6 +528,18 @@ class _TitleFormSheetState extends ConsumerState<TitleFormSheet> {
                         textInputAction: TextInputAction.next,
                         onEditingComplete: _handleLinkLookup,
                       ),
+                      if (_contentType == 'anime') ...[
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _imdbLinkController,
+                          decoration: InputDecoration(
+                            labelText: l10n.fieldImdbLink,
+                            hintText: 'https://www.imdb.com/title/…',
+                          ),
+                          keyboardType: TextInputType.url,
+                          textInputAction: TextInputAction.next,
+                        ),
+                      ],
                       if (linkStatus != null) ...[
                         const SizedBox(height: 6),
                         Text(

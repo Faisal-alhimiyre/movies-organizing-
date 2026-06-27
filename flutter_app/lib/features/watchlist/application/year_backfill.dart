@@ -1,17 +1,17 @@
 import '../../../core/config/app_config.dart';
+import '../../../core/utils/item_links.dart';
 import '../../../models/watchlist_item.dart';
 import '../../../repositories/metadata/metadata_service.dart';
 import 'watchlist_filters.dart';
+
+export '../../../core/utils/item_links.dart' show getImdbIdFromItem;
 
 bool hasValidReleaseYear(WatchlistItem item) =>
     parseReleaseYear(item.year) != null;
 
 int? releaseYearFromMetadata(String? raw) => parseReleaseYear(raw);
 
-String? getImdbIdFromItem(WatchlistItem item) {
-  if (item.link == null || item.link!.trim().isEmpty) return null;
-  return MetadataService.extractImdbId(item.link!);
-}
+// getImdbIdFromItem lives in item_links.dart
 
 class AnilistBackfillTarget {
   const AnilistBackfillTarget({required this.type, required this.id});

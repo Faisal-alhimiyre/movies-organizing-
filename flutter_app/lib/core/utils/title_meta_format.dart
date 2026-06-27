@@ -1,6 +1,6 @@
 import '../../models/metadata_detail.dart';
 
-enum TitleMetaBadgeKind { age, duration, seasons }
+enum TitleMetaBadgeKind { age, duration, seasons, episodes }
 
 class TitleMetaBadge {
   const TitleMetaBadge({
@@ -120,6 +120,10 @@ String formatAgeRatingDisplay(String raw, {bool arabic = false}) {
   };
 }
 
+String episodesBadgeLabel(int count) {
+  return count == 1 ? '1 episode' : '$count episodes';
+}
+
 /// Badges for cards/detail: age rating, movie duration, TV/anime seasons + ep length.
 List<TitleMetaBadge> buildTitleMetaBadges({
   required String contentType,
@@ -152,6 +156,14 @@ List<TitleMetaBadge> buildTitleMetaBadges({
         badges.add(TitleMetaBadge(kind: TitleMetaBadgeKind.duration, label: run));
       }
     case 'tvSeries':
+      if (episodeCount != null && episodeCount > 0) {
+        badges.add(
+          TitleMetaBadge(
+            kind: TitleMetaBadgeKind.episodes,
+            label: episodesBadgeLabel(episodeCount),
+          ),
+        );
+      }
       if (seasonCount != null && seasonCount > 0) {
         badges.add(
           TitleMetaBadge(
@@ -169,18 +181,19 @@ List<TitleMetaBadge> buildTitleMetaBadges({
         );
       }
     case 'anime':
+      if (episodeCount != null && episodeCount > 0) {
+        badges.add(
+          TitleMetaBadge(
+            kind: TitleMetaBadgeKind.episodes,
+            label: episodesBadgeLabel(episodeCount),
+          ),
+        );
+      }
       if (seasonCount != null && seasonCount > 0) {
         badges.add(
           TitleMetaBadge(
             kind: TitleMetaBadgeKind.seasons,
             label: seasonCount == 1 ? '1 season' : '$seasonCount seasons',
-          ),
-        );
-      } else if (episodeCount != null && episodeCount > 0) {
-        badges.add(
-          TitleMetaBadge(
-            kind: TitleMetaBadgeKind.seasons,
-            label: episodeCount == 1 ? '1 episode' : '$episodeCount episodes',
           ),
         );
       }

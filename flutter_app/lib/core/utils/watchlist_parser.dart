@@ -27,6 +27,11 @@ String makeItemId(String contentType, String genre, String title) {
   return '$contentType::$genre::$title';
 }
 
+/// Stable id for sync — always normalizes genre casing (web `item_id` parity).
+String canonicalItemId(String contentType, String genre, String title) {
+  return makeItemId(contentType, normalizeGenre(genre), title);
+}
+
 String normalizeGenre(String genre) {
   final trimmed = genre.trim();
   if (standardGenres.contains(trimmed)) return trimmed;
@@ -58,7 +63,7 @@ List<WatchlistItem> flattenWatchlist(WatchlistData data) {
         final leads = _parseLeads(map);
         items.add(
           WatchlistItem(
-            id: makeItemId(contentType, genre, title),
+            id: canonicalItemId(contentType, genre, title),
             contentType: contentType,
             genre: genre,
             title: title,
@@ -66,6 +71,7 @@ List<WatchlistItem> flattenWatchlist(WatchlistData data) {
             summary: _parseSummary(map),
             kind: map['kind']?.toString() ?? '',
             link: map['link']?.toString(),
+            imdbLink: _parseOptionalString(map['imdbLink']),
             poster: map['poster']?.toString(),
             cardPoster: _parseOptionalString(map['cardPoster']),
             selectedSeason: _parseOptionalInt(map['selectedSeason']) ??
@@ -300,6 +306,9 @@ WatchlistData itemsToNested(List<WatchlistItem> items) {
     };
 
     if (item.link != null && item.link!.isNotEmpty) entry['link'] = item.link;
+    if (item.imdbLink != null && item.imdbLink!.isNotEmpty) {
+      entry['imdbLink'] = item.imdbLink;
+    }
     if (item.poster != null && item.poster!.isNotEmpty) {
       entry['poster'] = item.poster;
     }

@@ -136,8 +136,7 @@ WatchlistConvertResult rowsToWatchlist(List<Map<String, dynamic>> rows) {
 
     section[genre]!.add(entry);
 
-    final itemId = row['item_id']?.toString() ?? '';
-    if (itemId.isEmpty) continue;
+    final itemId = canonicalItemId(contentType, genre, title);
 
     // Rows with meaningful progress, a note, or watched=true (web rowsToWatchlist).
     final isWatched = row['watched'] == true;
@@ -203,7 +202,7 @@ List<Map<String, dynamic>> watchlistToRows(
         if (title.isEmpty) continue;
 
         final leads = _parseLeadsForRow(map);
-        final itemId = makeItemId(contentType, genre, title);
+        final itemId = canonicalItemId(contentType, genre, title);
         final watchMeta = _watchMetaForRow(watched[itemId]);
 
         final row = <String, dynamic>{

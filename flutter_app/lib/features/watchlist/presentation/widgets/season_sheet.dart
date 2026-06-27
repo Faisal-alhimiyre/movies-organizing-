@@ -10,6 +10,7 @@ import '../../../../l10n/l10n.dart';
 import '../../../../models/series_metadata.dart';
 import '../../../../models/watchlist_item.dart';
 import '../../../../repositories/metadata/series_metadata_service.dart';
+import '../../application/title_meta_backfill.dart';
 import '../../application/watchlist_controller.dart';
 
 /// Season header block shown above summary when a season is selected (web `td-season-detail`).
@@ -98,6 +99,14 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
   }
 
   @override
+  void didUpdateWidget(covariant TitleSeasonsPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.item.noSpecials == true && !_noSpecials) {
+      setState(() => _noSpecials = true);
+    }
+  }
+
+  @override
   void dispose() {
     _posterPersistTimer?.cancel();
     super.dispose();
@@ -126,10 +135,13 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
     final svc = ref.read(seriesMetadataServiceProvider);
     final locale = widget.l10n.isArabic ? 'ar' : 'en';
 
+    final forceRefresh = itemNeedsSeriesBadgeRefresh(widget.item);
+
     final result = await svc.fetchSeriesMetadata(
       resolution: resolution,
       locale: locale,
       fallbackPoster: widget.item.poster,
+      forceRefresh: forceRefresh,
     );
 
     if (!mounted) return;
@@ -138,7 +150,11 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
       _loadingSeries = false;
     });
 
-    final seasons = _visibleSeasons(result.seasons ?? []);
+    unawaited(_persistSeriesCountsFromMetadata(result));
+
+    final snapshot = ref.read(watchlistControllerProvider).value;
+    final entry = snapshot?.watched[widget.item.id];
+    final seasons = _filterVisibleSeasons(result.seasons ?? [], entry: entry);
     if (seasons.isEmpty) return;
 
     final specials = (result.seasons ?? [])
@@ -146,12 +162,11 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
         .firstOrNull;
     if (specials != null &&
         specials.episodeCount == null &&
-        widget.item.noSpecials != true) {
+        widget.item.noSpecials != true &&
+        !_noSpecials) {
       unawaited(_silentlyCheckSpecials(specials));
     }
 
-    final snapshot = ref.read(watchlistControllerProvider).value;
-    final entry = snapshot?.watched[widget.item.id];
     final autoSelect = _pickInitialSeason(seasons, entry);
 
     await _selectSeason(autoSelect);
@@ -212,13 +227,28 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
     final detailOverview = result.seasonOverview?.trim() ?? '';
     if (detailOverview.isNotEmpty) overview = detailOverview;
 
+    var episodeCount = season.episodeCount;
+    final eps = result.episodes;
+    if (eps != null && eps.isNotEmpty) {
+      final seasonEps = episodesForSeason(eps, season.seasonNumber);
+      final airedCount = seasonEps.where((e) => e.isAired).length;
+      final canonical = widget.item.contentType == 'anime'
+          ? _series?.series?.totalEpisodes
+          : null;
+      if (airedCount > 0) {
+        episodeCount = (canonical != null && canonical > airedCount)
+            ? canonical
+            : airedCount;
+      }
+    }
+
     return SeasonSummary(
       source: season.source,
       seriesTmdbId: season.seriesTmdbId,
       seasonNumber: season.seasonNumber,
       name: season.name,
       poster: poster,
-      episodeCount: season.episodeCount,
+      episodeCount: episodeCount,
       overview: overview,
       airDate: season.airDate,
       isSpecials: season.isSpecials,
@@ -239,7 +269,8 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
 
     final merged = _mergeSeasonFromEpisodeResult(seasons[idx], result);
     if (merged.poster == seasons[idx].poster &&
-        merged.overview == seasons[idx].overview) {
+        merged.overview == seasons[idx].overview &&
+        merged.episodeCount == seasons[idx].episodeCount) {
       return;
     }
 
@@ -256,16 +287,84 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
     });
   }
 
-  List<SeasonSummary> _visibleSeasons(List<SeasonSummary> all) {
-    if (_noSpecials) return all.where((s) => s.isRegular).toList();
-    return all;
+  List<SeasonSummary> _filterVisibleSeasons(
+    List<SeasonSummary> all, {
+    WatchEntry? entry,
+  }) {
+    return all.where((s) {
+      if (s.isRegular) return true;
+      final prog = entry?.progress;
+      if (prog != null) {
+        final watchedSpecials =
+            prog.episodes.where((k) => k.startsWith('0:')).length;
+        if (watchedSpecials > 0) return true;
+      }
+      if (_noSpecials || widget.item.noSpecials == true) return false;
+      if (s.episodeCount == 0) return false;
+      return true;
+    }).toList();
   }
 
-  Future<void> _selectSeason(int seasonNumber) async {
+  List<SeasonSummary> _visibleSeasons(List<SeasonSummary> all) {
+    final snapshot = ref.read(watchlistControllerProvider).value;
+    final entry = snapshot?.watched[widget.item.id];
+    return _filterVisibleSeasons(all, entry: entry);
+  }
+
+  bool _specialsHaveAiredEpisodes(SeasonEpisodesResult result) {
+    if (result.state != MetadataResultState.available &&
+        result.state != MetadataResultState.offlineWithCache &&
+        result.state != MetadataResultState.partiallyAvailable) {
+      return false;
+    }
+    return (result.episodes ?? []).any((e) => e.isAired);
+  }
+
+  bool _shouldRemoveSpecialsForResult(SeasonEpisodesResult result, int seasonNum) {
+    if (seasonNum != 0) return false;
+    if (_specialsHaveAiredEpisodes(result)) return false;
+    switch (result.state) {
+      case MetadataResultState.available:
+      case MetadataResultState.offlineWithCache:
+      case MetadataResultState.partiallyAvailable:
+        return !_specialsHaveAiredEpisodes(result);
+      case MetadataResultState.offlineNoCache:
+      case MetadataResultState.episodeDetailsUnavailable:
+      case MetadataResultState.unavailable:
+      case MetadataResultState.apiFailure:
+      case MetadataResultState.noSeasons:
+        return true;
+      default:
+        return true;
+    }
+  }
+
+  void _stripSpecialsFromSeries() {
+    final current = _series;
+    final seasons = current?.seasons;
+    if (current == null || seasons == null) return;
+    final filtered = seasons.where((s) => s.seasonNumber != 0).toList();
+    if (filtered.length == seasons.length) return;
+    setState(() {
+      _series = SeriesMetadataResult(
+        state: current.state,
+        series: current.series,
+        seasons: filtered,
+        isStale: current.isStale,
+        debugMessage: current.debugMessage,
+      );
+    });
+  }
+
+  Future<void> _selectSeason(int seasonNumber, {bool forceRefresh = false}) async {
     final resolution = _resolution;
     if (resolution == null || !resolution.hasUsableSource) return;
 
-    if (_selectedSeasonNum == seasonNumber && _episodes != null) return;
+    if (!forceRefresh &&
+        _selectedSeasonNum == seasonNumber &&
+        _episodes != null) {
+      return;
+    }
 
     final loadToken = ++_seasonLoadToken;
     final seasonSummary = _seasonSummaryFor(seasonNumber, resolution);
@@ -288,12 +387,21 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
     final svc = ref.read(seriesMetadataServiceProvider);
     final locale = widget.l10n.isArabic ? 'ar' : 'en';
 
+    if (forceRefresh) {
+      await svc.invalidateSeasonEpisodesCache(
+        resolution: resolution,
+        seasonNumber: seasonNumber,
+        locale: locale,
+      );
+    }
+
     final result = await svc.fetchSeasonEpisodes(
       resolution: resolution,
       seasonNumber: seasonNumber,
       locale: locale,
       fallbackPoster: widget.item.poster,
       seasonSummary: seasonSummary,
+      forceRefresh: forceRefresh,
     );
 
     if (!mounted || loadToken != _seasonLoadToken) return;
@@ -302,13 +410,9 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
       _loadingEpisodes = false;
     });
 
-    if (seasonNumber == 0) {
-      final airedCount =
-          (result.episodes ?? []).where((e) => e.isAired).length;
-      if (airedCount == 0) {
-        await _removeEmptySpecials();
-        return;
-      }
+    if (_shouldRemoveSpecialsForResult(result, seasonNumber)) {
+      await _removeEmptySpecials();
+      return;
     }
 
     _patchSeasonFromEpisodeResult(seasonNumber, result);
@@ -354,6 +458,73 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
       if (token != _posterPersistToken || loadToken != _seasonLoadToken) return;
       _persistSelectedSeason(seasonNumber, name, seasonPoster);
     });
+  }
+
+  Future<void> _persistSeriesCountsFromMetadata(
+    SeriesMetadataResult result,
+  ) async {
+    if (result.state != MetadataResultState.available &&
+        result.state != MetadataResultState.partiallyAvailable &&
+        result.state != MetadataResultState.offlineWithCache) {
+      return;
+    }
+
+    final seasons = result.seasons ?? [];
+    final regular = seasons.where((s) => s.seasonNumber > 0 && !s.isSpecials);
+    var episodeTotal = 0;
+    if (widget.item.contentType == 'anime') {
+      episodeTotal = result.series?.totalEpisodes ?? 0;
+    } else {
+      for (final season in regular) {
+        final count = season.episodeCount;
+        if (count != null && count > 0) episodeTotal += count;
+      }
+    }
+    final seasonCount =
+        widget.item.contentType == 'anime' ? 1 : regular.length;
+    if (seasonCount <= 0 && episodeTotal <= 0) return;
+
+    final snapshot = ref.read(watchlistControllerProvider).value;
+    if (snapshot == null) return;
+    final index = snapshot.items.indexWhere((i) => i.id == widget.item.id);
+    if (index == -1) return;
+
+    final current = snapshot.items[index];
+    final nextSeasonCount =
+        seasonCount > 0 ? seasonCount : current.seasonCount;
+    final nextEpisodeCount =
+        episodeTotal > 0 ? episodeTotal : current.episodeCount;
+    if (nextSeasonCount == current.seasonCount &&
+        nextEpisodeCount == current.episodeCount) {
+      return;
+    }
+
+    await ref.read(watchlistControllerProvider.notifier).upsertItem(
+          WatchlistItem(
+            id: current.id,
+            contentType: current.contentType,
+            genre: current.genre,
+            title: current.title,
+            lead: current.lead,
+            summary: current.summary,
+            kind: current.kind,
+            link: current.link,
+            poster: current.poster,
+            cardPoster: current.cardPoster,
+            selectedSeason: current.selectedSeason,
+            selectedSeasonName: current.selectedSeasonName,
+            noSpecials: current.noSpecials,
+            imdbRating: current.imdbRating,
+            anilistRating: current.anilistRating,
+            ageRating: current.ageRating,
+            runtime: current.runtime,
+            seasonCount: nextSeasonCount,
+            episodeCount: nextEpisodeCount,
+            year: current.year,
+            addedAt: current.addedAt,
+            secondaryGenres: current.secondaryGenres,
+          ),
+        );
   }
 
   void _persistSelectedSeason(
@@ -437,20 +608,22 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
       );
       if (!mounted) return;
 
-      final airedCount = (result.episodes ?? [])
-          .where((e) => e.isAired)
-          .length;
-      if (airedCount > 0) return;
-
-      await _removeEmptySpecials();
+      if (!_specialsHaveAiredEpisodes(result)) {
+        await _removeEmptySpecials();
+      } else {
+        _patchSeasonFromEpisodeResult(0, result);
+      }
     } catch (_) {
-      // Network error — leave the card; removal runs if user taps it.
+      if (widget.item.noSpecials != true) {
+        await _removeEmptySpecials();
+      }
     }
   }
 
   Future<void> _removeEmptySpecials() async {
     if (!mounted) return;
     setState(() => _noSpecials = true);
+    _stripSpecialsFromSeries();
 
     final snapshot = ref.read(watchlistControllerProvider).value;
     if (snapshot != null) {
@@ -911,6 +1084,12 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
                     scrollController: widget.scrollController,
                     embedded: widget.embedded,
                     onSeasonSelected: _selectSeason,
+                    onRetryEpisodes: () {
+                      final num = _selectedSeasonNum;
+                      if (num != null) {
+                        unawaited(_selectSeason(num, forceRefresh: true));
+                      }
+                    },
                     onToggleEpisode: _handleToggleEpisode,
                     onMarkSeason: _handleMarkSeason,
                     specialsToggle: _specialsToggle(),
@@ -1136,6 +1315,7 @@ class _SeasonContent extends StatelessWidget {
     required this.scrollController,
     required this.embedded,
     required this.onSeasonSelected,
+    required this.onRetryEpisodes,
     required this.onToggleEpisode,
     required this.onMarkSeason,
     required this.hideEpisodeStills,
@@ -1158,6 +1338,7 @@ class _SeasonContent extends StatelessWidget {
   final ScrollController? scrollController;
   final bool embedded;
   final ValueChanged<int> onSeasonSelected;
+  final VoidCallback onRetryEpisodes;
   final Future<void> Function(EpisodeDetail, bool) onToggleEpisode;
   final Future<void> Function(SeasonSummary, bool) onMarkSeason;
   final bool hideEpisodeStills;
@@ -1233,6 +1414,7 @@ class _SeasonContent extends StatelessWidget {
               hideSourceRatings: hideSourceRatings,
               onToggle: onToggleEpisode,
               onOpenEpisode: onOpenEpisode,
+              onRetry: onRetryEpisodes,
             ),
         ],
       );
@@ -1490,6 +1672,9 @@ class _SeasonCard extends StatelessWidget {
     final scale = isSelected ? 1.0 : (isAdjacent ? 0.91 : 0.86);
     final opacity = isSelected ? 1.0 : (isAdjacent ? 0.72 : 0.55);
     final barPct = prog.total > 0 ? prog.watched / prog.total : 0.0;
+    final displayEpCount = isSelected && prog.total > 0
+        ? prog.total
+        : season.episodeCount;
 
     final borderColor = isSelected ? accent : Colors.transparent;
 
@@ -1583,10 +1768,9 @@ class _SeasonCard extends StatelessWidget {
                                       : theme.colorScheme.onSurface,
                             ),
                           ),
-                          if (season.episodeCount != null &&
-                              season.episodeCount! > 0)
+                          if (displayEpCount != null && displayEpCount > 0)
                             Text(
-                              l10n.progressEpisodeCount(season.episodeCount!),
+                              l10n.progressEpisodeCount(displayEpCount),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -1640,18 +1824,46 @@ class _SeasonCard extends StatelessWidget {
   }
 }
 
+/// Episodes for [seasonNumber], remapping when seasonNumber metadata is wrong.
+List<EpisodeDetail> episodesForSeason(
+  List<EpisodeDetail> all,
+  int seasonNumber,
+) {
+  final matched =
+      all.where((e) => e.seasonNumber == seasonNumber).toList();
+  if (matched.isNotEmpty) return matched;
+  if (all.isEmpty) return all;
+  return [
+    for (final ep in all)
+      EpisodeDetail(
+        source: ep.source,
+        seasonNumber: seasonNumber,
+        episodeNumber: ep.episodeNumber,
+        title: ep.title,
+        still: ep.still,
+        overview: ep.overview,
+        runtimeMinutes: ep.runtimeMinutes,
+        airDate: ep.airDate,
+        isAired: ep.isAired,
+        episodeRating: ep.episodeRating,
+        episodeRatingSource: ep.episodeRatingSource,
+      ),
+  ];
+}
+
 ({int watched, int total}) seasonProgressForCard(
   WatchEntry? entry,
   SeasonSummary season,
   List<EpisodeDetail> loadedEpisodes,
 ) {
-  if (loadedEpisodes.isNotEmpty &&
-      loadedEpisodes.first.seasonNumber == season.seasonNumber) {
-    return seasonProgressFromEpisodes(
+  final seasonEps = episodesForSeason(loadedEpisodes, season.seasonNumber);
+  if (seasonEps.isNotEmpty) {
+    final prog = seasonProgressFromEpisodes(
       entry,
-      loadedEpisodes,
+      seasonEps,
       season.seasonNumber,
     );
+    if (prog.total > 0) return prog;
   }
 
   final total = seasonEpisodeTotal(season, entry);
@@ -1699,8 +1911,7 @@ class _SeasonActionsBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final watchedColor = tc?.watched ?? const Color(0xFF58C322);
-    final seasonEps =
-        episodes.where((e) => e.seasonNumber == season.seasonNumber).toList();
+    final seasonEps = episodesForSeason(episodes, season.seasonNumber);
     final sourceAvg = _seasonAverageExternalRating(seasonEps);
     final avgSource = _episodeExternalRatingSource(seasonEps);
 
@@ -1981,6 +2192,7 @@ class _EpisodeListColumn extends StatelessWidget {
     required this.hideSourceRatings,
     required this.onToggle,
     required this.onOpenEpisode,
+    required this.onRetry,
   });
 
   final SeasonSummary season;
@@ -1993,22 +2205,46 @@ class _EpisodeListColumn extends StatelessWidget {
   final bool hideSourceRatings;
   final Future<void> Function(EpisodeDetail, bool) onToggle;
   final Future<void> Function(EpisodeDetail) onOpenEpisode;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
-    final seasonEps = episodes
-        .where((e) => e.seasonNumber == season.seasonNumber)
-        .toList();
+    final seasonEps = episodesForSeason(episodes, season.seasonNumber);
 
     if (seasonEps.isEmpty) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 20),
         child: Center(
-          child: Text(
-            l10n.progressLoadError,
-            style: TextStyle(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-            ),
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            children: [
+              Text(
+                l10n.progressLoadError,
+                style: TextStyle(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                ),
+              ),
+              OutlinedButton(
+                onPressed: onRetry,
+                style: OutlinedButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  minimumSize: const Size(0, 28),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  shape: const StadiumBorder(),
+                ),
+                child: Text(
+                  l10n.progressRetry,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       );

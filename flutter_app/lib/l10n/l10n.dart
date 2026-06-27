@@ -376,6 +376,11 @@ class L10n {
   String get fieldLead => _ar ? 'الممثل / الطاقم' : 'Lead actor / cast';
   String get fieldSummary => _ar ? 'ملخص' : 'Summary';
   String get fieldLink => _ar ? 'رابط (اختياري)' : 'Link (optional)';
+  String get fieldAnilistLink => _ar ? 'رابط AniList' : 'AniList link';
+  String get fieldImdbLink => _ar ? 'رابط IMDb' : 'IMDb link';
+  String get manualAnimeLinkHint => _ar
+      ? 'للأنمي: AniList هو المصدر الرئيسي للحلقات. أضف كلا الرابطين عند توفرهما.'
+      : 'For anime: AniList is the main source for episodes. Add both links when available.';
   String get manualLinkHint => _ar
       ? 'الصق رابط IMDb أو AniList أو MyAnimeList — سنملأ التفاصيل تلقائياً.'
       : 'Paste an IMDb, AniList, or MyAnimeList link — we\'ll fill in the details.';

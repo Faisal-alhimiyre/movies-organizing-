@@ -320,8 +320,9 @@ class WatchlistRepository {
     if (_pendingCloudPush.containsKey(listId)) return false;
 
     final localData = _local.readWatchlist(listId);
-    final localWatched = _readWatched(listId);
+    var localWatched = _readWatched(listId);
     final localHasData = localData != null && !localData.isEmpty;
+    var dataChanged = false;
 
     final remote = await supabase.fetchSnapshot(listId);
     if (remote == null) {
@@ -344,6 +345,21 @@ class WatchlistRepository {
     final meta = _readSyncMeta(listId);
     final localStamp = math.max(meta.localUpdated, meta.syncedAt);
     final remoteUpdated = remote.updatedAt?.millisecondsSinceEpoch ?? 0;
+    final remoteWatched = parseWatchedMap(remote.watched);
+
+    // Merge remote watch state when local is missing richer entries (prevents 0 watched UI).
+    if (localHasData) {
+      final mergedWatched = mergeWatchedPreferRicher(remoteWatched, localWatched);
+      if (!_watchedMapsEqual(mergedWatched, localWatched)) {
+        localWatched = mergedWatched;
+        await _local.writeWatchlist(
+          listId,
+          localData,
+          watched: watchedMapToJson(mergedWatched),
+        );
+        dataChanged = true;
+      }
+    }
 
     // Local is newer — push up (matches web `reconcileWithCloud`).
     if (localHasData &&
@@ -357,16 +373,16 @@ class WatchlistRepository {
         watched: localWatched,
         listName: listName,
       );
-      return await _executeCloudPush(listId);
+      final pushed = await _executeCloudPush(listId);
+      return dataChanged || pushed;
     }
 
     if (!localHasData || remoteUpdated > localStamp) {
       if (_cloudPushInFlight[listId] == true ||
           _pendingCloudPush.containsKey(listId)) {
-        return false;
+        return dataChanged;
       }
 
-      final remoteWatched = parseWatchedMap(remote.watched);
       final mergedWatched = localHasData
           ? mergeWatchedPreferRicher(remoteWatched, localWatched)
           : remoteWatched;
@@ -388,7 +404,7 @@ class WatchlistRepository {
       return true;
     }
 
-    return false;
+    return dataChanged;
   }
 
   ({int localUpdated, int syncedAt}) _readSyncMeta(String listId) {
@@ -451,6 +467,21 @@ class WatchlistRepository {
     }
     return {};
   }
+}
+
+bool _watchedMapsEqual(
+  Map<String, WatchEntry> a,
+  Map<String, WatchEntry> b,
+) {
+  if (a.length != b.length) return false;
+  for (final entry in a.entries) {
+    final other = b[entry.key];
+    if (other == null) return false;
+    if (_watchEntryRichness(entry.value) != _watchEntryRichness(other)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /// Union watched maps; keep the entry with more progress (never drop local watch state).

@@ -1,0 +1,1 @@
+{"query":"query($id:Int){Media(id:$id,type:ANIME){episodes streamingEpisodes{title}}}","variables":{"id":1735}}

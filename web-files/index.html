@@ -34,6 +34,7 @@
     <meta name="twitter:image" content="assets/og/og-image.svg" />
     <meta name="theme-color" content="#141416" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Movie Nights" />
     <title>Our Movie Nights</title>
     <link rel="manifest" href="manifest.webmanifest" />
@@ -942,6 +943,17 @@
               <p class="form-field__status" id="formLinkStatus" aria-live="polite"></p>
             </label>
 
+            <label class="form-field form-field--full" id="formImdbLinkField" hidden>
+              <span class="form-field__label">IMDb link</span>
+              <input
+                type="url"
+                name="imdbLink"
+                id="formImdbLink"
+                class="form-input"
+                placeholder="https://www.imdb.com/title/…"
+              />
+            </label>
+
             <div class="form-link-preview" id="formLinkPreview" hidden role="status" aria-live="polite">
               <p class="form-link-preview__hint" id="formLinkPreviewHint"></p>
               <div class="title-search-confirm__preview form-link-preview__card" id="formLinkPreviewCard"></div>
@@ -1185,10 +1197,10 @@
     <script src="js/accessibility.js"></script>
     <script src="js/dialog.js"></script>
     <script src="js/watch-progress.js"></script>
-    <script src="js/metadata.js"></script>
-    <script src="js/tvdb-service.js"></script>
+    <script src="js/metadata.js?v=20250627a"></script>
+    <script src="js/tvdb-service.js?v=20250625b"></script>
     <script src="js/tmdb-service.js"></script>
-    <script src="js/series-metadata.js"></script>
+    <script src="js/series-metadata.js?v=20250627b"></script>
     <script src="js/auth.js"></script>
     <script src="js/sync.js"></script>
     <script src="js/genres.js"></script>
@@ -1196,7 +1208,7 @@
     <script src="js/data.js"></script>
     <script src="js/mobile.js"></script>
     <script src="js/title-detail.js"></script>
-    <script src="js/title-seasons.js"></script>
+    <script src="js/title-seasons.js?v=20250627b"></script>
     <script src="js/app.js"></script>
     <script src="js/pwa.js"></script>
   </body>
