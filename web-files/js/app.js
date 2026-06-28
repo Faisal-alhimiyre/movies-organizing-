@@ -3961,19 +3961,6 @@
         </button>`
       : "";
 
-    const openLinkItem = item.link
-      ? `<button
-          type="button"
-          class="card-menu__item"
-          role="menuitem"
-          data-action="open-card-link"
-          data-link="${escapeHtml(item.link)}"
-          data-id="${escapeHtml(item.id)}"
-        >
-          ${escapeHtml(t("card.openLink"))}
-        </button>`
-      : "";
-
     // In-progress titles show "Mark watched" so one click completes them,
     // not "Mark unwatched" which would trash their episode progress.
     const watchedLabel = progressState === "watched"
@@ -4016,7 +4003,6 @@
               </svg>
             </button>
             <div class="card-menu__panel" hidden role="menu">
-              ${openLinkItem}
               <button
                 type="button"
                 class="card-menu__item"
@@ -5722,12 +5708,14 @@
     panel.style.removeProperty("right");
     panel.style.removeProperty("top");
     panel.style.removeProperty("bottom");
+    panel.style.removeProperty("transform");
   }
 
   function positionCardMenuPanel(panel) {
     if (!panel) return;
     resetCardMenuPosition(panel);
     const rtl = document.documentElement.getAttribute("dir") === "rtl";
+    const margin = 14;
 
     if (rtl) {
       panel.style.left = "0";
@@ -5739,18 +5727,13 @@
     panel.style.bottom = "calc(100% + 0.25rem)";
 
     requestAnimationFrame(() => {
-      const margin = 10;
       let rect = panel.getBoundingClientRect();
 
       if (rect.left < margin) {
-        panel.style.left = "auto";
-        panel.style.right = "0";
+        panel.style.transform = `translateX(${margin - rect.left}px)`;
         rect = panel.getBoundingClientRect();
-      }
-
-      if (rect.right > window.innerWidth - margin) {
-        panel.style.right = "auto";
-        panel.style.left = "0";
+      } else if (rect.right > window.innerWidth - margin) {
+        panel.style.transform = `translateX(${window.innerWidth - margin - rect.right}px)`;
         rect = panel.getBoundingClientRect();
       }
 

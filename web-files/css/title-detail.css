@@ -553,21 +553,39 @@ html.td-scroll-lock body {
   box-sizing: border-box;
 }
 
+.td-movie-progress__label {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text-muted, #a8a8a8);
+}
+
 .td-movie-progress__slider {
   width: 100%;
   margin: 0;
-  height: 0.35rem;
+  height: 1rem;
   appearance: none;
   -webkit-appearance: none;
-  background: var(--border, #363636);
+  background: transparent;
   border-radius: 999px;
   cursor: pointer;
+  direction: ltr;
+  --track-bg: var(--border, #363636);
+  --track-fill: var(--accent, #0095f6);
+  --progress: 0%;
 }
 
 .td-movie-progress__slider::-webkit-slider-runnable-track {
   height: 0.35rem;
   border-radius: 999px;
-  background: var(--border, #363636);
+  background: linear-gradient(
+    to right,
+    var(--track-fill) 0%,
+    var(--track-fill) var(--progress),
+    var(--track-bg) var(--progress),
+    var(--track-bg) 100%
+  );
 }
 
 .td-movie-progress__slider::-webkit-slider-thumb {
@@ -576,23 +594,30 @@ html.td-scroll-lock body {
   height: 1rem;
   margin-top: -0.325rem;
   border-radius: 50%;
-  background: var(--accent, #0095f6);
+  background: var(--track-fill);
   border: 2px solid var(--bg-elevated, #121212);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #0095f6) 40%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--track-fill) 40%, transparent);
 }
 
 .td-movie-progress__slider::-moz-range-track {
   height: 0.35rem;
   border-radius: 999px;
-  background: var(--border, #363636);
+  background: var(--track-bg);
+}
+
+.td-movie-progress__slider::-moz-range-progress {
+  height: 0.35rem;
+  border-radius: 999px;
+  background: var(--track-fill);
 }
 
 .td-movie-progress__slider::-moz-range-thumb {
   width: 1rem;
   height: 1rem;
   border-radius: 50%;
-  background: var(--accent, #0095f6);
+  background: var(--track-fill);
   border: 2px solid var(--bg-elevated, #121212);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--track-fill) 40%, transparent);
 }
 
 .td-movie-progress__slider:focus-visible {

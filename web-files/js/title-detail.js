@@ -308,9 +308,11 @@
     const entry = getWatchEntry(itemId);
     const pos = window.WatchlistProgress?.getMoviePosition?.(entry) ?? 0;
     const watchedMin = Math.round(pos * runtime);
+    const progressPct = runtime > 0 ? (watchedMin / runtime) * 100 : 0;
 
     return `
       <div class="td-movie-progress" data-td-part="movie-progress">
+        <p class="td-movie-progress__label">${esc(t("detail.movieProgressHint"))}</p>
         <input type="range"
           class="td-movie-progress__slider"
           data-td-action="movie-progress"
@@ -319,6 +321,7 @@
           max="${runtime}"
           step="1"
           value="${watchedMin}"
+          style="--progress: ${progressPct}%"
           aria-label="${esc(t("detail.movieProgressLabel"))}"
           aria-valuemin="0"
           aria-valuemax="${runtime}"
@@ -328,6 +331,21 @@
           <span class="td-movie-progress__total text-num">${esc(formatMovieClock(runtime))}</span>
         </div>
       </div>`;
+  }
+
+  function updateMovieProgressFill(slider) {
+    if (!slider) return;
+    const min = Number(slider.min) || 0;
+    const max = Number(slider.max) || 0;
+    const value = Number(slider.value) || 0;
+    const pct = max > min ? ((value - min) / (max - min)) * 100 : 0;
+    slider.style.setProperty("--progress", `${pct}%`);
+  }
+
+  function initMovieProgressSliders(root = _scroll) {
+    root?.querySelectorAll("[data-td-action='movie-progress']").forEach((slider) => {
+      updateMovieProgressFill(slider);
+    });
   }
 
   function updateMovieProgressLabels(slider) {
@@ -340,6 +358,7 @@
       ?.querySelector("[data-td-part='movie-elapsed']");
     if (elapsed) elapsed.textContent = formatMovieClock(watchedMin);
     slider.setAttribute("aria-valuenow", String(watchedMin));
+    updateMovieProgressFill(slider);
   }
 
   async function persistMovieProgress(slider) {
@@ -938,6 +957,7 @@
     tmp.innerHTML = myRatingMarkup(_activeItemId);
     const newEl = tmp.firstElementChild;
     if (newEl) el.replaceWith(newEl);
+    initMovieProgressSliders(_scroll);
   }
 
   /** Re-render only the action buttons (now: refresh menu items). */
@@ -1117,6 +1137,7 @@
 
     watchForAppChanges();
     attachSeasons(item);
+    initMovieProgressSliders(_scroll);
     if (item.contentType === "anime" || item.contentType === "tvSeries") {
       window.WatchlistApp?.queueItemBadgeEnrichment?.(itemId);
     }

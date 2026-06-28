@@ -1827,6 +1827,7 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   bottom: calc(100% + 0.35rem);
   z-index: 30;
   min-width: 10.5rem;
+  max-width: min(10.5rem, calc(100vw - 1.75rem));
   padding: 0.3rem;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -4080,10 +4081,6 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   .header__stat-chip {
     padding: 0.22rem 0.5rem;
     font-size: 0.72rem;
-  }
-
-  .header__stat-value {
-    font-size: 0.78rem;
   }
 
   .header__toolbar {

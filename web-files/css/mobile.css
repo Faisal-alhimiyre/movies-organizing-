@@ -288,8 +288,6 @@
     overflow: visible;
     z-index: 35;
   }
-
-  .card__body {
     display: flex;
     flex-direction: column;
     flex: 1;
@@ -306,7 +304,8 @@
 
   .card__footer > .card__rating,
   .card__footer > button.card__rating,
-  .card__footer > .card__footer-badge {
+  .card__footer > .card__footer-badge,
+  .card__footer > .card__watch-status {
     display: none !important;
   }
 
@@ -484,6 +483,12 @@
     flex: 1 1 auto;
     align-items: center;
     min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .card__footer-mobile .card__watch-status {
+    width: 100%;
     max-width: 100%;
   }
 
