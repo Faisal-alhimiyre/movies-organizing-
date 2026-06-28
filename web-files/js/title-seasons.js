@@ -65,6 +65,7 @@
   let _episodesPartialPainted = false;
   let _pendingSpecialsCheck = false;
   let _episodesBySeason = new Map();
+  let _seasonEpisodeToken = 0;
   let _dragStartX     = 0;
   let _isDragging     = false;
   let _scrollToSeasonsObserver = null;
@@ -643,6 +644,7 @@
     _episodesPartialPainted = false;
     _pendingSpecialsCheck = false;
     _episodesBySeason = new Map();
+    _seasonEpisodeToken = 0;
     _isDragging     = false;
     disconnectScrollToSeasons();
   }
@@ -1261,7 +1263,7 @@
     }
   }
 
-  async function loadEpisodes(seasonNum, { background = false } = {}) {
+  async function loadEpisodes(seasonNum, { background = false, loadTok = null } = {}) {
     const tok = _token;
     const meta = window.WatchlistSeriesMetadata;
     if (!meta || !_item || !_resolution) return;
@@ -1288,27 +1290,47 @@
         {
           onPartial: (partial) => {
             if (!isValid(tok)) return;
+            if (loadTok != null && loadTok !== _seasonEpisodeToken) return;
             rememberSeasonEpisodes(seasonNum, partial);
             if (background || _selectedSeason !== seasonNum) return;
-            applyEpisodesPayload(seasonNum, partial, { partial: true });
+            applyEpisodesPayload(seasonNum, partial, { partial: true, loadTok });
           },
         }
       );
       if (!isValid(tok)) return;
+      if (loadTok != null && loadTok !== _seasonEpisodeToken) return;
       rememberSeasonEpisodes(seasonNum, result);
       if (background) {
         if (_selectedSeason === seasonNum) {
-          applyEpisodesPayload(seasonNum, result, { partial: false });
+          applyEpisodesPayload(seasonNum, result, { partial: false, loadTok });
         }
         return;
       }
       if (_selectedSeason !== seasonNum) return;
 
-      applyEpisodesPayload(seasonNum, result, { partial: false });
+      applyEpisodesPayload(seasonNum, result, { partial: false, loadTok });
       prefetchNeighborSeasons(seasonNum);
     } finally {
       if (!background) runPendingSpecialsCheck();
     }
+  }
+
+  function seasonAnilistIdFor(seasonNum) {
+    const seasonSummary = (_seriesResult?.seasons || []).find(
+      (s) => s.seasonNumber === seasonNum
+    );
+    const meta = window.WatchlistSeriesMetadata;
+    if (!meta || !_resolution) return null;
+    return meta.pickSeasonAnilistId?.(seasonSummary, _resolution, seasonNum) ?? null;
+  }
+
+  function isSeasonCacheValid(seasonNum, cached) {
+    if (!cached?.episodes?.length) return false;
+    const expectedId = seasonAnilistIdFor(seasonNum);
+    if (expectedId == null) return seasonNum <= 1;
+    const cachedId = Number(cached.seasonAnilistId);
+    if (!Number.isFinite(cachedId)) return false;
+    return cachedId === expectedId;
   }
 
   function rememberSeasonEpisodes(seasonNum, result) {
@@ -1318,6 +1340,10 @@
       displayEps !== result?.episodes
         ? { ...result, episodes: displayEps }
         : result;
+    const seasonAnilistId = seasonAnilistIdFor(seasonNum);
+    if (seasonAnilistId != null) {
+      stored.seasonAnilistId = seasonAnilistId;
+    }
     _episodesBySeason.set(seasonNum, stored);
   }
 
@@ -1360,9 +1386,11 @@
     }
   }
 
-  function applyEpisodesPayload(seasonNum, result, { partial = false } = {}) {
+  function applyEpisodesPayload(seasonNum, result, { partial = false, loadTok = null } = {}) {
     const meta = window.WatchlistSeriesMetadata;
     if (!meta || !result) return;
+    if (loadTok != null && loadTok !== _seasonEpisodeToken) return;
+    if (_selectedSeason !== seasonNum) return;
 
     const displayEps = filterSpecialsEpisodes(seasonNum, result?.episodes);
     const displayResult =
@@ -1635,6 +1663,8 @@
     if (_selectedSeason === seasonNum && animate) return;
     closeEpisodeModal();
     resetEpisodeJumpInput();
+    _seasonEpisodeToken += 1;
+    const loadTok = _seasonEpisodeToken;
     _selectedSeason = seasonNum;
 
     if (!skipTabSwitch) {
@@ -1655,14 +1685,18 @@
     notifySeasonPresentation(seasonNum);
 
     const cached = _episodesBySeason.get(seasonNum);
-    if (cached?.episodes?.length) {
-      applyEpisodesPayload(seasonNum, cached, { partial: false });
+    if (isSeasonCacheValid(seasonNum, cached)) {
+      applyEpisodesPayload(seasonNum, cached, { partial: false, loadTok });
       updateNavButtons(getRegularSeasons());
-      void loadEpisodes(seasonNum, { background: true });
+      void loadEpisodes(seasonNum, { background: true, loadTok });
       return;
     }
 
-    loadEpisodes(seasonNum);
+    if (cached && !isSeasonCacheValid(seasonNum, cached)) {
+      _episodesBySeason.delete(seasonNum);
+    }
+
+    void loadEpisodes(seasonNum, { loadTok });
     updateNavButtons(getRegularSeasons());
   }
 

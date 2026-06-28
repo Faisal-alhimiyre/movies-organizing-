@@ -507,11 +507,16 @@
    * Season 1 = your item's AniList link. Season 2+ = each cour's own ID on the season card.
    */
   function pickSeasonAnilistId(seasonSummary, resolution, seasonNumber) {
-    const fromSummary = Number(seasonSummary?.anilistId);
-    if (Number.isFinite(fromSummary) && fromSummary > 0) return fromSummary;
     const sn = Number(seasonNumber);
+    const root = Number(resolution?.anilistId);
+    const fromSummary = Number(seasonSummary?.anilistId);
+    if (Number.isFinite(fromSummary) && fromSummary > 0) {
+      if (Number.isFinite(sn) && sn > 1 && Number.isFinite(root) && fromSummary === root) {
+        return null;
+      }
+      return fromSummary;
+    }
     if (!Number.isFinite(sn) || sn <= 1) {
-      const root = Number(resolution?.anilistId);
       return Number.isFinite(root) && root > 0 ? root : null;
     }
     return null;
@@ -928,11 +933,22 @@
     if (resolution?.isNegative) return { state: ResultState.INVALID_ID };
     const effectivePoster = seasonSummary?.poster || fallbackPoster;
 
-    const seasonAnilistId = pickSeasonAnilistId(
+    const sn = Number(seasonNumber) || 0;
+    const rootAnilistId = Number(resolution?.anilistId);
+
+    let seasonAnilistId = pickSeasonAnilistId(
       seasonSummary,
       resolution,
       seasonNumber
     );
+    if (!seasonAnilistId && sn > 1 && Number.isFinite(rootAnilistId)) {
+      seasonAnilistId = await resolveSeasonAnilistId(
+        seasonSummary,
+        resolution,
+        seasonNumber
+      );
+      repairSeasonSummaryAnilistId(seasonSummary, seasonAnilistId);
+    }
 
     const emitPartial = (partial) => {
       if (typeof onPartial !== "function") return;
@@ -1098,10 +1114,13 @@
           item
         );
       case "anilist":
+        if (sn > 1) {
+          return { state: ResultState.UNAVAILABLE };
+        }
         return await enrichEpisodeRatings(
-          await fetchAnilistEpisodes(resolution.anilistId, seasonNumber, effectivePoster),
+          await fetchAnilistEpisodes(resolution.anilistId, 1, effectivePoster),
           resolution,
-          seasonNumber,
+          1,
           locale,
           effectivePoster,
           item
@@ -2675,6 +2694,7 @@
 
   async function fetchAnilistEpisodes(anilistId, seasonNumber, fallbackPoster = "") {
     const appSeasonNumber = Number(seasonNumber) || 1;
+    const aid = Number(anilistId);
     void fallbackPoster;
 
     const cacheKey = `metadata:v14:episodes:anilist:${anilistId}:${appSeasonNumber}`;
@@ -3824,6 +3844,7 @@
     regularEpisodeTotalFromSeasons,
     clearItemResolutionCache,
     cleanEpisodeOverview: cleanEpisodeOverviewText,
+    pickSeasonAnilistId,
     isTvSpecialLinkedMovie: isMovieLikeTvSpecial,
     // Normalization functions exposed for testing
     _normalizeTmdbSeries: normalizeTmdbSeries,
