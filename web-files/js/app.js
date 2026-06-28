@@ -2809,6 +2809,23 @@
     };
   }
 
+  function applyWatchedFilter(value) {
+    const next =
+      value === "watched" || value === "inProgress" || value === "unwatched" || value === "all"
+        ? value
+        : "all";
+    state.watchedFilter = next;
+    if (els.watchedFilter) els.watchedFilter.value = next;
+    updateFilterFieldHighlights();
+    updateClearFiltersButton();
+    saveUiPrefs();
+    render();
+  }
+
+  function headerStatChipActiveClass(filterValue) {
+    return state.watchedFilter === filterValue ? " header__stat-chip--active" : "";
+  }
+
   function updateStats() {
     const total = state.items.length;
     const watchedCount = state.items.filter((i) => itemProgressState(i.id) === "watched").length;
@@ -2834,18 +2851,24 @@
       : "";
 
     els.stats.innerHTML = `
-      <span class="header__stat-chip">
+      <button type="button" class="header__stat-chip header__stat-chip--filter${headerStatChipActiveClass("all")}"
+        data-action="filter-watched" data-watched-filter="all"
+        aria-label="${escapeHtml(t("stats.filterAll"))}">
         <span class="header__stat-value text-num">${total}</span>
         <span class="header__stat-label">${escapeHtml(t("stats.totalWord"))}</span>
-      </span>
-      <span class="header__stat-chip header__stat-chip--watched">
+      </button>
+      <button type="button" class="header__stat-chip header__stat-chip--watched header__stat-chip--filter${headerStatChipActiveClass("watched")}"
+        data-action="filter-watched" data-watched-filter="watched"
+        aria-label="${escapeHtml(t("stats.filterWatched"))}">
         <span class="header__stat-value text-num">${watchedCount}</span>
         <span class="header__stat-label">${escapeHtml(t("stats.watchedWord"))}</span>
-      </span>
-      ${inProgressCount > 0 ? `<span class="header__stat-chip header__stat-chip--in-progress">
+      </button>
+      <button type="button" class="header__stat-chip header__stat-chip--in-progress header__stat-chip--filter${headerStatChipActiveClass("inProgress")}"
+        data-action="filter-watched" data-watched-filter="inProgress"
+        aria-label="${escapeHtml(t("stats.filterInProgress"))}">
         <span class="header__stat-value text-num">${inProgressCount}</span>
         <span class="header__stat-label">${escapeHtml(t("stats.inProgressWord"))}</span>
-      </span>` : ""}
+      </button>
       ${syncHtml}
     `;
 
@@ -7144,9 +7167,13 @@
     });
 
     els.watchedFilter?.addEventListener("change", () => {
-      state.watchedFilter = els.watchedFilter.value || "all";
-      saveUiPrefs();
-      render();
+      applyWatchedFilter(els.watchedFilter.value || "all");
+    });
+
+    els.stats?.addEventListener("click", (event) => {
+      const chip = event.target.closest("[data-action='filter-watched']");
+      if (!chip) return;
+      applyWatchedFilter(chip.dataset.watchedFilter || "all");
     });
 
     els.ratingFilter?.addEventListener("change", () => {

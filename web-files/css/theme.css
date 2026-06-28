@@ -125,6 +125,38 @@ html:not([data-theme]) .list-title-dropdown__trigger {
   flex-shrink: 0;
 }
 
+.header__stat-chip--filter {
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.header__stat-chip--filter:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border-strong, #525252);
+}
+
+.header__stat-chip--filter:focus-visible {
+  outline: 2px solid var(--accent, #7c6aff);
+  outline-offset: 2px;
+}
+
+.header__stat-chip--filter.header__stat-chip--active {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: color-mix(in srgb, var(--accent, #7c6aff) 45%, var(--border));
+}
+
+.header__stat-chip--filter.header__stat-chip--active.header__stat-chip--watched {
+  border-color: color-mix(in srgb, var(--watched) 55%, var(--border));
+  background: color-mix(in srgb, var(--watched) 10%, transparent);
+}
+
+.header__stat-chip--filter.header__stat-chip--active.header__stat-chip--in-progress {
+  border-color: color-mix(in srgb, var(--in-progress, #fb923c) 55%, var(--border));
+  background: color-mix(in srgb, var(--in-progress, #fb923c) 10%, transparent);
+}
+
 .header__stat-value {
   font-weight: 600;
   font-size: 0.84rem;
