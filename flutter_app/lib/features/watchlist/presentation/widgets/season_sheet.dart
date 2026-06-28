@@ -103,27 +103,18 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
   RelatedMoviesResult? _moviesResult;
   bool _moviesLoading = false;
   int _moviesLoadToken = 0;
-  final Map<int, SeasonEpisodesResult> _episodesBySeason = {};
-  final GlobalKey _seasonControlsKey = GlobalKey();
-  bool _showScrollToSeasons = false;
-  final TextEditingController _episodeJumpController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _noSpecials = widget.item.noSpecials == true;
     _selectedSeasonNum = widget.item.selectedSeason;
-    widget.scrollController?.addListener(_onDetailScroll);
     _resolveAndLoad();
   }
 
   @override
   void didUpdateWidget(covariant TitleSeasonsPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.scrollController != widget.scrollController) {
-      oldWidget.scrollController?.removeListener(_onDetailScroll);
-      widget.scrollController?.addListener(_onDetailScroll);
-    }
     if (widget.item.noSpecials == true && !_noSpecials) {
       setState(() => _noSpecials = true);
     }
@@ -131,54 +122,15 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
 
   bool get _fillerUiAvailable {
     if (widget.item.contentType != 'anime') return false;
-    if ((_selectedSeasonNum ?? 0) <= 0) return false;
     final eps = _episodes?.episodes;
     if (eps == null || eps.isEmpty) return false;
     return eps.any((e) => AniFillerService.instance.isBadgeKind(e.fillerKind));
   }
 
-  String? _episodeJumpHint;
-
   @override
   void dispose() {
-    widget.scrollController?.removeListener(_onDetailScroll);
     _posterPersistTimer?.cancel();
-    _episodeJumpController.dispose();
     super.dispose();
-  }
-
-  void _onDetailScroll() {
-    if (!mounted) return;
-    final show = _shouldShowScrollToSeasons();
-    if (show != _showScrollToSeasons) {
-      setState(() => _showScrollToSeasons = show);
-    }
-  }
-
-  bool _shouldShowScrollToSeasons() {
-    if (_activeTab == _SeasonsDetailTab.movies) return false;
-    if (_loadingEpisodes) return false;
-    if (_episodes?.episodes?.isEmpty != false) return false;
-    final ctx = _seasonControlsKey.currentContext;
-    final scroll = widget.scrollController;
-    if (ctx == null || scroll == null || !scroll.hasClients) return false;
-    final render = ctx.findRenderObject();
-    if (render is! RenderBox || !render.hasSize) return false;
-    final offset = render.localToGlobal(Offset.zero);
-    final threshold = MediaQuery.paddingOf(context).top + 56;
-    return offset.dy + render.size.height < threshold;
-  }
-
-  void _scrollToSeasonControls() {
-    final scroll = widget.scrollController;
-    final ctx = _seasonControlsKey.currentContext;
-    if (scroll == null || !scroll.hasClients || ctx == null) return;
-    Scrollable.ensureVisible(
-      ctx,
-      duration: const Duration(milliseconds: 320),
-      curve: Curves.easeOutCubic,
-      alignment: 0,
-    );
   }
 
   Future<void> _resolveAndLoad() async {
@@ -538,83 +490,34 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
     });
   }
 
-  Future<void> _selectSeason(
-    int seasonNumber, {
-    bool forceRefresh = false,
-    bool background = false,
-  }) async {
+  Future<void> _selectSeason(int seasonNumber, {bool forceRefresh = false}) async {
     final resolution = _resolution;
     if (resolution == null || !resolution.hasUsableSource) return;
 
     if (!forceRefresh &&
-        !background &&
         _selectedSeasonNum == seasonNumber &&
         _episodes != null) {
       return;
     }
 
-    final cached = !forceRefresh ? _episodesBySeason[seasonNumber] : null;
-    if (!background && cached?.episodes?.isNotEmpty == true) {
-      final loadToken = _seasonLoadToken;
-      final seasonSummary = _seasonSummaryFor(seasonNumber, resolution);
-      _notifySeasonPresentation(seasonSummary);
-      setState(() {
-        _selectedSeasonNum = seasonNumber;
-        _episodes = cached;
-        _loadingEpisodes = false;
-        _episodeJumpHint = null;
-        _episodeJumpTarget = null;
-        _episodeJumpController.clear();
-      });
-      _patchSeasonFromEpisodeResult(seasonNumber, cached!);
-      unawaited(_loadSeasonEpisodes(
-        seasonNumber,
-        loadToken: loadToken,
-        background: true,
-      ));
-      return;
-    }
-
-    final loadToken = background ? _seasonLoadToken : ++_seasonLoadToken;
+    final loadToken = ++_seasonLoadToken;
     final seasonSummary = _seasonSummaryFor(seasonNumber, resolution);
 
-    if (!background) {
-      _notifySeasonPresentation(seasonSummary);
-      _schedulePersistSelectedSeason(
-        loadToken,
-        seasonNumber,
-        seasonSummary?.name,
-        _seasonPosterUrl(seasonSummary),
-      );
-      setState(() {
-        _selectedSeasonNum = seasonNumber;
-        _episodes = null;
-        _loadingEpisodes = true;
-        _showScrollToSeasons = false;
-        _episodeJumpHint = null;
-        _episodeJumpTarget = null;
-        _episodeJumpController.clear();
-      });
-    }
+    _notifySeasonPresentation(seasonSummary);
 
-    await _loadSeasonEpisodes(
+    _schedulePersistSelectedSeason(
+      loadToken,
       seasonNumber,
-      loadToken: loadToken,
-      background: background,
-      forceRefresh: forceRefresh,
+      seasonSummary?.name,
+      _seasonPosterUrl(seasonSummary),
     );
-  }
 
-  Future<void> _loadSeasonEpisodes(
-    int seasonNumber, {
-    required int loadToken,
-    bool background = false,
-    bool forceRefresh = false,
-  }) async {
-    final resolution = _resolution;
-    if (resolution == null) return;
+    setState(() {
+      _selectedSeasonNum = seasonNumber;
+      _episodes = null;
+      _loadingEpisodes = true;
+    });
 
-    final seasonSummary = _seasonSummaryFor(seasonNumber, resolution);
     final svc = ref.read(seriesMetadataServiceProvider);
     final locale = widget.l10n.isArabic ? 'ar' : 'en';
 
@@ -623,7 +526,6 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
         resolution: resolution,
         seasonNumber: seasonNumber,
         locale: locale,
-        seasonSummary: seasonSummary,
       );
     }
 
@@ -633,36 +535,10 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
       locale: locale,
       fallbackPoster: widget.item.poster,
       seasonSummary: seasonSummary,
-      item: widget.item,
       forceRefresh: forceRefresh,
-      onPartial: (partial) {
-        if (!mounted || loadToken != _seasonLoadToken) return;
-        if (partial.episodes?.isNotEmpty == true) {
-          _episodesBySeason[seasonNumber] = partial;
-        }
-        if (background || _selectedSeasonNum != seasonNumber) return;
-        setState(() {
-          _episodes = partial;
-          _loadingEpisodes = false;
-        });
-      },
     );
 
     if (!mounted || loadToken != _seasonLoadToken) return;
-    if (result.episodes?.isNotEmpty == true) {
-      _episodesBySeason[seasonNumber] = result;
-    }
-
-    if (background) {
-      if (_selectedSeasonNum == seasonNumber) {
-        setState(() => _episodes = result);
-        _patchSeasonFromEpisodeResult(seasonNumber, result);
-      }
-      return;
-    }
-
-    if (_selectedSeasonNum != seasonNumber) return;
-
     setState(() {
       _episodes = result;
       _loadingEpisodes = false;
@@ -674,7 +550,6 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
     }
 
     _patchSeasonFromEpisodeResult(seasonNumber, result);
-    _prefetchNeighborSeasons(seasonNumber);
 
     final patchedSeason = _seasonSummaryFor(seasonNumber, resolution);
     if (patchedSeason != null) {
@@ -686,50 +561,7 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
         _seasonPosterUrl(patchedSeason),
       );
     }
-
-    WidgetsBinding.instance.addPostFrameCallback((_) => _onDetailScroll());
   }
-
-  void _prefetchNeighborSeasons(int seasonNumber) {
-    final seasons = _series?.seasons
-            ?.where((s) => s.isRegular)
-            .toList() ??
-        [];
-    final idx = seasons.indexWhere((s) => s.seasonNumber == seasonNumber);
-    if (idx < 0) return;
-    for (final offset in [-1, 1]) {
-      final i = idx + offset;
-      if (i < 0 || i >= seasons.length) continue;
-      final neighbor = seasons[i].seasonNumber;
-      if (_episodesBySeason.containsKey(neighbor)) continue;
-      unawaited(_selectSeason(neighbor, background: true));
-    }
-  }
-
-  void _jumpToEpisodeNumber(String raw) {
-    final epNum = int.tryParse(raw.trim());
-    if (epNum == null || epNum <= 0) return;
-    final episodes = _episodes?.episodes;
-    if (episodes == null) return;
-    final seasonNum = _selectedSeasonNum;
-    if (seasonNum == null) return;
-    final exists = episodes.any(
-      (ep) =>
-          ep.seasonNumber == seasonNum && ep.episodeNumber == epNum,
-    );
-    if (!exists) {
-      setState(() {
-        _episodeJumpHint = widget.l10n.seasonsJumpToEpisodeMissing(epNum);
-      });
-      return;
-    }
-    setState(() {
-      _episodeJumpHint = null;
-      _episodeJumpTarget = epNum;
-    });
-  }
-
-  int? _episodeJumpTarget;
 
   SeasonSummary? _seasonSummaryFor(int seasonNumber, SeriesIdResolution resolution) {
     return _series?.seasons?.firstWhere(
@@ -1429,16 +1261,6 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
                     loadingEpisodes: _loadingEpisodes,
                     scrollController: widget.scrollController,
                     embedded: widget.embedded,
-                    seasonControlsKey: _seasonControlsKey,
-                    episodeJumpController: _episodeJumpController,
-                    episodeJumpHint: _episodeJumpHint,
-                    episodeJumpTarget: _episodeJumpTarget,
-                    onEpisodeJump: _jumpToEpisodeNumber,
-                    onEpisodeJumpScrolled: () {
-                      if (_episodeJumpTarget != null) {
-                        setState(() => _episodeJumpTarget = null);
-                      }
-                    },
                     onSeasonSelected: _selectSeason,
                     onTabChanged: _setActiveTab,
                     onRelatedMovieTap: (movie) =>
@@ -1465,61 +1287,29 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
                   );
 
     if (widget.embedded) {
-      return Stack(
-        clipBehavior: Clip.none,
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 8),
-              Divider(
-                height: 1,
-                color: theme.colorScheme.outline.withValues(alpha: 0.28),
-              ),
-              const SizedBox(height: 14),
-              _SeasonsTabBar(
-                l10n: l10n,
-                theme: theme,
-                tc: tc,
-                activeTab: _activeTab,
-                onTabChanged: _setActiveTab,
-              ),
-              const SizedBox(height: 8),
-              content,
-            ],
+          const SizedBox(height: 8),
+          Divider(
+            height: 1,
+            color: theme.colorScheme.outline.withValues(alpha: 0.28),
           ),
-          if (_showScrollToSeasons && widget.scrollController != null)
-            Positioned(
-              top: 8,
-              right: 0,
-              child: _ScrollToSeasonsFab(
-                label: l10n.seasonsScrollToControls,
-                onPressed: _scrollToSeasonControls,
-                theme: theme,
-                tc: tc,
-              ),
-            ),
+          const SizedBox(height: 14),
+          _SeasonsTabBar(
+            l10n: l10n,
+            theme: theme,
+            tc: tc,
+            activeTab: _activeTab,
+            onTabChanged: _setActiveTab,
+          ),
+          const SizedBox(height: 8),
+          content,
         ],
       );
     }
 
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        content,
-        if (_showScrollToSeasons && widget.scrollController != null)
-          Positioned(
-            top: 8,
-            right: 8,
-            child: _ScrollToSeasonsFab(
-              label: l10n.seasonsScrollToControls,
-              onPressed: _scrollToSeasonControls,
-              theme: theme,
-              tc: tc,
-            ),
-          ),
-      ],
-    );
+    return content;
   }
 
   Widget _loadingIndicator(ThemeData theme) {
@@ -1654,12 +1444,6 @@ class _SeasonContent extends StatelessWidget {
     required this.loadingEpisodes,
     required this.scrollController,
     required this.embedded,
-    required this.seasonControlsKey,
-    required this.episodeJumpController,
-    this.episodeJumpHint,
-    this.episodeJumpTarget,
-    required this.onEpisodeJump,
-    required this.onEpisodeJumpScrolled,
     required this.onSeasonSelected,
     required this.onTabChanged,
     required this.onRelatedMovieTap,
@@ -1690,12 +1474,6 @@ class _SeasonContent extends StatelessWidget {
   final bool loadingEpisodes;
   final ScrollController? scrollController;
   final bool embedded;
-  final GlobalKey seasonControlsKey;
-  final TextEditingController episodeJumpController;
-  final String? episodeJumpHint;
-  final int? episodeJumpTarget;
-  final ValueChanged<String> onEpisodeJump;
-  final VoidCallback onEpisodeJumpScrolled;
   final ValueChanged<int> onSeasonSelected;
   final ValueChanged<_SeasonsDetailTab> onTabChanged;
   final ValueChanged<RelatedMovie> onRelatedMovieTap;
@@ -1805,53 +1583,28 @@ class _SeasonContent extends StatelessWidget {
 
   List<Widget> _episodesBlock(SeasonSummary selSeason, [List<EpisodeDetail>? episodeList]) {
     final list = episodeList ?? episodes?.episodes ?? [];
-    final showEpisodeControls =
-        !loadingEpisodes && list.isNotEmpty;
     return [
-      KeyedSubtree(
-        key: seasonControlsKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _SeasonActionsBar(
-              season: selSeason,
-              entry: entry,
-              episodes: list,
-              l10n: l10n,
-              tc: tc,
-              theme: theme,
-              onMarkSeason: onMarkSeason,
-            ),
-            const SizedBox(height: 10),
-            _EpisodesSectionHeader(
-              season: selSeason,
-              l10n: l10n,
-              theme: theme,
-              tc: tc,
-            ),
-            if (showEpisodeControls) ...[
-              _SpoilerToggleRow(
-                l10n: l10n,
-                theme: theme,
-                hideEpisodeStills: hideEpisodeStills,
-                hideSourceRatings: hideSourceRatings,
-                hideFiller: hideFiller,
-                fillerUiAvailable: fillerUiAvailable,
-                onToggleHideStills: onToggleHideStills,
-                onToggleHideRatings: onToggleHideRatings,
-                onToggleHideFiller: onToggleHideFiller,
-              ),
-              _EpisodeJumpBar(
-                l10n: l10n,
-                theme: theme,
-                tc: tc,
-                controller: episodeJumpController,
-                hint: episodeJumpHint,
-                onSubmit: onEpisodeJump,
-              ),
-            ],
-          ],
-        ),
+      _SeasonActionsBar(
+        season: selSeason,
+        entry: entry,
+        episodes: list,
+        l10n: l10n,
+        tc: tc,
+        theme: theme,
+        onMarkSeason: onMarkSeason,
+      ),
+      const SizedBox(height: 10),
+      _EpisodesSectionHeader(season: selSeason, l10n: l10n, theme: theme, tc: tc),
+      _SpoilerToggleRow(
+        l10n: l10n,
+        theme: theme,
+        hideEpisodeStills: hideEpisodeStills,
+        hideSourceRatings: hideSourceRatings,
+        hideFiller: hideFiller,
+        fillerUiAvailable: fillerUiAvailable,
+        onToggleHideStills: onToggleHideStills,
+        onToggleHideRatings: onToggleHideRatings,
+        onToggleHideFiller: onToggleHideFiller,
       ),
       if (loadingEpisodes)
         const Padding(
@@ -1869,8 +1622,6 @@ class _SeasonContent extends StatelessWidget {
           hideEpisodeStills: hideEpisodeStills,
           hideSourceRatings: hideSourceRatings,
           hideFiller: hideFiller,
-          jumpTarget: episodeJumpTarget,
-          onJumpScrolled: onEpisodeJumpScrolled,
           onToggle: onToggleEpisode,
           onOpenEpisode: onOpenEpisode,
           onRetry: onRetryEpisodes,
@@ -2616,115 +2367,6 @@ class _EpisodesSectionHeader extends StatelessWidget {
   }
 }
 
-class _EpisodeJumpBar extends StatelessWidget {
-  const _EpisodeJumpBar({
-    required this.l10n,
-    required this.theme,
-    required this.tc,
-    required this.controller,
-    this.hint,
-    required this.onSubmit,
-  });
-
-  final L10n l10n;
-  final ThemeData theme;
-  final AppTypeColors? tc;
-  final TextEditingController controller;
-  final String? hint;
-  final ValueChanged<String> onSubmit;
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = tc?.textMuted ??
-        theme.colorScheme.onSurface.withValues(alpha: 0.55);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            l10n.seasonsJumpToEpisode,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: muted,
-              fontWeight: FontWeight.w600,
-              fontSize: 11,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  keyboardType: TextInputType.number,
-                  textInputAction: TextInputAction.go,
-                  style: theme.textTheme.bodySmall,
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: l10n.seasonsJumpToEpisodePlaceholder,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                  ),
-                  onSubmitted: onSubmit,
-                ),
-              ),
-              const SizedBox(width: 6),
-              IconButton(
-                onPressed: () => onSubmit(controller.text),
-                tooltip: l10n.seasonsJumpToEpisodeGo,
-                icon: const Icon(Icons.subdirectory_arrow_left, size: 20),
-                visualDensity: VisualDensity.compact,
-              ),
-            ],
-          ),
-          if (hint != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              hint!,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.error,
-                fontSize: 11,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _ScrollToSeasonsFab extends StatelessWidget {
-  const _ScrollToSeasonsFab({
-    required this.label,
-    required this.onPressed,
-    required this.theme,
-    required this.tc,
-  });
-
-  final String label;
-  final VoidCallback onPressed;
-  final ThemeData theme;
-  final AppTypeColors? tc;
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = tc?.titleAccent ?? theme.colorScheme.primary;
-    return Material(
-      elevation: 4,
-      color: theme.colorScheme.surfaceContainerHigh,
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: IconButton(
-        onPressed: onPressed,
-        tooltip: label,
-        icon: Icon(Icons.keyboard_arrow_up, color: accent),
-      ),
-    );
-  }
-}
-
 class _SpoilerToggleRow extends StatelessWidget {
   const _SpoilerToggleRow({
     required this.l10n,
@@ -2879,7 +2521,7 @@ class _ToggleTrack extends StatelessWidget {
   }
 }
 
-class _EpisodeListColumn extends StatefulWidget {
+class _EpisodeListColumn extends StatelessWidget {
   const _EpisodeListColumn({
     required this.season,
     required this.episodes,
@@ -2890,8 +2532,6 @@ class _EpisodeListColumn extends StatefulWidget {
     required this.hideEpisodeStills,
     required this.hideSourceRatings,
     required this.hideFiller,
-    this.jumpTarget,
-    required this.onJumpScrolled,
     required this.onToggle,
     required this.onOpenEpisode,
     required this.onRetry,
@@ -2906,53 +2546,16 @@ class _EpisodeListColumn extends StatefulWidget {
   final bool hideEpisodeStills;
   final bool hideSourceRatings;
   final bool hideFiller;
-  final int? jumpTarget;
-  final VoidCallback onJumpScrolled;
   final Future<void> Function(EpisodeDetail, bool) onToggle;
   final Future<void> Function(EpisodeDetail) onOpenEpisode;
   final VoidCallback onRetry;
 
   @override
-  State<_EpisodeListColumn> createState() => _EpisodeListColumnState();
-}
-
-class _EpisodeListColumnState extends State<_EpisodeListColumn> {
-  final Map<int, GlobalKey> _rowKeys = {};
-
-  @override
-  void didUpdateWidget(covariant _EpisodeListColumn oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final target = widget.jumpTarget;
-    if (target != null && target != oldWidget.jumpTarget) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEpisode(target));
-    }
-  }
-
-  void _scrollToEpisode(int epNum) {
-    final key = _rowKeys[epNum];
-    final ctx = key?.currentContext;
-    if (ctx == null) {
-      widget.onJumpScrolled();
-      return;
-    }
-    Scrollable.ensureVisible(
-      ctx,
-      duration: const Duration(milliseconds: 320),
-      curve: Curves.easeOutCubic,
-      alignment: 0.2,
-    );
-    widget.onJumpScrolled();
-  }
-
-  GlobalKey _keyForEpisode(int epNum) =>
-      _rowKeys.putIfAbsent(epNum, GlobalKey.new);
-
-  @override
   Widget build(BuildContext context) {
-    final seasonEps = episodesForSeason(widget.episodes, widget.season.seasonNumber)
+    final seasonEps = episodesForSeason(episodes, season.seasonNumber)
         .where(
           (ep) =>
-              !widget.hideFiller ||
+              !hideFiller ||
               !AniFillerService.instance.shouldHideEpisode(ep, true),
         )
         .toList();
@@ -2967,13 +2570,13 @@ class _EpisodeListColumnState extends State<_EpisodeListColumn> {
             spacing: 8,
             children: [
               Text(
-                widget.l10n.progressLoadError,
+                l10n.progressLoadError,
                 style: TextStyle(
-                  color: widget.theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
                 ),
               ),
               OutlinedButton(
-                onPressed: widget.onRetry,
+                onPressed: onRetry,
                 style: OutlinedButton.styleFrom(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -2983,7 +2586,7 @@ class _EpisodeListColumnState extends State<_EpisodeListColumn> {
                   shape: const StadiumBorder(),
                 ),
                 child: Text(
-                  widget.l10n.progressRetry,
+                  l10n.progressRetry,
                   style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
@@ -2999,29 +2602,19 @@ class _EpisodeListColumnState extends State<_EpisodeListColumn> {
     return Column(
       children: [
         for (final ep in seasonEps)
-          KeyedSubtree(
-            key: _keyForEpisode(ep.episodeNumber),
-            child: _EpisodeRow(
-              ep: ep,
-              seasonPoster: widget.season.poster,
-              isWatched: isEpisodeWatched(
-                widget.entry,
-                ep.seasonNumber,
-                ep.episodeNumber,
-              ),
-              userRating: getEpisodeRating(
-                widget.entry,
-                ep.seasonNumber,
-                ep.episodeNumber,
-              ),
-              hideEpisodeStills: widget.hideEpisodeStills,
-              hideSourceRatings: widget.hideSourceRatings,
-              l10n: widget.l10n,
-              tc: widget.tc,
-              theme: widget.theme,
-              onToggle: (val) => widget.onToggle(ep, val),
-              onOpen: () => widget.onOpenEpisode(ep),
-            ),
+          _EpisodeRow(
+            ep: ep,
+            seasonPoster: season.poster,
+            isWatched:
+                isEpisodeWatched(entry, ep.seasonNumber, ep.episodeNumber),
+            userRating: getEpisodeRating(entry, ep.seasonNumber, ep.episodeNumber),
+            hideEpisodeStills: hideEpisodeStills,
+            hideSourceRatings: hideSourceRatings,
+            l10n: l10n,
+            tc: tc,
+            theme: theme,
+            onToggle: (val) => onToggle(ep, val),
+            onOpen: () => onOpenEpisode(ep),
           ),
       ],
     );

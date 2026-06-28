@@ -235,18 +235,6 @@ class L10n {
       _ar ? 'إخفاء تقييمات الحلقات' : 'Hide episode ratings';
   String get seasonsHideFiller =>
       _ar ? 'إخفاء حلقات الفيلر' : 'Hide filler episodes';
-  String get seasonsScrollToControls =>
-      _ar ? 'العودة إلى المواسم' : 'Back to seasons';
-  String get seasonsJumpToEpisode =>
-      _ar ? 'انتقل إلى الحلقة' : 'Go to episode';
-  String get seasonsJumpToEpisodePlaceholder =>
-      _ar ? 'رقم الحلقة' : 'Episode #';
-  String get seasonsJumpToEpisodeGo =>
-      _ar ? 'انتقل إلى الحلقة' : 'Jump to episode';
-  String seasonsJumpToEpisodeMissing(int n) => _ar
-      ? 'لا توجد حلقة $n في هذا الموسم'
-      : 'No episode $n in this season';
-  String get titleSearchClear => _ar ? 'مسح البحث' : 'Clear search';
   String get seasonsFillerBadge => _ar ? 'حشو' : 'Filler';
   String seasonsWatchedProgress(int watched, int total) => _ar
       ? '$watched / $total مشاهَد'

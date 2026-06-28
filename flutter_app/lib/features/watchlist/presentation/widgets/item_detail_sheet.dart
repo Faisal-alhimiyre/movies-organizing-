@@ -247,7 +247,6 @@ class _ItemDetailSheetState extends ConsumerState<ItemDetailSheet> {
         seasonPresentation: _seasonPresentation,
         isMobile: isMobile,
         showSeasons: _hasSeasons,
-        scrollController: widget.scrollController,
         onRate: () => _close(context, ItemDetailAction.rate),
         onQuickToggleWatched: () =>
             _close(context, ItemDetailAction.toggleWatched),
@@ -521,7 +520,6 @@ class _DetailContent extends StatelessWidget {
     this.seasonPresentation,
     required this.isMobile,
     required this.showSeasons,
-    this.scrollController,
     required this.onRate,
     required this.onQuickToggleWatched,
     required this.onSeasonPresentation,
@@ -535,7 +533,6 @@ class _DetailContent extends StatelessWidget {
   final SeasonPresentation? seasonPresentation;
   final bool isMobile;
   final bool showSeasons;
-  final ScrollController? scrollController;
   final VoidCallback onRate;
   final VoidCallback onQuickToggleWatched;
   final ValueChanged<SeasonPresentation?> onSeasonPresentation;
@@ -714,7 +711,6 @@ class _DetailContent extends StatelessWidget {
             item: item,
             watched: watched,
             embedded: true,
-            scrollController: scrollController,
             onSeasonPresentation: onSeasonPresentation,
             onHeaderReset: onHeaderReset,
           ),

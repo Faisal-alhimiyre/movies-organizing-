@@ -197,7 +197,6 @@ class SeasonSummary {
   const SeasonSummary({
     required this.source,
     this.seriesTmdbId,
-    this.anilistId,
     required this.seasonNumber,
     required this.name,
     this.poster = '',
@@ -210,9 +209,6 @@ class SeasonSummary {
 
   final String source;
   final int? seriesTmdbId;
-
-  /// AniList media id for this cour (season 2+ sequels have their own id).
-  final int? anilistId;
   final int seasonNumber;
 
   /// Display name, e.g. `'Season 1'`, `'Specials'`.
@@ -239,7 +235,6 @@ class SeasonSummary {
   Map<String, dynamic> toJson() => {
         'source': source,
         if (seriesTmdbId != null) 'seriesTmdbId': seriesTmdbId,
-        if (anilistId != null) 'anilistId': anilistId,
         'seasonNumber': seasonNumber,
         'name': name,
         'poster': poster,
@@ -253,7 +248,6 @@ class SeasonSummary {
   factory SeasonSummary.fromJson(Map<String, dynamic> json) => SeasonSummary(
         source: json['source']?.toString() ?? 'unknown',
         seriesTmdbId: json['seriesTmdbId'] as int?,
-        anilistId: json['anilistId'] as int?,
         seasonNumber: json['seasonNumber'] as int? ?? 0,
         name: json['name']?.toString() ?? '',
         poster: json['poster']?.toString() ?? '',
