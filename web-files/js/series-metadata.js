@@ -132,33 +132,6 @@
   const TTL_RESOLVE = 30 * 24 * 60 * 60 * 1000;       // 30 days
   const TTL_NEGATIVE = 2 * 60 * 60 * 1000;            // 2 hours
   const STALE_RATIO = 0.8;
-  const FETCH_TIMEOUT_MS = 40000;
-  const ANILIST_CHAIN_TIMEOUT_MS = 60000;
-  const EPISODE_ENRICH_TIMEOUT_MS = 30000;
-
-  function isBrowserOffline() {
-    return typeof navigator !== "undefined" && navigator.onLine === false;
-  }
-
-  /** Distinguish real offline from transient API/network failures on mobile. */
-  function failWithoutCache(debugMessage) {
-    return {
-      state: isBrowserOffline()
-        ? ResultState.OFFLINE_NO_CACHE
-        : ResultState.API_FAILURE,
-      debugMessage,
-    };
-  }
-
-  async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      return await fetch(url, { ...options, signal: controller.signal });
-    } finally {
-      clearTimeout(timer);
-    }
-  }
 
   // ─── Result state enum ────────────────────────────────────────
   const ResultState = Object.freeze({
@@ -534,17 +507,11 @@
    * Season 1 = your item's AniList link. Season 2+ = each cour's own ID on the season card.
    */
   function pickSeasonAnilistId(seasonSummary, resolution, seasonNumber) {
-    const sn = Number(seasonNumber);
-    const root = Number(resolution?.anilistId);
     const fromSummary = Number(seasonSummary?.anilistId);
-    if (Number.isFinite(fromSummary) && fromSummary > 0) {
-      // Cached season rows sometimes repeat the root ID — never use it for S2+.
-      if (Number.isFinite(sn) && sn > 1 && Number.isFinite(root) && fromSummary === root) {
-        return null;
-      }
-      return fromSummary;
-    }
+    if (Number.isFinite(fromSummary) && fromSummary > 0) return fromSummary;
+    const sn = Number(seasonNumber);
     if (!Number.isFinite(sn) || sn <= 1) {
+      const root = Number(resolution?.anilistId);
       return Number.isFinite(root) && root > 0 ? root : null;
     }
     return null;
@@ -760,7 +727,7 @@
     if (stale?.payload) {
       return parseCachedSeriesResult(stale, { isStale: true, forceState: ResultState.OFFLINE_WITH_CACHE });
     }
-    return failWithoutCache(`TMDb tv/${tmdbId} failed`);
+    return { state: ResultState.OFFLINE_NO_CACHE, debugMessage: `TMDb tv/${tmdbId} failed` };
   }
 
   function normalizeTmdbSeriesResult(json, tmdbId, fallbackPoster) {
@@ -854,57 +821,6 @@
       if (epTitle && epTitle === rootTitles[i]) hits++;
     }
     return hits >= 3;
-  }
-
-  /** Reject cached/wrong cour episode lists before painting (sequel seasons). */
-  function episodesPlausibleForSeason(
-    episodes,
-    seasonSummary,
-    seasonNumber,
-    { seasonAnilistId = null, rootAnilistId = null } = {}
-  ) {
-    const sn = Number(seasonNumber);
-    const count = episodes?.length || 0;
-    if (!count) return false;
-
-    const root = Number(rootAnilistId);
-    const seasonId = Number(seasonAnilistId);
-    if (sn > 1 && Number.isFinite(root) && Number.isFinite(seasonId) && seasonId === root) {
-      return false;
-    }
-
-    const expected = parsePositiveCount(seasonSummary?.episodeCount);
-    if (expected != null && expected > 0 && count > expected + 3) {
-      return false;
-    }
-
-    return true;
-  }
-
-  /** Fix season rows that repeat the root AniList ID (bad disk cache from older builds). */
-  async function repairSeasonAnilistIds(resolution, seasons) {
-    const root = Number(resolution?.anilistId);
-    if (!Number.isFinite(root) || !Array.isArray(seasons) || seasons.length < 2) {
-      return seasons;
-    }
-    const needsRepair = seasons.some((s) => {
-      const sn = Number(s.seasonNumber);
-      const aid = Number(s.anilistId);
-      return Number.isFinite(sn) && sn > 1 && (!Number.isFinite(aid) || aid === root);
-    });
-    if (!needsRepair) return seasons;
-
-    const ids = await getAnilistSeasonChainIds(root);
-    if (ids.length < 2) return seasons;
-
-    return seasons.map((s) => {
-      const sn = Number(s.seasonNumber);
-      if (!Number.isFinite(sn) || sn < 1) return s;
-      const chainId = ids[sn - 1];
-      if (!chainId) return s;
-      if (Number(s.anilistId) === chainId) return s;
-      return { ...s, anilistId: chainId };
-    });
   }
 
   function episodesLackEnglishTitles(episodes, locale) {
@@ -1012,35 +928,11 @@
     if (resolution?.isNegative) return { state: ResultState.INVALID_ID };
     const effectivePoster = seasonSummary?.poster || fallbackPoster;
 
-    const sn = Number(seasonNumber) || 0;
-    const rootAnilistId = Number(resolution?.anilistId);
-
-    let seasonAnilistId = pickSeasonAnilistId(
+    const seasonAnilistId = pickSeasonAnilistId(
       seasonSummary,
       resolution,
       seasonNumber
     );
-    // Sequel seasons must use their cour's own AniList ID — never the series root.
-    if (sn > 1 && Number.isFinite(rootAnilistId)) {
-      if (!seasonAnilistId || seasonAnilistId === rootAnilistId) {
-        seasonAnilistId = await resolveSeasonAnilistId(
-          seasonSummary,
-          resolution,
-          seasonNumber
-        );
-        repairSeasonSummaryAnilistId(seasonSummary, seasonAnilistId);
-      }
-      if (!seasonAnilistId || seasonAnilistId === rootAnilistId) {
-        console.warn(
-          "[series-metadata] season",
-          sn,
-          "could not resolve cour anilistId (root",
-          rootAnilistId,
-          ")"
-        );
-        seasonAnilistId = null;
-      }
-    }
 
     const emitPartial = (partial) => {
       if (typeof onPartial !== "function") return;
@@ -1049,14 +941,6 @@
       if (
         partial?.state === ResultState.OFFLINE_NO_CACHE ||
         partial?.state === ResultState.UNAVAILABLE
-      ) {
-        return;
-      }
-      if (
-        !episodesPlausibleForSeason(partial.episodes, seasonSummary, sn, {
-          seasonAnilistId,
-          rootAnilistId,
-        })
       ) {
         return;
       }
@@ -1108,9 +992,7 @@
       );
     };
 
-    let anilistEpisodesAttempted = false;
     if (seasonAnilistId) {
-      anilistEpisodesAttempted = true;
       try {
         // Resolve IMDb in parallel — do not block the first episode paint on it.
         const seasonImdbPromise = resolveSeasonImdbForCour(
@@ -1123,64 +1005,36 @@
         const anilistRaw = await fetchAnilistEpisodes(
           seasonAnilistId,
           seasonNumber,
-          effectivePoster,
-          { rootAnilistId, seasonSummary }
+          effectivePoster
         );
         let result = normalizeEpisodesToAppSeason(anilistRaw, seasonNumber);
-        if (
-          sn > 1 &&
-          Number.isFinite(rootAnilistId) &&
-          result?.episodes?.length &&
-          !episodesPlausibleForSeason(result.episodes, seasonSummary, sn, {
-            seasonAnilistId,
-            rootAnilistId,
-          })
-        ) {
-          console.warn(
-            "[series-metadata] rejected episode list for season",
-            sn,
-            "— looks like wrong cour"
-          );
-          result = { state: ResultState.UNAVAILABLE };
-        }
         emitPartial(result);
 
         const seasonImdb = await seasonImdbPromise;
 
-        const enrichJob = (async () => {
-          let enriched = result;
-          if (item?.contentType === "anime" || resolution?.anilistId) {
-            enriched = await enrichAnilistEpisodesWithTvdb(
-              enriched,
-              resolution,
-              seasonNumber,
-              locale,
-              effectivePoster,
-              item,
-              seasonSummary,
-              seasonAnilistId,
-              seasonImdb
-            );
-            enriched = normalizeEpisodesToAppSeason(enriched, seasonNumber);
-            emitPartial(enriched);
-          }
-          const epCount = enriched?.episodes?.length || 0;
-          if (
-            epCount > 0 &&
-            enriched?.state !== ResultState.OFFLINE_NO_CACHE &&
-            enriched?.state !== ResultState.UNAVAILABLE
-          ) {
-            return enrichRatingsAndFiller(enriched, seasonImdb);
-          }
-          return enriched;
-        })();
-
-        const enriched = await Promise.race([
-          enrichJob,
-          new Promise((resolve) => setTimeout(() => resolve(null), EPISODE_ENRICH_TIMEOUT_MS)),
-        ]);
-        if (enriched) return enriched;
-        if (result?.episodes?.length) return result;
+        if (item?.contentType === "anime" || resolution?.anilistId) {
+          result = await enrichAnilistEpisodesWithTvdb(
+            result,
+            resolution,
+            seasonNumber,
+            locale,
+            effectivePoster,
+            item,
+            seasonSummary,
+            seasonAnilistId,
+            seasonImdb
+          );
+          result = normalizeEpisodesToAppSeason(result, seasonNumber);
+          emitPartial(result);
+        }
+        const epCount = result?.episodes?.length || 0;
+        if (
+          epCount > 0 &&
+          result?.state !== ResultState.OFFLINE_NO_CACHE &&
+          result?.state !== ResultState.UNAVAILABLE
+        ) {
+          return enrichRatingsAndFiller(result, seasonImdb);
+        }
       } catch (err) {
         console.warn(
           "[series-metadata] AniList episodes failed:",
@@ -1244,17 +1098,10 @@
           item
         );
       case "anilist":
-        // Never use the root AniList ID for season 2+ (that loads season 1 episodes).
-        if (anilistEpisodesAttempted || sn > 1) {
-          return { state: ResultState.UNAVAILABLE };
-        }
         return await enrichEpisodeRatings(
-          await fetchAnilistEpisodes(resolution.anilistId, 1, effectivePoster, {
-            rootAnilistId,
-            seasonSummary,
-          }),
+          await fetchAnilistEpisodes(resolution.anilistId, seasonNumber, effectivePoster),
           resolution,
-          1,
+          seasonNumber,
           locale,
           effectivePoster,
           item
@@ -2294,7 +2141,7 @@
     if (stale?.payload) {
       return parseCachedEpisodesResult(stale, { isStale: true, forceState: ResultState.OFFLINE_WITH_CACHE });
     }
-    return failWithoutCache(`TMDb season ${season} failed`);
+    return { state: ResultState.OFFLINE_NO_CACHE };
   }
 
   function normalizeTmdbSeasonEpisodes(json, tmdbId, season, fallbackPoster = "") {
@@ -2697,48 +2544,13 @@
     return { state: ResultState.NO_SEASONS, movies: [] };
   }
 
-  function cachedSeriesFallback(cacheKey, preferFresh = null) {
-    const fresh = preferFresh?.payload ? preferFresh : readCached(cacheKey, TTL_SERIES);
-    if (fresh?.payload?.seasons?.length) {
-      return parseCachedSeriesResult(fresh, {
-        isStale: true,
-        forceState: ResultState.OFFLINE_WITH_CACHE,
-      });
-    }
-    const stale = readCacheStale(cacheKey);
-    if (stale?.payload?.seasons?.length) {
-      return parseCachedSeriesResult(stale, {
-        isStale: true,
-        forceState: ResultState.OFFLINE_WITH_CACHE,
-      });
-    }
-    return null;
-  }
-
   async function fetchAnilistSeriesMetadata(anilistId, locale, fallbackPoster = "") {
     const cacheKey = `metadata:v13:series:anilist:${anilistId}:${locale}`;
     const cached = readCached(cacheKey, TTL_SERIES);
-    const staleCached = !cached?.payload?.seasons?.length
-      ? readCacheStale(cacheKey)
-      : null;
-
-    if (cached?.payload?.seasons?.length) {
-      const needsRepair = seasonsNeedChainRepair(cached.payload.seasons, anilistId);
-      if (!needsRepair) {
+    if (cached?.payload) {
+      if (!seasonsNeedChainRepair(cached.payload.seasons, anilistId)) {
         return parseCachedSeriesResult(cached, { isStale: isStale(cacheKey, TTL_SERIES) });
       }
-      // Show cached seasons immediately — cour IDs are fixed when episodes load.
-      return parseCachedSeriesResult(cached, {
-        isStale: true,
-        forceState: ResultState.AVAILABLE,
-      });
-    }
-
-    if (staleCached?.payload?.seasons?.length && isAnilistRateLimited()) {
-      return parseCachedSeriesResult(staleCached, {
-        isStale: true,
-        forceState: ResultState.OFFLINE_WITH_CACHE,
-      });
     }
 
     const data = await anilistQuery(
@@ -2776,9 +2588,11 @@
 
     const media = data?.Media;
     if (!media) {
-      const fallback = cachedSeriesFallback(cacheKey, cached || staleCached);
-      if (fallback) return fallback;
-      return failWithoutCache("AniList series metadata failed");
+      const stale = readCacheStale(cacheKey);
+      if (stale?.payload) {
+        return parseCachedSeriesResult(stale, { isStale: true, forceState: ResultState.OFFLINE_WITH_CACHE });
+      }
+      return { state: ResultState.OFFLINE_NO_CACHE };
     }
 
     const title =
@@ -2786,23 +2600,7 @@
     const posterUrl = media.coverImage?.large || fallbackPoster || "";
     const streamingCount = (media.streamingEpisodes || []).length;
 
-    let seasonChain;
-    try {
-      seasonChain = await Promise.race([
-        collectAnilistSeasonChain(media),
-        new Promise((_, reject) => {
-          setTimeout(() => reject(new Error("anilist-chain-timeout")), ANILIST_CHAIN_TIMEOUT_MS);
-        }),
-      ]);
-    } catch (err) {
-      console.warn(
-        "[series-metadata] AniList season chain failed:",
-        err?.message || err
-      );
-      const fallback = cachedSeriesFallback(cacheKey, cached || staleCached);
-      if (fallback) return fallback;
-      seasonChain = [media];
-    }
+    const seasonChain = await collectAnilistSeasonChain(media);
     const seasons = seasonChain.map((node, idx) =>
       buildAnilistSeasonSummary(node, idx + 1, posterUrl)
     );
@@ -2875,39 +2673,16 @@
     };
   }
 
-  async function fetchAnilistEpisodes(
-    anilistId,
-    seasonNumber,
-    fallbackPoster = "",
-    { rootAnilistId = null, seasonSummary = null } = {}
-  ) {
+  async function fetchAnilistEpisodes(anilistId, seasonNumber, fallbackPoster = "") {
     const appSeasonNumber = Number(seasonNumber) || 1;
-    const aid = Number(anilistId);
-    const root = rootAnilistId != null ? Number(rootAnilistId) : null;
     void fallbackPoster;
 
-    if (appSeasonNumber > 1 && Number.isFinite(root) && aid === root) {
-      return {
-        state: ResultState.UNAVAILABLE,
-        debugMessage: "refused root anilistId for sequel season",
-      };
-    }
-
-    const cacheKey = `metadata:v15:episodes:anilist:${anilistId}:${appSeasonNumber}`;
-    const legacyKey = `metadata:v14:episodes:anilist:${anilistId}:${appSeasonNumber}`;
-    const cached = readCached(cacheKey, TTL_EPISODES) || readCached(legacyKey, TTL_EPISODES);
+    const cacheKey = `metadata:v14:episodes:anilist:${anilistId}:${appSeasonNumber}`;
+    const cached = readCached(cacheKey, TTL_EPISODES);
     if (cached?.payload) {
-      const parsed = parseCachedEpisodesResult(cached, {
+      return parseCachedEpisodesResult(cached, {
         isStale: isStale(cacheKey, TTL_EPISODES),
       });
-      if (
-        episodesPlausibleForSeason(parsed?.episodes, seasonSummary, appSeasonNumber, {
-          seasonAnilistId: aid,
-          rootAnilistId: root,
-        })
-      ) {
-        return parsed;
-      }
     }
 
     const data = await anilistQuery(
@@ -2924,22 +2699,14 @@
 
     const media = data?.Media;
     if (!media) {
-      const stale = readCacheStale(cacheKey) || readCacheStale(legacyKey);
+      const stale = readCacheStale(cacheKey);
       if (stale?.payload) {
-        const parsed = parseCachedEpisodesResult(stale, {
+        return parseCachedEpisodesResult(stale, {
           isStale: true,
           forceState: ResultState.OFFLINE_WITH_CACHE,
         });
-        if (
-          episodesPlausibleForSeason(parsed?.episodes, seasonSummary, appSeasonNumber, {
-            seasonAnilistId: aid,
-            rootAnilistId: root,
-          })
-        ) {
-          return parsed;
-        }
       }
-      return failWithoutCache(`AniList episodes ${anilistId} failed`);
+      return { state: ResultState.OFFLINE_NO_CACHE };
     }
 
     const episodeCount = parsePositiveCount(media.episodes);
@@ -3125,7 +2892,7 @@
 
     const run = (async () => {
       try {
-        const res = await fetchWithTimeout(ANILIST_API, {
+        const res = await fetch(ANILIST_API, {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({ query, variables }),
@@ -3138,10 +2905,7 @@
         const json = await res.json().catch(() => null);
         if (!res.ok || (json?.errors && json.errors.length > 0)) return null;
         return json?.data ?? null;
-      } catch (err) {
-        if (err?.name === "AbortError") {
-          console.warn("[series-metadata] AniList request timed out");
-        }
+      } catch {
         return null;
       } finally {
         _anilistInflight.delete(key);
@@ -4060,9 +3824,6 @@
     regularEpisodeTotalFromSeasons,
     clearItemResolutionCache,
     cleanEpisodeOverview: cleanEpisodeOverviewText,
-    pickSeasonAnilistId,
-    repairSeasonAnilistIds,
-    episodesPlausibleForSeason,
     isTvSpecialLinkedMovie: isMovieLikeTvSpecial,
     // Normalization functions exposed for testing
     _normalizeTmdbSeries: normalizeTmdbSeries,
