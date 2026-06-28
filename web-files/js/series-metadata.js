@@ -1142,21 +1142,6 @@
             "— looks like wrong cour"
           );
           result = { state: ResultState.UNAVAILABLE };
-        } else if (
-          sn > 1 &&
-          Number.isFinite(rootAnilistId) &&
-          result?.episodes?.length &&
-          !isAnilistRateLimited()
-        ) {
-          const rootTitles = await getAnilistRootTitleFingerprint(rootAnilistId);
-          if (episodesMatchRootTitles(result.episodes, rootTitles)) {
-            console.warn(
-              "[series-metadata] rejected episode list for season",
-              sn,
-              "— matches season 1 titles"
-            );
-            result = { state: ResultState.UNAVAILABLE };
-          }
         }
         emitPartial(result);
 
@@ -2733,10 +2718,27 @@
   async function fetchAnilistSeriesMetadata(anilistId, locale, fallbackPoster = "") {
     const cacheKey = `metadata:v13:series:anilist:${anilistId}:${locale}`;
     const cached = readCached(cacheKey, TTL_SERIES);
-    if (cached?.payload) {
-      if (!seasonsNeedChainRepair(cached.payload.seasons, anilistId)) {
+    const staleCached = !cached?.payload?.seasons?.length
+      ? readCacheStale(cacheKey)
+      : null;
+
+    if (cached?.payload?.seasons?.length) {
+      const needsRepair = seasonsNeedChainRepair(cached.payload.seasons, anilistId);
+      if (!needsRepair) {
         return parseCachedSeriesResult(cached, { isStale: isStale(cacheKey, TTL_SERIES) });
       }
+      // Show cached seasons immediately — cour IDs are fixed when episodes load.
+      return parseCachedSeriesResult(cached, {
+        isStale: true,
+        forceState: ResultState.AVAILABLE,
+      });
+    }
+
+    if (staleCached?.payload?.seasons?.length && isAnilistRateLimited()) {
+      return parseCachedSeriesResult(staleCached, {
+        isStale: true,
+        forceState: ResultState.OFFLINE_WITH_CACHE,
+      });
     }
 
     const data = await anilistQuery(
@@ -2774,7 +2776,7 @@
 
     const media = data?.Media;
     if (!media) {
-      const fallback = cachedSeriesFallback(cacheKey, cached);
+      const fallback = cachedSeriesFallback(cacheKey, cached || staleCached);
       if (fallback) return fallback;
       return failWithoutCache("AniList series metadata failed");
     }
@@ -2797,7 +2799,7 @@
         "[series-metadata] AniList season chain failed:",
         err?.message || err
       );
-      const fallback = cachedSeriesFallback(cacheKey, cached);
+      const fallback = cachedSeriesFallback(cacheKey, cached || staleCached);
       if (fallback) return fallback;
       seasonChain = [media];
     }
@@ -2892,7 +2894,8 @@
     }
 
     const cacheKey = `metadata:v15:episodes:anilist:${anilistId}:${appSeasonNumber}`;
-    const cached = readCached(cacheKey, TTL_EPISODES);
+    const legacyKey = `metadata:v14:episodes:anilist:${anilistId}:${appSeasonNumber}`;
+    const cached = readCached(cacheKey, TTL_EPISODES) || readCached(legacyKey, TTL_EPISODES);
     if (cached?.payload) {
       const parsed = parseCachedEpisodesResult(cached, {
         isStale: isStale(cacheKey, TTL_EPISODES),
@@ -2921,7 +2924,7 @@
 
     const media = data?.Media;
     if (!media) {
-      const stale = readCacheStale(cacheKey);
+      const stale = readCacheStale(cacheKey) || readCacheStale(legacyKey);
       if (stale?.payload) {
         const parsed = parseCachedEpisodesResult(stale, {
           isStale: true,

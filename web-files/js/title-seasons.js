@@ -1254,9 +1254,6 @@
           overview: cleanOverview(season.overview) || "",
         }));
       }
-      if (_resolution?.anilistId && meta.repairSeasonAnilistIds) {
-        result.seasons = await meta.repairSeasonAnilistIds(_resolution, result.seasons);
-      }
     }
 
     _seriesResult = result;
@@ -1281,7 +1278,12 @@
         break;
 
       case RS.API_FAILURE:
-        showError(t("seasons.error"), "retry-series");
+        if (result?.seasons?.length) {
+          renderSeasonsSection(result);
+          showStale(t("seasons.staleWarning"));
+        } else {
+          showError(t("seasons.error"), "retry-series");
+        }
         break;
 
       case RS.RATE_LIMITED:
