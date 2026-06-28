@@ -312,7 +312,9 @@ html:not([data-theme]) .gate__input,
 html[data-theme="dark"] .form-input,
 html:not([data-theme]) .form-input,
 html[data-theme="dark"] .form-textarea,
-html:not([data-theme]) .form-textarea {
+html:not([data-theme]) .form-textarea,
+html[data-theme="dark"] .tds-episode-jump__input,
+html:not([data-theme]) .tds-episode-jump__input {
   background-color: var(--search-field-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -343,7 +345,9 @@ html:not([data-theme]) .gate__input::placeholder,
 html[data-theme="dark"] .form-input::placeholder,
 html:not([data-theme]) .form-input::placeholder,
 html[data-theme="dark"] .form-textarea::placeholder,
-html:not([data-theme]) .form-textarea::placeholder {
+html:not([data-theme]) .form-textarea::placeholder,
+html[data-theme="dark"] .tds-episode-jump__input::placeholder,
+html:not([data-theme]) .tds-episode-jump__input::placeholder {
   color: #a8a8a8;
 }
 
@@ -364,7 +368,9 @@ html:not([data-theme]) .gate__input:focus,
 html[data-theme="dark"] .form-input:focus,
 html:not([data-theme]) .form-input:focus,
 html[data-theme="dark"] .form-textarea:focus,
-html:not([data-theme]) .form-textarea:focus {
+html:not([data-theme]) .form-textarea:focus,
+html[data-theme="dark"] .tds-episode-jump__input:focus,
+html:not([data-theme]) .tds-episode-jump__input:focus {
   border-color: #525252;
   box-shadow: none;
   outline: none;

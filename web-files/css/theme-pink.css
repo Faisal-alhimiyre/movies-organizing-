@@ -128,7 +128,8 @@ html[data-theme="pink"] .type-tab:hover {
 html[data-theme="pink"] .search__input,
 html[data-theme="pink"] .gate__input,
 html[data-theme="pink"] .form-input,
-html[data-theme="pink"] .form-textarea {
+html[data-theme="pink"] .form-textarea,
+html[data-theme="pink"] .tds-episode-jump__input {
   color: #ffffff;
   background: linear-gradient(
     180deg,
@@ -142,7 +143,8 @@ html[data-theme="pink"] .form-textarea {
 html[data-theme="pink"] .search__input::placeholder,
 html[data-theme="pink"] .gate__input::placeholder,
 html[data-theme="pink"] .form-input::placeholder,
-html[data-theme="pink"] .form-textarea::placeholder {
+html[data-theme="pink"] .form-textarea::placeholder,
+html[data-theme="pink"] .tds-episode-jump__input::placeholder {
   color: rgba(255, 255, 255, 0.65);
 }
 
@@ -162,7 +164,8 @@ html[data-theme="pink"] .select {
 html[data-theme="pink"] .search__input:focus,
 html[data-theme="pink"] .select:focus,
 html[data-theme="pink"] .form-input:focus,
-html[data-theme="pink"] .form-textarea:focus {
+html[data-theme="pink"] .form-textarea:focus,
+html[data-theme="pink"] .tds-episode-jump__input:focus {
   border-color: rgba(255, 180, 205, 0.48);
   box-shadow:
     0 0 0 3px rgba(255, 140, 180, 0.16),

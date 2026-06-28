@@ -245,11 +245,19 @@
   function mergeAnimeEpisodeOverview(anilistOverview, tvdbOverview, locale) {
     const tv = String(tvdbOverview || "").trim();
     const al = String(anilistOverview || "").trim();
-    if (locale === "ar") return pickLocalizedOverview(tv, al);
-    if (tv && isLatinDominant(tv)) return tv;
-    if (al && isLatinDominant(al)) return al;
-    // Prefer any TVDB text over blank (common when only Japanese translation exists).
-    return tv || al;
+    let merged = "";
+    if (locale === "ar") merged = pickLocalizedOverview(tv, al);
+    else if (tv && isLatinDominant(tv)) merged = tv;
+    else if (al && isLatinDominant(al)) merged = al;
+    return cleanEpisodeOverviewText(merged);
+  }
+
+  function pickLatinEpisodeOverview(primary, english) {
+    const en = String(english || "").trim();
+    const primaryText = String(primary || "").trim();
+    if (en && isLatinDominant(en)) return en;
+    if (primaryText && isLatinDominant(primaryText)) return primaryText;
+    return "";
   }
 
   function pickLocalizedEpisodeText(localText, enText, epNum) {
@@ -275,7 +283,9 @@
     );
     return {
       ...localResult,
-      seasonOverview: pickLocalizedOverview(localResult.seasonOverview, enResult.seasonOverview),
+      seasonOverview: cleanEpisodeOverviewText(
+        pickLocalizedOverview(localResult.seasonOverview, enResult.seasonOverview)
+      ),
       episodes: localResult.episodes.map((ep) => {
         const key = ep.progressKey || `${ep.seasonNumber}:${ep.episodeNumber}`;
         const enEp = enByKey.get(key);
@@ -285,7 +295,9 @@
           ...ep,
           title: pickLocalizedEpisodeText(ep.title, enEp.title, epNum)
             || `Episode ${epNum}`,
-          overview: pickLocalizedOverview(ep.overview, enEp.overview),
+          overview: cleanEpisodeOverviewText(
+            pickLocalizedOverview(ep.overview, enEp.overview)
+          ),
         };
       }),
     };
@@ -742,7 +754,7 @@
       totalSeasons: parsePositiveCount(json.number_of_seasons),
       totalEpisodes: parsePositiveCount(json.number_of_episodes),
       poster,
-      overview: json.overview || "",
+      overview: cleanEpisodeOverviewText(json.overview || ""),
       status: json.status || null,
       firstAirDate: json.first_air_date || null,
       lastAirDate: json.last_air_date || null,
@@ -767,7 +779,7 @@
       name: json.name || `Season ${num}`,
       poster,
       episodeCount: parsePositiveCount(json.episode_count),
-      overview: json.overview || "",
+      overview: cleanEpisodeOverviewText(json.overview || ""),
       airDate: json.air_date || null,
       isSpecials: num === 0,
       isSynthetic: false,
@@ -996,8 +1008,15 @@
               tvdbResult?.state === ResultState.OFFLINE_WITH_CACHE) &&
             epCount > 0
           ) {
+            const episodes = await preferTmdbEpisodeOverviews(
+              tvdbResult.episodes,
+              resolution,
+              seasonNumber,
+              locale,
+              effectivePoster
+            );
             return await enrichEpisodeRatings(
-              tvdbResult,
+              { ...tvdbResult, episodes },
               resolution,
               seasonNumber,
               locale,
@@ -1501,7 +1520,7 @@
       if (memOk) return memCached;
     }
 
-    const cacheKey = `metadata:v9:alleps:absolute:${tvdbId}:en`;
+    const cacheKey = `metadata:v10:alleps:absolute:${tvdbId}:en`;
     const cached = readCached(cacheKey, TTL_EPISODES);
     if (cached?.payload?.episodes) {
       const parsed = parseCachedEpisodesResult(cached, {
@@ -1567,6 +1586,46 @@
       );
     }
     return flat;
+  }
+
+  /** Grow an AniList stub list when TVDB absolute order has more episodes (e.g. One Piece). */
+  function expandEpisodeListFromTvdbSkeleton(anilistEpisodes, tvdbEpisodes, seasonNumber) {
+    const seasonNum = Number(seasonNumber) || 1;
+    const priorByNum = new Map(
+      (anilistEpisodes || []).map((ep) => [ep.episodeNumber, ep])
+    );
+    return (tvdbEpisodes || []).map((tvdbEp) => {
+      const num = Number(tvdbEp.episodeNumber);
+      const prior = priorByNum.get(num);
+      return {
+        source: prior?.source || "anilist",
+        seasonNumber: seasonNum,
+        episodeNumber: num,
+        title:
+          prior?.title ||
+          tvdbEp.title ||
+          (Number.isFinite(num) ? `Episode ${num}` : "Episode"),
+        still: prior?.still || tvdbEp.still || "",
+        overview: prior?.overview || "",
+        runtimeMinutes: prior?.runtimeMinutes ?? tvdbEp.runtimeMinutes ?? null,
+        airDate: prior?.airDate || tvdbEp.airDate || null,
+        isAired: prior?.isAired ?? tvdbEp.isAired ?? true,
+        progressKey: `${seasonNum}:${num}`,
+      };
+    });
+  }
+
+  async function resolveTvdbMegaEpisodeMin(tvdbId, locale, floor = 0) {
+    const minFloor = Number(floor) || 0;
+    if (!tvdbId || !window.WatchlistTvdb?.fetchEpisodeTotals) return minFloor;
+    try {
+      const totals = await window.WatchlistTvdb.fetchEpisodeTotals(tvdbId, locale);
+      const total = parsePositiveCount(totals?.episodeTotal);
+      if (total > minFloor) return total;
+    } catch {
+      // Totals are optional — absolute fetch still runs.
+    }
+    return minFloor;
   }
 
   /**
@@ -1661,13 +1720,22 @@
     let tvdbEpisodes = [];
     const tvdbSeasonNum = Number(seasonNumber) > 0 ? Number(seasonNumber) : 1;
     const tvdbLocale = locale === "ar" ? "ar" : "en";
+    let tvdbExpectedMin = episodes.length;
+
+    if (longRunner) {
+      tvdbExpectedMin = await resolveTvdbMegaEpisodeMin(
+        tvdbId,
+        tvdbLocale,
+        episodes.length
+      );
+    }
 
     if (longRunner) {
       tvdbEpisodes = await fetchTvdbAllEpisodesFlat(
         tvdbId,
         tvdbLocale,
         fallbackPoster,
-        episodes.length
+        tvdbExpectedMin
       );
     } else {
       const tvdbResult = await fetchTvdbSeasonEpisodes(
@@ -1689,16 +1757,36 @@
       return result;
     }
 
+    let workingEpisodes = episodes;
+    if (longRunner && tvdbEpisodes.length > workingEpisodes.length) {
+      workingEpisodes = expandEpisodeListFromTvdbSkeleton(
+        workingEpisodes,
+        tvdbEpisodes,
+        seasonNumber
+      );
+      console.info(
+        "[series-metadata] TVDB mega-runner expand:",
+        episodes.length,
+        "→",
+        workingEpisodes.length,
+        "episodes (tvdb",
+        tvdbId,
+        ")"
+      );
+    }
+
+    const expandedFromTvdb = workingEpisodes.length > episodes.length;
     if (
       longRunner &&
-      episodes.length > 40 &&
-      tvdbEpisodes.length < Math.ceil(episodes.length * 0.85)
+      !expandedFromTvdb &&
+      workingEpisodes.length > 40 &&
+      tvdbEpisodes.length < Math.ceil(workingEpisodes.length * 0.85)
     ) {
       console.warn(
         "[series-metadata] TVDB enrich: episode count mismatch for anilist",
         seasonAnilistId,
         "expected",
-        episodes.length,
+        workingEpisodes.length,
         "got",
         tvdbEpisodes.length,
         "tvdb",
@@ -1719,7 +1807,7 @@
       longRunner ? "(absolute)" : `(season ${tvdbSeasonNum})`
     );
 
-    tvdbEpisodes = tvdbEpisodes.slice(0, episodes.length);
+    tvdbEpisodes = tvdbEpisodes.slice(0, workingEpisodes.length);
 
     const tvdbByEpisodeNumber = new Map();
     for (const tvdbEp of tvdbEpisodes) {
@@ -1729,7 +1817,7 @@
       }
     }
 
-    const merged = episodes.map((ep, idx) => {
+    const merged = workingEpisodes.map((ep, idx) => {
       const tvdbEp =
         tvdbByEpisodeNumber.get(ep.episodeNumber) || tvdbEpisodes[idx];
       if (!tvdbEp) return ep;
@@ -1751,9 +1839,25 @@
       };
     });
 
+    let finalEpisodes = merged;
+    if (!longRunner) {
+      finalEpisodes = await preferTmdbEpisodeOverviews(
+        merged,
+        { ...resolution, imdbId: linkedImdb || resolution?.imdbId },
+        seasonNumber,
+        locale,
+        fallbackPoster
+      );
+    } else {
+      finalEpisodes = merged.map((ep) => ({
+        ...ep,
+        overview: cleanEpisodeOverviewText(ep.overview),
+      }));
+    }
+
     return {
       ...result,
-      episodes: merged,
+      episodes: finalEpisodes,
       state: ResultState.AVAILABLE,
     };
   }
@@ -1977,7 +2081,7 @@
       state: episodes.length === 0 ? ResultState.NO_SEASONS : ResultState.AVAILABLE,
       episodes,
       seasonPoster,
-      seasonOverview: json.overview || "",
+      seasonOverview: cleanEpisodeOverviewText(json.overview || ""),
     };
   }
 
@@ -2000,7 +2104,7 @@
       episodeNumber: json.episode_number,
       title: json.name || `Episode ${json.episode_number}`,
       still,
-      overview: json.overview || "",
+      overview: cleanEpisodeOverviewText(json.overview || ""),
       runtimeMinutes: json.runtime || null,
       airDate,
       isAired: isAired(airDate),
@@ -2141,8 +2245,233 @@
     };
   }
 
+  /**
+   * Movies linked to the franchise (AniList relations, format MOVIE only).
+   */
+  function collectAnilistRelatedMoviesFromSources(sources, chainIds) {
+    const seen = new Set();
+    const movies = [];
+
+    for (const media of sources || []) {
+      for (const edge of media.relations?.edges || []) {
+        const node = edge?.node;
+        if (!node || node.type !== "ANIME") continue;
+        const id = Number(node.id);
+        if (!Number.isFinite(id) || chainIds.has(id) || seen.has(id)) continue;
+        if (anilistSeasonFormat(node.format) !== "MOVIE") continue;
+        if (String(edge.relationType || "").toUpperCase() === "CHARACTER") continue;
+        seen.add(id);
+        movies.push({ node, relationType: String(edge.relationType || "").toUpperCase() });
+      }
+    }
+
+    movies.sort(
+      (a, b) =>
+        anilistStartSortKey(a.node.startDate) - anilistStartSortKey(b.node.startDate)
+    );
+    return movies;
+  }
+
+  function normalizeAnilistRelatedMovie(node) {
+    const title =
+      node.title?.english || node.title?.romaji || node.title?.native || "";
+    const duration = parsePositiveCount(node.duration);
+    return {
+      source: "anilist",
+      anilistId: Number(node.id),
+      title,
+      poster: node.coverImage?.large || "",
+      year: node.startDate?.year ? String(node.startDate.year) : "",
+      overview: stripHtml(node.description || ""),
+      runtimeMinutes: duration,
+      score: node.averageScore != null ? Number(node.averageScore) : null,
+      pick: { anilistId: Number(node.id), source: "anilist" },
+    };
+  }
+
+  async function fetchAnilistRelatedMovies(anilistId, locale) {
+    const cacheKey = `metadata:v2:related:movies:anilist:${anilistId}:${locale}`;
+    const cached = readCached(cacheKey, TTL_SERIES);
+    if (cached?.movies) {
+      return {
+        state: cached.movies.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
+        movies: cached.movies,
+        isStale: isStale(cacheKey, TTL_SERIES),
+      };
+    }
+
+    const data = await anilistQuery(
+      `query ($id: Int) {
+        Media(id: $id, type: ANIME) {
+          id
+          format
+          ${ANILIST_SEASON_NODE_FIELDS}
+          relations {
+            edges {
+              relationType
+              node { ${ANILIST_SEASON_NODE_FIELDS} }
+            }
+          }
+        }
+      }`,
+      { id: anilistId }
+    );
+
+    const media = data?.Media;
+    if (!media) {
+      const stale = readCacheStale(cacheKey);
+      if (stale?.movies) {
+        return {
+          state: ResultState.OFFLINE_WITH_CACHE,
+          movies: stale.movies,
+          isStale: true,
+        };
+      }
+      return { state: ResultState.OFFLINE_NO_CACHE, movies: [] };
+    }
+
+    const seasonChain = await collectAnilistSeasonChain(media);
+    const chainIds = new Set(
+      seasonChain.map((n) => Number(n.id)).filter(Number.isFinite)
+    );
+    const sources = [media];
+    for (const node of seasonChain) {
+      const id = Number(node.id);
+      if (id !== Number(media.id)) {
+        const expanded = await fetchAnilistSeasonNode(id);
+        if (expanded) sources.push(expanded);
+      }
+    }
+
+    const related = collectAnilistRelatedMoviesFromSources(sources, chainIds);
+    const movies = related.map((entry) => normalizeAnilistRelatedMovie(entry.node));
+
+    writeSeriesCacheEntry(cacheKey, { movies }, TTL_SERIES);
+    return {
+      state: movies.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
+      movies,
+    };
+  }
+
+  const TV_SPECIAL_NON_MOVIE_TITLE =
+    /\b(story\s+so\s+far|recap|making\s+of|behind\s+the\s+scenes|featurette|trailer|preview|deleted\s+scenes?|clip\s+show|retrospective|look\s+back|highlights?)\b/i;
+
+  /** Recaps, making-ofs, etc. — stay in Specials only, not the Movies tab. */
+  function isTvSpecialNonMovie(episode) {
+    const title = String(episode?.title || "").trim();
+    if (!title) return false;
+    if (TV_SPECIAL_NON_MOVIE_TITLE.test(title)) return true;
+    if (/^the\s+making\b/i.test(title)) return true;
+    return false;
+  }
+
+  /**
+   * TV feature films in season 0: TVDB isMovie/linkedMovie when present,
+   * else long runtime (80+ min) excluding obvious non-movie specials.
+   */
+  function isMovieLikeTvSpecial(episode) {
+    if (episode?.isMovie === true || episode?.isMovie === 1) return true;
+    const linked = Number(episode?.linkedMovieId);
+    if (Number.isFinite(linked) && linked > 0) return true;
+    if (isTvSpecialNonMovie(episode)) return false;
+    const runtime = Number(episode?.runtimeMinutes);
+    return Number.isFinite(runtime) && runtime >= 80;
+  }
+
+  function normalizeTvdbRelatedMovie(episode) {
+    const title = String(episode?.title || "").trim();
+    const year = episode?.airDate ? String(episode.airDate).slice(0, 4) : "";
+    return {
+      source: "tvdb",
+      title,
+      poster: episode?.still || "",
+      year,
+      overview: cleanEpisodeOverviewText(episode?.overview || ""),
+      runtimeMinutes: episode?.runtimeMinutes ?? null,
+      pick: {
+        source: "tvdb",
+        title,
+        year,
+        tvdbId: episode?.seriesTvdbId,
+        seasonNumber: episode?.seasonNumber,
+        episodeNumber: episode?.episodeNumber,
+      },
+    };
+  }
+
+  async function fetchTvdbRelatedMovies(tvdbId, locale) {
+    const cacheKey = `metadata:v4:related:movies:tvdb:${tvdbId}:${locale}`;
+    const cached = readCached(cacheKey, TTL_SERIES);
+    if (cached?.movies) {
+      return {
+        state: cached.movies.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
+        movies: cached.movies,
+        isStale: isStale(cacheKey, TTL_SERIES),
+      };
+    }
+
+    const WTvdb = window.WatchlistTvdb;
+    if (!WTvdb) return { state: ResultState.UNAVAILABLE, movies: [] };
+
+    try {
+      const episodes = await WTvdb.fetchEpisodes(tvdbId, 0, locale);
+      const movies = (episodes || [])
+        .filter(isMovieLikeTvSpecial)
+        .map(normalizeTvdbRelatedMovie)
+        .filter((m) => m.title);
+
+      writeSeriesCacheEntry(cacheKey, { movies }, TTL_SERIES);
+      return {
+        state: movies.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
+        movies,
+      };
+    } catch {
+      const stale = readCacheStale(cacheKey);
+      if (stale?.movies) {
+        return {
+          state: ResultState.OFFLINE_WITH_CACHE,
+          movies: stale.movies,
+          isStale: true,
+        };
+      }
+      return { state: ResultState.UNAVAILABLE, movies: [] };
+    }
+  }
+
+  /**
+   * Standalone movies related to a TV series or anime (not season-carousel entries).
+   */
+  async function fetchRelatedMovies(resolution, item, locale = "en") {
+    if (!resolution || resolution.isNegative) {
+      return { state: ResultState.INVALID_ID, movies: [] };
+    }
+
+    let anilistId = resolution.anilistId ? Number(resolution.anilistId) : null;
+    if (!anilistId && item?.contentType === "anime") {
+      const WM = window.WatchlistMetadata;
+      anilistId = Number(WM?.extractAnilistId?.(item?.link)) || null;
+      if (!anilistId) {
+        const resolved = await resolveAnimeSeriesId(item);
+        anilistId = resolved?.anilistId ? Number(resolved.anilistId) : null;
+      }
+    }
+
+    if (anilistId) {
+      return fetchAnilistRelatedMovies(anilistId, locale);
+    }
+
+    if (window.WatchlistTvdb) {
+      const tvdbId = await resolveTvdbId(resolution);
+      if (tvdbId) {
+        return fetchTvdbRelatedMovies(tvdbId, locale);
+      }
+    }
+
+    return { state: ResultState.NO_SEASONS, movies: [] };
+  }
+
   async function fetchAnilistSeriesMetadata(anilistId, locale, fallbackPoster = "") {
-    const cacheKey = `metadata:v12:series:anilist:${anilistId}:${locale}`;
+    const cacheKey = `metadata:v13:series:anilist:${anilistId}:${locale}`;
     const cached = readCached(cacheKey, TTL_SERIES);
     if (cached?.payload) {
       if (!seasonsNeedChainRepair(cached.payload.seasons, anilistId)) {
@@ -2597,6 +2926,134 @@
       .trim();
   }
 
+  /** Drop TVDB metadata footnotes (special-episode lists, source tags, notes). */
+  function episodeOverviewLooksBoilerplate(text) {
+    const t = String(text || "").trim();
+    if (!t) return true;
+    if (/\bincludes?\s+(?:the\s+following\s+)?special\s+episodes?\b/i.test(t)) {
+      return true;
+    }
+    if (/\(Source:\s*[^)]+\)/i.test(t)) return true;
+    if (/\bnote\s*:\s*/i.test(t) && t.length < 280) return true;
+    if (/^[-•*–]\s*.+\(Episode\s+\d+\)\s*$/im.test(t)) return true;
+    return false;
+  }
+
+  function cleanEpisodeOverviewText(overview) {
+    let text = stripHtml(overview).replace(/\r\n/g, "\n").trim();
+    if (!text) return "";
+
+    // One Piece-style footnote + everything after it (asterisk optional).
+    text = text
+      .replace(
+        /\s*(?:\*+\s*)?(?:this\s+)?includes?\s+(?:the\s+following\s+)?special\s+episodes?\s*:?[\s\S]*$/i,
+        ""
+      )
+      .trim();
+
+    // Trailing crossover / special-episode bullet lists (newline or inline).
+    text = text
+      .replace(
+        /(?:\n\s*[-•*–]\s*[^\n]*\(Episode\s+\d+\)\s*)+$/gi,
+        ""
+      )
+      .trim();
+    text = text
+      .replace(
+        /\s+[-–]\s+[^-\n]+?\(Episode\s+\d+\)(?:\s+[-–]\s+[^-\n]+?\(Episode\s+\d+\))*\s*$/gi,
+        ""
+      )
+      .trim();
+
+    // OPM-style source attribution and broadcast notes at the end.
+    text = text
+      .replace(/\s*\(Source:\s*[^)]+\)\s*$/gi, "")
+      .trim();
+    text = text
+      .replace(/\s*note\s*:\s*[^\n]+(?:\n[^\n]+)*$/gi, "")
+      .trim();
+
+    const lines = text.split(/\n/).map((line) => line.trim()).filter(Boolean);
+    if (
+      lines.length > 0 &&
+      lines.every(
+        (line) =>
+          /^[-•*–]\s*.+\(Episode\s+\d+\)\s*$/i.test(line) ||
+          /^\(Source:/i.test(line) ||
+          /^note\s*:/i.test(line) ||
+          /^\*+\s*includes?\b/i.test(line)
+      )
+    ) {
+      return "";
+    }
+
+    if (episodeOverviewLooksBoilerplate(text)) {
+      return "";
+    }
+
+    return text.replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  function episodeOverviewNeedsTmdbFallback(overview) {
+    const cleaned = cleanEpisodeOverviewText(overview);
+    return !cleaned || episodeOverviewLooksBoilerplate(cleaned);
+  }
+
+  async function preferTmdbEpisodeOverviews(
+    episodes,
+    resolution,
+    seasonNumber,
+    locale,
+    fallbackPoster = "",
+    franchiseImdb = null
+  ) {
+    const cleanedEps = episodes.map((ep) => ({
+      ...ep,
+      overview: cleanEpisodeOverviewText(ep.overview),
+    }));
+
+    const needsFallback = cleanedEps.some((ep) =>
+      episodeOverviewNeedsTmdbFallback(ep.overview)
+    );
+    if (!needsFallback) return cleanedEps;
+
+    let tmdbId = resolution?.tmdbId;
+    if (!tmdbId) {
+      const imdbId =
+        resolution?.imdbId ||
+        (await resolveLinkedImdbId(resolution));
+      if (imdbId) tmdbId = await resolveTmdbIdByImdb(imdbId);
+    }
+    if (!tmdbId) return cleanedEps;
+
+    const tmdbSeason = Number(seasonNumber) > 0 ? Number(seasonNumber) : 1;
+    const tmdbResult = await fetchTmdbSeasonEpisodes(
+      tmdbId,
+      tmdbSeason,
+      locale,
+      fallbackPoster
+    );
+    const tmdbByNum = new Map(
+      (tmdbResult?.episodes || []).map((ep) => [ep.episodeNumber, ep])
+    );
+    if (!tmdbByNum.size) return cleanedEps;
+
+    return cleanedEps.map((ep) => {
+      if (!episodeOverviewNeedsTmdbFallback(ep.overview)) return ep;
+
+      const tmdbEp = tmdbByNum.get(ep.episodeNumber);
+      let tmdbOverview = cleanEpisodeOverviewText(tmdbEp?.overview);
+      if (
+        !tmdbOverview ||
+        episodeOverviewLooksBoilerplate(tmdbOverview) ||
+        (locale !== "ar" && !isLatinDominant(tmdbOverview))
+      ) {
+        return ep;
+      }
+      return { ...ep, overview: tmdbOverview };
+    });
+  }
+
   function na(value) {
     const text = String(value || "");
     return text === "N/A" ? "" : text;
@@ -2626,7 +3083,7 @@
   }
 
   // ─── One-time cache eviction ──────────────────────────────────
-  const CACHE_EVICT_VERSION = "v24";
+  const CACHE_EVICT_VERSION = "v28";
   (function evictObsoleteEpisodeCache() {
     try {
       const flagKey = `watchlist-series-cache-evict-${CACHE_EVICT_VERSION}`;
@@ -2648,6 +3105,9 @@
         "metadata:v18:season:tvdb:",
         "metadata:v19:season:tvdb:",
         "metadata:v20:season:tvdb:",
+        "metadata:v8:series:tvdb:",
+        "metadata:v22:season:tvdb:",
+        "metadata:v23:season:tvdb:",
         "metadata:v9:resolve:imdb:anilist:",
         "metadata:v11:resolve:imdb:anilist:",
         "metadata:v7:resolve:tvdb:anilist:",
@@ -2659,7 +3119,7 @@
           changed = true;
           return;
         }
-        if (k.includes(":alleps:") && !k.startsWith("metadata:v9:alleps:")) {
+        if (k.includes(":alleps:") && !k.startsWith("metadata:v10:alleps:")) {
           delete cache[k];
           _memory.delete(k);
           changed = true;
@@ -2783,7 +3243,7 @@
    * @returns {Promise<SeriesMetadataResult>}
    */
   async function fetchTvdbSeriesMetadata(tvdbId, locale, fallbackPoster = "") {
-    const cacheKey = `metadata:v8:series:tvdb:${tvdbId}:${locale}`;
+    const cacheKey = `metadata:v11:series:tvdb:${tvdbId}:${locale}`;
     const cached = readCached(cacheKey, TTL_SERIES);
     if (cached?.payload) {
       return parseCachedSeriesResult(cached, { isStale: isStale(cacheKey, TTL_SERIES) });
@@ -2819,7 +3279,7 @@
         name: s.name,
         poster: s.poster || poster,
         episodeCount: null,
-        overview: s.overview || "",
+        overview: cleanEpisodeOverviewText(s.overview || ""),
         airDate: s.airDate || null,
         isSpecials: s.isSpecials || false,
       }));
@@ -2839,12 +3299,24 @@
         // Episode counts unavailable — seasons still render without totals.
       }
 
+      const specialsSeason = seasons.find((s) => s.seasonNumber === 0);
+      if (specialsSeason && specialsSeason.episodeCount == null) {
+        try {
+          const s0eps = await WTvdb.fetchEpisodes(tvdbId, 0, locale);
+          const specialsOnly = (s0eps || []).filter((ep) => !isMovieLikeTvSpecial(ep));
+          const aired = specialsOnly.filter((ep) => ep.isAired !== false).length;
+          if (aired > 0) specialsSeason.episodeCount = aired;
+        } catch {
+          // Specials count unavailable — carousel may still load episodes on demand.
+        }
+      }
+
       const series = {
         source: "tvdb",
         tvdbId,
         imdbId: seriesData.imdbId || null,
         title: seriesData.title || "",
-        overview: seriesData.overview || "",
+        overview: cleanEpisodeOverviewText(seriesData.overview || ""),
         poster,
         status: seriesData.status || null,
         firstAirDate: seriesData.firstAired || null,
@@ -2889,8 +3361,8 @@
    * @returns {Promise<EpisodesResult>}
    */
   async function fetchTvdbSeasonEpisodes(tvdbId, season, locale, fallbackPoster = "") {
-    // v19: bust TVDB rows merged with wrong AniList titles
-    const cacheKey = `metadata:v21:season:tvdb:${tvdbId}:${season}:${locale}`;
+    // v22: English summaries via official lang episode list (not season=? untranslated rows)
+    const cacheKey = `metadata:v24:season:tvdb:${tvdbId}:${season}:${locale}`;
     const cached = readCached(cacheKey, TTL_EPISODES);
     if (cached?.payload) {
       return parseCachedEpisodesResult(cached, { isStale: isStale(cacheKey, TTL_EPISODES) });
@@ -2900,10 +3372,34 @@
     if (!WTvdb) return { state: ResultState.UNAVAILABLE };
 
     try {
-      const raw = await WTvdb.fetchEpisodes(tvdbId, season, locale);
+      let raw = null;
+      if (locale === "en" && WTvdb.fetchAllEpisodes) {
+        const allOfficial = await WTvdb.fetchAllEpisodes(tvdbId, "en", {
+          order: "official",
+        });
+        raw = filterTvdbEpisodesForSeason(allOfficial || [], season);
+      }
+      if (!raw?.length) {
+        raw = await WTvdb.fetchEpisodes(tvdbId, season, locale);
+      }
+
       let enRaw = null;
-      if (locale !== "en") {
+      if (locale === "ar") {
         enRaw = await WTvdb.fetchEpisodes(tvdbId, season, "en");
+      } else if (locale === "en" && raw?.length) {
+        const sample = raw.slice(0, Math.min(4, raw.length));
+        const latinOverviews = sample.filter((ep) =>
+          isLatinDominant(ep.overview)
+        ).length;
+        if (
+          latinOverviews < Math.ceil(sample.length * 0.35) &&
+          WTvdb.fetchAllEpisodes
+        ) {
+          const allOfficial = await WTvdb.fetchAllEpisodes(tvdbId, "en", {
+            order: "official",
+          });
+          enRaw = filterTvdbEpisodesForSeason(allOfficial || [], season);
+        }
       }
 
       if (!raw) {
@@ -2935,7 +3431,7 @@
         ? filtered.map((e) => ({ ...e, still: "" }))
         : filtered;
 
-      if (locale !== "en" && enRaw?.length) {
+      if (locale === "ar" && enRaw?.length) {
         const enFiltered = filterTvdbEpisodesForSeason(enRaw, season);
         const enByKey = new Map(
           enFiltered.map((ep) => [ep.progressKey || `${ep.seasonNumber}:${ep.episodeNumber}`, ep])
@@ -2949,9 +3445,39 @@
             ...ep,
             title: pickLocalizedEpisodeText(ep.title, enEp.title, epNum)
               || `Episode ${epNum}`,
-            overview: pickLocalizedOverview(ep.overview, enEp.overview),
+            overview: cleanEpisodeOverviewText(
+              pickLocalizedOverview(ep.overview, enEp.overview)
+            ),
           };
         });
+      } else if (locale === "en" && enRaw?.length) {
+        const enByKey = new Map(
+          enRaw.map((ep) => [ep.progressKey || `${ep.seasonNumber}:${ep.episodeNumber}`, ep])
+        );
+        episodes = episodes.map((ep) => {
+          const key = ep.progressKey || `${ep.seasonNumber}:${ep.episodeNumber}`;
+          const enEp = enByKey.get(key);
+          if (!enEp) return ep;
+          const epNum = ep.episodeNumber;
+          const overview = pickLatinEpisodeOverview(ep.overview, enEp.overview);
+          return {
+            ...ep,
+            title: pickLocalizedEpisodeText(ep.title, enEp.title, epNum)
+              || ep.title,
+            overview: cleanEpisodeOverviewText(overview || ""),
+          };
+        });
+      }
+
+      episodes = episodes.map((ep) => ({
+        ...ep,
+        overview: cleanEpisodeOverviewText(ep.overview),
+      }));
+
+      // Feature films live in the Movies tab — not the Specials episode list.
+      if (Number(season) === 0) {
+        episodes = episodes.filter((ep) => !isMovieLikeTvSpecial(ep));
+        if (!episodes.length) return { state: ResultState.UNAVAILABLE };
       }
 
       const result = { state: ResultState.AVAILABLE, episodes };
@@ -2976,11 +3502,13 @@
 
   // ─── Title badge helpers (episode totals, metadata) ─────────────
 
-  /** Sum regular-season episode counts (excludes specials). */
+  /** Sum regular-season episode counts (excludes specials and related movies). */
   function regularEpisodeTotalFromSeasons(seasons) {
     let total = 0;
     for (const season of seasons || []) {
-      if (!season || season.seasonNumber <= 0 || season.isSpecials) continue;
+      if (!season || season.seasonNumber <= 0 || season.isSpecials || season.isRelated) {
+        continue;
+      }
       const count = parsePositiveCount(season.episodeCount);
       if (count > 0) total += count;
     }
@@ -3006,7 +3534,7 @@
       item?.poster || ""
     );
     const seasons = (result?.seasons || []).filter(
-      (s) => s.seasonNumber > 0 && !s.isSpecials
+      (s) => s.seasonNumber > 0 && !s.isSpecials && !s.isRelated
     );
     const seasonCount = seasons.length > 0 ? seasons.length : 1;
     let total = regularEpisodeTotalFromSeasons(result?.seasons);
@@ -3214,12 +3742,15 @@
     resolveSeriesId,
     fetchSeriesMetadata,
     fetchSeasonEpisodes,
+    fetchRelatedMovies,
     fetchTitleEpisodeTotal,
     fetchTitleBadgeMeta,
     fetchTitleSeriesCounts,
     resolveLinkedImdbId,
     regularEpisodeTotalFromSeasons,
     clearItemResolutionCache,
+    cleanEpisodeOverview: cleanEpisodeOverviewText,
+    isTvSpecialLinkedMovie: isMovieLikeTvSpecial,
     // Normalization functions exposed for testing
     _normalizeTmdbSeries: normalizeTmdbSeries,
     _normalizeTmdbSeasonSummary: normalizeTmdbSeasonSummary,
@@ -3229,6 +3760,12 @@
     _parsePositiveCount: parsePositiveCount,
     _anilistDateStr: anilistDateStr,
     _stripHtml: stripHtml,
+    _cleanEpisodeOverview: cleanEpisodeOverviewText,
+    _expandEpisodeListFromTvdbSkeleton: expandEpisodeListFromTvdbSkeleton,
+    _episodeOverviewLooksBoilerplate: episodeOverviewLooksBoilerplate,
+    _collectAnilistRelatedMoviesFromSources: collectAnilistRelatedMoviesFromSources,
+    _isMovieLikeTvSpecial: isMovieLikeTvSpecial,
+    _isTvSpecialNonMovie: isTvSpecialNonMovie,
     // TheTVDB provider functions exposed for testing
     _resolveTvdbId: resolveTvdbId,
     _fetchTvdbSeriesMetadata: fetchTvdbSeriesMetadata,

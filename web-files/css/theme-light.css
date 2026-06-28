@@ -84,7 +84,8 @@ html[data-theme="light"] .type-tabs {
 html[data-theme="light"] .search__input,
 html[data-theme="light"] .gate__input,
 html[data-theme="light"] .form-input,
-html[data-theme="light"] .form-textarea {
+html[data-theme="light"] .form-textarea,
+html[data-theme="light"] .tds-episode-jump__input {
   background-color: var(--search-field-bg);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -110,7 +111,8 @@ html[data-theme="light"] .watched-filter__select:focus,
 html[data-theme="light"] .rating-filter__select:focus,
 html[data-theme="light"] .gate__input:focus,
 html[data-theme="light"] .form-input:focus,
-html[data-theme="light"] .form-textarea:focus {
+html[data-theme="light"] .form-textarea:focus,
+html[data-theme="light"] .tds-episode-jump__input:focus {
   border-color: rgba(138, 109, 66, 0.45);
   box-shadow: 0 0 0 3px rgba(138, 109, 66, 0.1);
 }

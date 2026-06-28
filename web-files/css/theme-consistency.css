@@ -178,3 +178,104 @@ html[data-theme="pink"] .btn--ghost:hover {
 html[data-theme="light"] .header__sync-retry:hover {
   background: rgba(0, 0, 0, 0.06);
 }
+
+/* Active panel filters — loaded after theme files so highlights win over resets */
+.panel__filters .filter-field--active,
+.panel__filters .genre-filter--active > .genre-filter__select,
+.panel__filters .watched-filter--active > .watched-filter__select,
+.panel__filters .rating-filter--active > .rating-filter__select {
+  border-color: rgba(232, 184, 74, 0.62) !important;
+  background-color: rgba(232, 184, 74, 0.12) !important;
+  box-shadow:
+    0 0 0 1px rgba(232, 184, 74, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+.panel__filters .genre-filter--active > .panel-filter__label,
+.panel__filters .watched-filter--active > .panel-filter__label,
+.panel__filters .rating-filter--active > .panel-filter__label {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+html[data-theme="brown"] .panel__filters .filter-field--active,
+html[data-theme="brown"] .panel__filters .genre-filter--active > .genre-filter__select,
+html[data-theme="brown"] .panel__filters .watched-filter--active > .watched-filter__select,
+html[data-theme="brown"] .panel__filters .rating-filter--active > .rating-filter__select {
+  border-color: rgba(245, 210, 168, 0.72) !important;
+  background-color: rgba(201, 149, 106, 0.24) !important;
+  box-shadow:
+    0 0 0 1px rgba(232, 201, 168, 0.38),
+    inset 0 1px 0 rgba(255, 248, 240, 0.1) !important;
+}
+
+html[data-theme="brown"] .panel__filters .genre-filter--active > .panel-filter__label,
+html[data-theme="brown"] .panel__filters .watched-filter--active > .panel-filter__label,
+html[data-theme="brown"] .panel__filters .rating-filter--active > .panel-filter__label {
+  color: #f0dcc0;
+}
+
+html[data-theme="light"] .panel__filters .filter-field--active,
+html[data-theme="light"] .panel__filters .genre-filter--active > .genre-filter__select,
+html[data-theme="light"] .panel__filters .watched-filter--active > .watched-filter__select,
+html[data-theme="light"] .panel__filters .rating-filter--active > .rating-filter__select {
+  border-color: rgba(138, 109, 66, 0.55) !important;
+  background-color: rgba(138, 109, 66, 0.1) !important;
+  box-shadow: 0 0 0 1px rgba(138, 109, 66, 0.2) !important;
+}
+
+/* Episode jump bar — go button per theme */
+html[data-theme="light"] .tds-episode-jump__go {
+  background: var(--filter-field-bg);
+  border-color: var(--border-strong);
+  color: var(--text-muted);
+}
+
+html[data-theme="light"] .tds-episode-jump__go:hover {
+  color: var(--text);
+  border-color: rgba(138, 109, 66, 0.45);
+  box-shadow: 0 0 0 3px rgba(138, 109, 66, 0.1);
+}
+
+html[data-theme="purple"] .tds-episode-jump__go {
+  background: var(--filter-field-bg);
+  border-color: rgba(180, 140, 255, 0.14);
+  color: var(--text-muted);
+}
+
+html[data-theme="purple"] .tds-episode-jump__go:hover {
+  color: #f0d498;
+  border-color: rgba(232, 192, 120, 0.45);
+  box-shadow: 0 0 0 3px rgba(232, 192, 120, 0.12);
+}
+
+html[data-theme="brown"] .tds-episode-jump__go {
+  background: linear-gradient(180deg, rgba(10, 6, 4, 0.82) 0%, rgba(22, 14, 10, 0.68) 100%);
+  border-color: rgba(232, 201, 168, 0.16);
+  color: var(--text-muted);
+  box-shadow: inset 0 1px 0 rgba(255, 248, 240, 0.04);
+}
+
+html[data-theme="brown"] .tds-episode-jump__go:hover {
+  color: var(--latte-foam);
+  border-color: rgba(232, 201, 168, 0.46);
+  box-shadow:
+    0 0 0 3px rgba(201, 149, 106, 0.14),
+    inset 0 1px 0 rgba(255, 248, 240, 0.06);
+}
+
+html[data-theme="pink"] .tds-episode-jump__go {
+  color: rgba(255, 255, 255, 0.78);
+  background: linear-gradient(
+    180deg,
+    rgba(210, 55, 110, 0.52) 0%,
+    rgba(185, 38, 90, 0.58) 100%
+  );
+  border-color: rgba(255, 180, 205, 0.26);
+  box-shadow: inset 0 1px 0 rgba(255, 220, 235, 0.08);
+}
+
+html[data-theme="pink"] .tds-episode-jump__go:hover {
+  color: #ffffff;
+  border-color: rgba(255, 200, 218, 0.5);
+}

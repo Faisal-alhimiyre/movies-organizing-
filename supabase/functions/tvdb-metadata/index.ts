@@ -104,6 +104,16 @@ async function tvdbGet(path: string, retried = false): Promise<unknown> {
 // ── Safe type coercions ───────────────────────────────────────────────────
 function s(v: unknown): string { return typeof v === "string" ? v.trim() : ""; }
 function n(v: unknown): number | null { const x = Number(v); return isFinite(x) ? x : null; }
+
+/** TVDB marks feature films in season 0 with isMovie and/or linkedMovie. */
+function tvdbEpisodeMovieFlags(ep: Record<string, unknown>) {
+  const linkedMovieId = n(ep.linkedMovie);
+  const isMovie =
+    ep.isMovie === 1 ||
+    ep.isMovie === true ||
+    (linkedMovieId != null && linkedMovieId > 0);
+  return { isMovie, linkedMovieId };
+}
 function a(v: unknown): unknown[] { return Array.isArray(v) ? v : []; }
 
 const TVDB_ART = "https://artworks.thetvdb.com";
@@ -432,7 +442,7 @@ async function actionEpisodes(
   const order = normalizeEpisodeOrder(p.order, "official");
 
   const allEps = allSeasons
-    ? await paginateSeriesEpisodes(id, { lang, maxPages: 40, order })
+    ? await paginateSeriesEpisodes(id, { lang, maxPages: 80, order })
     : await paginateSeriesEpisodes(id, {
       // ?season= queries return untranslated episode text; use the lang
       // episode list and filter locally so English/Arabic overviews resolve.
@@ -457,6 +467,7 @@ async function actionEpisodes(
         return null;
       }
       const airDate = s(ep.aired) || null;
+      const movieFlags = tvdbEpisodeMovieFlags(ep);
       return {
         source: "tvdb",
         tvdbEpId: n(ep.id),
@@ -471,6 +482,8 @@ async function actionEpisodes(
         runtimeMinutes: n(ep.runtime),
         airDate,
         isAired: isAired(airDate),
+        isMovie: movieFlags.isMovie,
+        linkedMovieId: movieFlags.linkedMovieId,
         progressKey: `${seasonNum}:${epNum}`,
       };
     })
@@ -511,8 +524,8 @@ async function actionEpisodeTotals(
   const lang = tvdbLanguage(p.locale);
 
   const seasonCounts: Record<string, number> = {};
-  const allEps = await paginateSeriesEpisodes(id, { lang, maxPages: 40, order: "official" });
-  for (const raw of allEps) {
+  const allRaw = await paginateSeriesEpisodes(id, { lang, maxPages: 80, order: "official" });
+  for (const raw of allRaw) {
     const ep = raw as Record<string, unknown>;
     const sn = n(ep.seasonNumber);
     const epNum = n(ep.number);
@@ -542,7 +555,7 @@ async function actionAllEpisodes(
   const lang = tvdbLanguage(p.locale);
   const order = normalizeEpisodeOrder(p.order, "absolute");
 
-  const allRaw = await paginateSeriesEpisodes(id, { lang, maxPages: 40, order });
+  const allRaw = await paginateSeriesEpisodes(id, { lang, maxPages: 80, order });
 
   const episodes = allRaw
     .map((raw) => {
@@ -552,6 +565,7 @@ async function actionAllEpisodes(
       if (epNum == null) return null;
       if (order !== "absolute" && (seasonNum == null || seasonNum <= 0)) return null;
       const airDate = s(ep.aired) || null;
+      const movieFlags = tvdbEpisodeMovieFlags(ep);
       return {
         source: "tvdb",
         tvdbEpId: n(ep.id),
@@ -564,6 +578,8 @@ async function actionAllEpisodes(
         runtimeMinutes: n(ep.runtime),
         airDate,
         isAired: isAired(airDate),
+        isMovie: movieFlags.isMovie,
+        linkedMovieId: movieFlags.linkedMovieId,
         progressKey: `${seasonNum}:${epNum}`,
       };
     })

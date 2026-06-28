@@ -237,6 +237,9 @@
     stats: document.getElementById("stats"),
     search: document.getElementById("searchInput"),
     genre: document.getElementById("genreSelect"),
+    genreFilter: document.querySelector(".genre-filter"),
+    watchedFilterWrap: document.querySelector(".watched-filter"),
+    ratingFilterWrap: document.querySelector(".rating-filter"),
     genreFilterChips: document.getElementById("genreFilterChips"),
     watchedFilter: document.getElementById("watchedFilter"),
     ratingFilter: document.getElementById("ratingFilter"),
@@ -587,6 +590,7 @@
     }
     updateGenreOptions();
     updateRatingFilterOptions();
+    updateFilterFieldHighlights();
     updateClearFiltersButton();
     if (renderNow) render();
   }
@@ -1844,7 +1848,16 @@
     if (!raw) return "unwatched";
     const entry = normalizeWatchEntry(raw);
     if (!entry) return "unwatched";
+
+    const item = state.items.find((i) => i.id === id);
     const P = window.WatchlistProgress;
+    if (item?.contentType === "movies" && P?.movieWatchState) {
+      const movieState = P.movieWatchState(entry);
+      if (movieState === "inprogress") return "inProgress";
+      if (movieState === "watched") return "watched";
+      return "unwatched";
+    }
+
     if (!P || P.isLegacyComplete(entry)) return "watched";
     const prog = P.getProgress(entry);
     if (!prog || !Array.isArray(prog.episodes)) return "unwatched";
@@ -2459,6 +2472,20 @@
     );
   }
 
+  function updateFilterFieldHighlights() {
+    const genreActive = state.selectedGenres.length > 0;
+    els.genreFilter?.classList.toggle("genre-filter--active", genreActive);
+    els.genre?.classList.toggle("filter-field--active", genreActive);
+
+    const watchedActive = state.watchedFilter !== "all";
+    els.watchedFilterWrap?.classList.toggle("watched-filter--active", watchedActive);
+    els.watchedFilter?.classList.toggle("filter-field--active", watchedActive);
+
+    const sortActive = state.ratingFilterSource !== "all";
+    els.ratingFilterWrap?.classList.toggle("rating-filter--active", sortActive);
+    els.ratingFilter?.classList.toggle("filter-field--active", sortActive);
+  }
+
   function updateClearFiltersButton() {
     if (!els.clearFiltersBtn) return;
     const show = hasPanelFilters();
@@ -2482,6 +2509,7 @@
     });
     updateGenreOptions();
     updateRatingFilterOptions();
+    updateFilterFieldHighlights();
     updateClearFiltersButton();
     saveUiPrefs();
     render();
@@ -3863,6 +3891,8 @@
               : ""
           }
         </button>`
+      : progressState === "inProgress"
+        ? `<button type="button" class="card__watch-status card__watch-status--in-progress" data-action="quick-toggle-watched" data-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(t("card.markWatched"))}">${escapeHtml(t("card.inProgress"))}</button>`
       : isWatched
         ? `<div class="card__rating card__rating--pending">
             <div class="card__rating-top">
@@ -4002,6 +4032,7 @@
 
   function render() {
     updateClearFiltersButton();
+    updateFilterFieldHighlights();
     updateGenreOptions();
     const filtered = getFilteredItems();
     updateStats();
@@ -4145,6 +4176,31 @@
       .join("");
   }
 
+  function addTitlePosterMarkup(posterUrl, title, posterClass, { lazy = true } = {}) {
+    if (!posterUrl) {
+      return `<div class="${posterClass} ${posterClass}--empty" aria-hidden="true">🎬</div>`;
+    }
+    const viewLabel = t("detail.viewPoster", { title: title || "" });
+    const lazyAttr = lazy ? ' loading="lazy"' : "";
+    return `<button type="button" class="search-poster-btn" data-action="view-search-poster"
+      aria-label="${escapeHtml(viewLabel)}">
+      <img class="${posterClass}" src="${escapeHtml(posterUrl)}" alt=""${lazyAttr} />
+    </button>`;
+  }
+
+  function openAddTitlePosterLightbox(event) {
+    const posterBtn = event.target.closest("[data-action='view-search-poster']");
+    if (!posterBtn) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const img = posterBtn.querySelector("img");
+    const src = img?.currentSrc || img?.src || img?.getAttribute("src") || "";
+    if (src) {
+      window.WatchlistTitleDetail?.openPosterLightbox?.(src, img?.alt || "");
+    }
+    return true;
+  }
+
   function formatSearchConfirmRating(details) {
     if (!details) return "";
     if (details.anilistRating || details.source === "anilist") {
@@ -4158,9 +4214,12 @@
   function renderTitlePreview(container, details) {
     if (!container || !details) return;
 
-    const poster = details.poster
-      ? `<img class="title-search-confirm__poster" src="${escapeHtml(details.poster)}" alt="" />`
-      : `<div class="title-search-confirm__poster title-search-confirm__poster--empty" aria-hidden="true">🎬</div>`;
+    const poster = addTitlePosterMarkup(
+      details.poster,
+      details.title,
+      "title-search-confirm__poster",
+      { lazy: false }
+    );
     const yearHtml = details.year
       ? `<span class="title-search-confirm__year">${escapeHtml(String(details.year))}</span>`
       : "";
@@ -4339,9 +4398,11 @@
         const isAdded = onList || state.searchAddedKeys.has(resultKey);
         const isAdding = state.searchAddingKeys.has(resultKey);
 
-        const poster = result.poster
-          ? `<img class="title-search__poster" src="${escapeHtml(result.poster)}" alt="" loading="lazy" />`
-          : `<div class="title-search__poster title-search__poster--empty" aria-hidden="true">🎬</div>`;
+        const poster = addTitlePosterMarkup(
+          result.poster,
+          result.title,
+          "title-search__poster"
+        );
         const meta = [result.year, formatSearchResultType(result.type)]
           .filter(Boolean)
           .join(" · ");
@@ -4479,6 +4540,35 @@
     if (els.searchAddStep) els.searchAddStep.hidden = false;
     if (els.searchConfirmStep) els.searchConfirmStep.hidden = true;
     setTitleSearchStatus("");
+  }
+
+  async function openAddTitleConfirm(details, options = {}) {
+    if (!details?.title) return;
+    openModal("add");
+    if (els.titleSearchType && options.defaultContentType) {
+      const map = {
+        movies: "movie",
+        tvSeries: "series",
+        anime: "anime",
+      };
+      const filter = map[options.defaultContentType];
+      if (filter) els.titleSearchType.value = filter;
+    }
+    const enriched = {
+      ...details,
+      contentType: options.defaultContentType || details.contentType,
+    };
+    await showSearchConfirmStep(enriched);
+  }
+
+  function isTitleOnList(hints) {
+    if (!hints) return false;
+    return isSearchResultOnList({
+      title: hints.title,
+      imdbId: hints.imdbId,
+      anilistId: hints.anilistId,
+      year: hints.year,
+    });
   }
 
   async function quickToggleWatched(itemId) {
@@ -5315,6 +5405,7 @@
   }
 
   function closeModal() {
+    window.WatchlistTitleDetail?.closePosterLightbox?.();
     unbindItemModalTouchBlock();
     unbindItemModalViewport();
     unlockItemModalBackground();
@@ -7452,6 +7543,7 @@
     });
 
     els.searchAddPanel?.addEventListener("click", async (event) => {
+      if (openAddTitlePosterLightbox(event)) return;
       const addBtn = event.target.closest("[data-action='add-search-result']");
       if (addBtn) {
         await handleSearchResultDirectAdd(addBtn);
@@ -7550,6 +7642,7 @@
     });
 
     els.modal.addEventListener("click", (event) => {
+      if (openAddTitlePosterLightbox(event)) return;
       if (event.target.closest("[data-action='close-modal']")) {
         closeModal();
       }
@@ -7557,6 +7650,10 @@
 
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
+      if (window.WatchlistTitleDetail?.isPosterLightboxOpen?.()) {
+        window.WatchlistTitleDetail.closePosterLightbox();
+        return;
+      }
       if (!els.accountMenuPanel?.hidden) {
         closeAccountMenu();
         return;
@@ -7954,6 +8051,7 @@
     isWatched: isItemWatched,
     getWatchEntry,
     progressState: itemProgressState,
+    parseRuntimeMinutes,
     closeAllMenus: closeAllCardMenus,
     deleteAndRender: (id) => { deleteItem(id); updateGenreOptions(); render(); },
     // Exposed for title-seasons.js — save watch entry locally without full render
@@ -7995,6 +8093,8 @@
     cardDisplayPoster,
     cardDisplayTitle,
     normalizeGenre,
+    openAddTitleConfirm,
+    isTitleOnList,
   };
 
   if (document.getElementById("mainContent")) {

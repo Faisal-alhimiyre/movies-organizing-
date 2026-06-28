@@ -52,6 +52,10 @@
       result.seasonTotals = raw.seasonTotals;
     }
     if (raw.completed === true) result.completed = true;
+    if (typeof raw.moviePosition === "number" && Number.isFinite(raw.moviePosition)) {
+      const pos = Math.max(0, Math.min(1, raw.moviePosition));
+      if (pos > 0) result.moviePosition = Math.round(pos * 1000) / 1000;
+    }
     if (raw.episodeRatings && typeof raw.episodeRatings === "object") {
       const cleaned = {};
       for (const [k, v] of Object.entries(raw.episodeRatings)) {
@@ -72,6 +76,9 @@
   function exportProgressObject(raw) {
     const parsed = parseProgressObject(raw);
     if (parsed.episodes.length > 0) return parsed;
+    if (typeof parsed.moviePosition === "number" && parsed.moviePosition > 0) {
+      return parsed;
+    }
     if (parsed.episodeRatings && Object.keys(parsed.episodeRatings).length > 0) {
       return parsed;
     }
@@ -202,6 +209,78 @@
 
   // ─── mutation helpers ─────────────────────────────────────────────────────────
   // All return NEW entry objects — callers write back to state.watched.
+
+  function getMoviePosition(entry) {
+    const progress = getProgress(entry);
+    if (!progress || typeof progress.moviePosition !== "number") return 0;
+    const pos = Number(progress.moviePosition);
+    if (!Number.isFinite(pos) || pos <= 0) return 0;
+    return Math.max(0, Math.min(1, pos));
+  }
+
+  /**
+   * @param {number} fraction 0–1 through the movie runtime
+   */
+  function setMoviePosition(entry, fraction) {
+    const pos = Math.max(0, Math.min(1, Number(fraction) || 0));
+    const base =
+      entry && entry !== true && typeof entry === "object" ? { ...entry } : {};
+
+    if (pos <= 0) {
+      const existing = getProgress(base);
+      if (!existing) return Object.keys(base).length ? base : null;
+      const next = { ...existing };
+      delete next.moviePosition;
+      delete next.completed;
+      if (_isEmptyProgress(next)) {
+        delete base.progress;
+        return Object.keys(base).length ? base : null;
+      }
+      base.progress = next;
+      return base;
+    }
+
+    const episodes = getProgress(base)?.episodes || [];
+    const rawProg = base.progress && typeof base.progress === "object" ? base.progress : null;
+    const newProgress = {
+      version: PROGRESS_VERSION,
+      episodes: [...episodes],
+      moviePosition: Math.round(pos * 1000) / 1000,
+    };
+    if (rawProg?.episodeRatings && typeof rawProg.episodeRatings === "object") {
+      newProgress.episodeRatings = { ...rawProg.episodeRatings };
+    }
+    if (rawProg?.seasonTotals && typeof rawProg.seasonTotals === "object") {
+      newProgress.seasonTotals = { ...rawProg.seasonTotals };
+    }
+    base.progress = newProgress;
+    return base;
+  }
+
+  /** Movie watch state from stored position (0–1). */
+  function movieWatchState(entry, completeThreshold = 0.97) {
+    if (!entry) return "unwatched";
+    const progress = getProgress(entry);
+    if (!progress) return isLegacyComplete(entry) ? "watched" : "unwatched";
+    const pos = getMoviePosition(entry);
+    if (pos <= 0) return "unwatched";
+    if (pos >= completeThreshold) return "watched";
+    return "inprogress";
+  }
+
+  function _isEmptyProgress(prog) {
+    if (!prog) return true;
+    if (Array.isArray(prog.episodes) && prog.episodes.length > 0) return false;
+    if (typeof prog.moviePosition === "number" && prog.moviePosition > 0) return false;
+    if (prog.episodeRatings && Object.keys(prog.episodeRatings).length > 0) {
+      return false;
+    }
+    if (prog.seasonTotals && Object.keys(prog.seasonTotals).length > 0) {
+      return false;
+    }
+    if (prog.completed === true) return false;
+    return true;
+  }
 
   /**
    * Mark a single episode as watched.
@@ -356,6 +435,9 @@
     if (rawProg?.completed === true) {
       newProgress.completed = true;
     }
+    if (rawProg?.moviePosition > 0) {
+      newProgress.moviePosition = rawProg.moviePosition;
+    }
     base.progress = newProgress;
     return base;
   }
@@ -423,6 +505,9 @@
     getEpisodeRating,
     setEpisodeRating,
     clearEpisodeRating,
+    getMoviePosition,
+    setMoviePosition,
+    movieWatchState,
     isAiredEpisode,
     airedEpisodeKeys,
   };

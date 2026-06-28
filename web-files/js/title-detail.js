@@ -51,6 +51,9 @@
   /** Set to true while a toggle-watched card-click is in flight.
    *  Prevents the MutationObserver from triggering a full detail rebuild. */
   let _ignoreMutations = false;
+  let _posterLightboxEl = null;
+  let _posterLightboxOpen = false;
+  let _posterLightboxOpener = null;
 
   /** Mobile pull-to-dismiss + background scroll lock */
   let _savedScrollY = 0;
@@ -282,6 +285,93 @@
     return item?.contentType === "tvSeries" || item?.contentType === "anime";
   }
 
+  function isMovie(item) {
+    return item?.contentType === "movies";
+  }
+
+  function movieRuntimeMinutes(item) {
+    return window.WatchlistApp?.parseRuntimeMinutes?.(item?.runtime) ?? null;
+  }
+
+  function formatMovieClock(minutes) {
+    const total = Math.max(0, Math.floor(Number(minutes) || 0));
+    const h = Math.floor(total / 60);
+    const m = total % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, "0")}`;
+    return t("seasons.epRuntime", { n: total });
+  }
+
+  function movieProgressMarkup(item, itemId) {
+    const runtime = movieRuntimeMinutes(item);
+    if (!runtime) return "";
+
+    const entry = getWatchEntry(itemId);
+    const pos = window.WatchlistProgress?.getMoviePosition?.(entry) ?? 0;
+    const watchedMin = Math.round(pos * runtime);
+
+    return `
+      <div class="td-movie-progress" data-td-part="movie-progress">
+        <input type="range"
+          class="td-movie-progress__slider"
+          data-td-action="movie-progress"
+          data-td-id="${esc(itemId)}"
+          min="0"
+          max="${runtime}"
+          step="1"
+          value="${watchedMin}"
+          aria-label="${esc(t("detail.movieProgressLabel"))}"
+          aria-valuemin="0"
+          aria-valuemax="${runtime}"
+          aria-valuenow="${watchedMin}" />
+        <div class="td-movie-progress__times" aria-hidden="true">
+          <span class="td-movie-progress__elapsed text-num" data-td-part="movie-elapsed">${esc(formatMovieClock(watchedMin))}</span>
+          <span class="td-movie-progress__total text-num">${esc(formatMovieClock(runtime))}</span>
+        </div>
+      </div>`;
+  }
+
+  function updateMovieProgressLabels(slider) {
+    if (!slider) return;
+    const runtime = Number(slider.max);
+    const watchedMin = Number(slider.value);
+    if (!Number.isFinite(runtime) || runtime <= 0) return;
+    const elapsed = slider
+      .closest(".td-movie-progress")
+      ?.querySelector("[data-td-part='movie-elapsed']");
+    if (elapsed) elapsed.textContent = formatMovieClock(watchedMin);
+    slider.setAttribute("aria-valuenow", String(watchedMin));
+  }
+
+  async function persistMovieProgress(slider) {
+    const itemId = slider?.dataset?.tdsId || slider?.dataset?.tdId || _activeItemId;
+    const item = findItem(itemId);
+    const runtime = movieRuntimeMinutes(item);
+    if (!itemId || !runtime) return;
+
+    const watchedMin = Number(slider.value);
+    const fraction = watchedMin / runtime;
+    const P = window.WatchlistProgress;
+
+    _ignoreMutations = true;
+
+    if (fraction >= 0.97) {
+      await window.WatchlistApp?.quickToggleWatched?.(itemId);
+    } else if (fraction <= 0) {
+      window.WatchlistApp?.saveWatchedEntry?.(itemId, null);
+    } else if (P?.setMoviePosition) {
+      const existing = window.WatchlistApp?.isWatched?.(itemId)
+        ? window.WatchlistApp?.getWatchEntry?.(itemId)
+        : null;
+      const next = P.setMoviePosition(existing, fraction);
+      window.WatchlistApp?.saveWatchedEntry?.(itemId, next);
+    }
+
+    updateMyRating();
+    refreshMenuItems();
+    window.WatchlistApp?.updateCardInPlace?.(itemId);
+    Promise.resolve().then(() => { _ignoreMutations = false; });
+  }
+
   // ─── Type badge ───────────────────────────────────────────────────────────
   function getTypeBadge(item) {
     if (item.contentType === "anime") {
@@ -310,7 +400,11 @@
       </div>`;
     }
     if (src) {
-      return `<img class="td-poster" data-td-poster src="${esc(src)}" alt="${esc(altText)}" />`;
+      const viewLabel = t("detail.viewPoster", { title: item.title || "" });
+      return `<button type="button" class="td-poster-btn" data-td-action="view-poster"
+        aria-label="${esc(viewLabel)}">
+        <img class="td-poster" data-td-poster src="${esc(src)}" alt="${esc(altText)}" />
+      </button>`;
     }
     return `<div class="td-poster td-poster--empty" aria-hidden="true">🎬</div>`;
   }
@@ -319,8 +413,16 @@
     if (!season) return "";
     const num = season.seasonNumber;
     if (season.isSpecials) return t("seasons.specials");
+    if (season.isRelated && season.name) return season.name;
     if (season.name && !/^Season \d+$/i.test(season.name)) return season.name;
     return t("seasons.seasonNum", { n: num });
+  }
+
+  function cleanOverviewForDisplay(overview) {
+    const cleaned =
+      window.WatchlistSeriesMetadata?.cleanEpisodeOverview?.(overview) ??
+      String(overview || "").trim();
+    return String(cleaned || "").trim();
   }
 
   /** Update header poster + season detail block when the user selects a season. */
@@ -353,8 +455,9 @@
 
         const overviewEl = detailEl.querySelector("[data-td-part='season-overview']");
         if (overviewEl) {
-          if (season.overview) {
-            overviewEl.textContent = season.overview;
+          const overviewText = cleanOverviewForDisplay(season.overview);
+          if (overviewText) {
+            overviewEl.textContent = overviewText;
             overviewEl.hidden = false;
           } else {
             overviewEl.textContent = "";
@@ -366,6 +469,69 @@
       }
 
       if (seriesSummaryEl) seriesSummaryEl.hidden = true;
+    }
+  }
+
+  function ensurePosterLightbox() {
+    if (_posterLightboxEl) return;
+    _posterLightboxEl = document.createElement("div");
+    _posterLightboxEl.className = "td-poster-lightbox";
+    _posterLightboxEl.id = "tdPosterLightbox";
+    _posterLightboxEl.hidden = true;
+    _posterLightboxEl.setAttribute("aria-hidden", "true");
+    _posterLightboxEl.innerHTML = `
+      <div class="td-poster-lightbox__backdrop" data-td-action="close-poster-lightbox" aria-hidden="true"></div>
+      <button type="button" class="td-poster-lightbox__close" data-td-action="close-poster-lightbox"
+        aria-label="${esc(t("btn.close"))}">✕</button>
+      <img class="td-poster-lightbox__img" data-td-part="poster-lightbox-img" alt="" />
+    `;
+    document.body.appendChild(_posterLightboxEl);
+    _posterLightboxEl.addEventListener("click", (event) => {
+      if (event.target.closest("[data-td-action='close-poster-lightbox']")) {
+        closePosterLightbox();
+      }
+    });
+    _posterLightboxEl.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePosterLightbox();
+      }
+    });
+  }
+
+  function openPosterLightbox(src, alt) {
+    if (!src) return;
+    ensurePosterLightbox();
+    const img = _posterLightboxEl.querySelector("[data-td-part='poster-lightbox-img']");
+    if (img) {
+      img.src = src;
+      img.alt = alt || "";
+    }
+    _posterLightboxOpener = document.activeElement;
+    _posterLightboxOpen = true;
+    _posterLightboxEl.hidden = false;
+    _posterLightboxEl.setAttribute("aria-hidden", "false");
+    _posterLightboxEl.querySelector(".td-poster-lightbox__close")?.focus();
+  }
+
+  function closePosterLightbox() {
+    if (!_posterLightboxEl || _posterLightboxEl.hidden) return;
+    _posterLightboxOpen = false;
+    _posterLightboxEl.hidden = true;
+    _posterLightboxEl.setAttribute("aria-hidden", "true");
+    const img = _posterLightboxEl.querySelector("[data-td-part='poster-lightbox-img']");
+    if (img) {
+      img.removeAttribute("src");
+      img.alt = "";
+    }
+    const opener = _posterLightboxOpener;
+    _posterLightboxOpener = null;
+    if (opener && document.contains(opener)) {
+      try {
+        opener.focus({ preventScroll: true });
+      } catch {
+        /* opener may not accept focus */
+      }
     }
   }
 
@@ -389,29 +555,38 @@
 
   // ─── My Rating block ──────────────────────────────────────────────────────
   function myRatingMarkup(itemId) {
+    const item = findItem(itemId);
     const state = titleProgressState(itemId);
     const entry = getWatchEntry(itemId);
     const rated = entry && hasWatchRating(entry);
     const hasNote = Boolean(String(entry?.note || "").trim());
     const noteSnippet = hasNote
       ? `<p class="td-my-rating__note">${esc(entry.note)}</p>` : "";
+    const movieBar =
+      isMovie(item) && state !== "watched"
+        ? movieProgressMarkup(item, itemId)
+        : "";
+    const movieClass = movieBar ? " td-my-rating--movie" : "";
 
     // Unwatched: tap to mark watched
     if (state === "unwatched") {
-      return `<div class="td-my-rating td-my-rating--chip">
-        <button type="button"
-          class="card__footer-badge card__footer-badge--unwatched"
-          data-td-action="quick-toggle-watched"
-          data-td-id="${esc(itemId)}"
-          aria-label="${esc(t("card.markWatched"))}">
-          ${esc(t("card.notWatchedShort"))}
-        </button>
+      return `<div class="td-my-rating td-my-rating--chip${movieClass}">
+        <div class="td-my-rating__chip-row">
+          <button type="button"
+            class="card__footer-badge card__footer-badge--unwatched"
+            data-td-action="quick-toggle-watched"
+            data-td-id="${esc(itemId)}"
+            aria-label="${esc(t("card.markWatched"))}">
+            ${esc(t("card.notWatchedShort"))}
+          </button>
+        </div>
+        ${movieBar}
       </div>`;
     }
 
     // In progress: tap to mark fully watched
     if (state === "inProgress") {
-      return `<div class="td-my-rating td-my-rating--chip td-my-rating--in-progress">
+      return `<div class="td-my-rating td-my-rating--chip td-my-rating--in-progress${movieClass}">
         <div class="td-my-rating__toolbar">
           <button type="button"
             class="card__watch-status card__watch-status--in-progress"
@@ -426,6 +601,7 @@
           </button>
         </div>
         ${noteSnippet}
+        ${movieBar}
       </div>`;
     }
 
@@ -875,6 +1051,8 @@
     });
     // Close menu when clicking anywhere in overlay that is not the menu itself
     _overlay.addEventListener("click", onOverlayClick);
+    _overlay.addEventListener("input", onOverlayInput);
+    _overlay.addEventListener("change", onOverlayChange);
     _overlay.addEventListener("keydown", onOverlayKeydown);
     _titleObserver = null;
     setupSwipeToDismiss();
@@ -902,6 +1080,7 @@
         updateMyRating();
       },
       onSeasonSelected: (payload) => updateHeaderSeasonPresentation(payload),
+      resetHeaderSeasonPresentation: () => resetHeaderSeasonPresentation(),
     });
   }
 
@@ -976,6 +1155,7 @@
     _isOpen = false;
 
     closeMenu();
+    closePosterLightbox();
     detachSeasons();
     _panelDrag = null;
     resetPanelDragStyles();
@@ -1143,6 +1323,18 @@
   }
 
   // ─── Action handler ───────────────────────────────────────────────────────
+  function onOverlayInput(event) {
+    const slider = event.target.closest("[data-td-action='movie-progress']");
+    if (!slider) return;
+    updateMovieProgressLabels(slider);
+  }
+
+  function onOverlayChange(event) {
+    const slider = event.target.closest("[data-td-action='movie-progress']");
+    if (!slider) return;
+    void persistMovieProgress(slider);
+  }
+
   function onOverlayClick(event) {
     // Close menu when clicking outside the menu root
     if (_menuOpen) {
@@ -1150,6 +1342,16 @@
       if (menuRoot && !menuRoot.contains(event.target)) {
         closeMenu();
       }
+    }
+
+    const posterBtn = event.target.closest("[data-td-action='view-poster']");
+    if (posterBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const img = posterBtn.querySelector("[data-td-poster]");
+      const src = img?.currentSrc || img?.src || img?.getAttribute("src") || "";
+      if (src) openPosterLightbox(src, img?.alt || "");
+      return;
     }
 
     const target = event.target.closest("[data-td-action]");
@@ -1252,6 +1454,10 @@
     // Escape: close menu first, then close panel if menu was already closed
     if (event.key === "Escape") {
       event.stopPropagation();
+      if (_posterLightboxOpen) {
+        closePosterLightbox();
+        return;
+      }
       if (_menuOpen) {
         closeMenu();
         _menuBtn?.focus();
@@ -1357,6 +1563,10 @@
     bindCardClick();
 
     document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && _posterLightboxOpen) {
+        closePosterLightbox();
+        return;
+      }
       if (event.key === "Escape" && _isOpen) {
         if (_menuOpen) { closeMenu(); _menuBtn?.focus(); }
         else close();
@@ -1384,6 +1594,9 @@
     refresh,
     isOpen: () => _isOpen,
     activeItemId: () => _activeItemId,
+    openPosterLightbox,
+    closePosterLightbox,
+    isPosterLightboxOpen: () => _posterLightboxOpen,
     // Targeted update hooks (used by WatchlistSeasons)
     updateMyRating,
     updateDetailActions: (item) => updateDetailActions(item || findItem(_activeItemId)),

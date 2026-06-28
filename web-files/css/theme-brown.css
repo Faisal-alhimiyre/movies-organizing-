@@ -113,7 +113,8 @@ html[data-theme="brown"] .type-tabs {
 html[data-theme="brown"] .search__input,
 html[data-theme="brown"] .gate__input,
 html[data-theme="brown"] .form-input,
-html[data-theme="brown"] .form-textarea {
+html[data-theme="brown"] .form-textarea,
+html[data-theme="brown"] .tds-episode-jump__input {
   background: linear-gradient(180deg, rgba(10, 6, 4, 0.82) 0%, rgba(22, 14, 10, 0.68) 100%);
   border-color: rgba(232, 201, 168, 0.16);
   box-shadow: inset 0 1px 0 rgba(255, 248, 240, 0.04);
@@ -140,7 +141,8 @@ html[data-theme="brown"] .panel__filters #ratingFilter {
 html[data-theme="brown"] .search__input:focus,
 html[data-theme="brown"] .select:focus,
 html[data-theme="brown"] .form-input:focus,
-html[data-theme="brown"] .form-textarea:focus {
+html[data-theme="brown"] .form-textarea:focus,
+html[data-theme="brown"] .tds-episode-jump__input:focus {
   border-color: rgba(232, 201, 168, 0.46);
   box-shadow:
     0 0 0 3px rgba(201, 149, 106, 0.14),

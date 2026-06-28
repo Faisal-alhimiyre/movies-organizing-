@@ -88,7 +88,8 @@ html[data-theme="purple"] .type-tabs {
 html[data-theme="purple"] .search__input,
 html[data-theme="purple"] .gate__input,
 html[data-theme="purple"] .form-input,
-html[data-theme="purple"] .form-textarea {
+html[data-theme="purple"] .form-textarea,
+html[data-theme="purple"] .tds-episode-jump__input {
   background-color: var(--search-field-bg);
   border-color: rgba(180, 140, 255, 0.14);
 }
@@ -107,7 +108,8 @@ html[data-theme="purple"] .select {
 html[data-theme="purple"] .search__input:focus,
 html[data-theme="purple"] .select:focus,
 html[data-theme="purple"] .form-input:focus,
-html[data-theme="purple"] .form-textarea:focus {
+html[data-theme="purple"] .form-textarea:focus,
+html[data-theme="purple"] .tds-episode-jump__input:focus {
   border-color: rgba(232, 192, 120, 0.45);
   box-shadow: 0 0 0 3px rgba(232, 192, 120, 0.12);
 }

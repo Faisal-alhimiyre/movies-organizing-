@@ -328,6 +328,141 @@ describe("_anilistDateStr", () => {
   });
 });
 
+describe("_collectAnilistRelatedMoviesFromSources", () => {
+  let SM;
+  beforeEach(() => { SM = loadModule(); });
+
+  test("includes linked movies and excludes TV cours already in the chain", () => {
+    const chainIds = new Set([101922, 142329]);
+    const sources = [
+      {
+        relations: {
+          edges: [
+            {
+              relationType: "SEQUEL",
+              node: {
+                id: 129874,
+                type: "ANIME",
+                format: "MOVIE",
+                title: { english: "Mugen Train" },
+                startDate: { year: 2020 },
+              },
+            },
+            {
+              relationType: "SEQUEL",
+              node: {
+                id: 142329,
+                type: "ANIME",
+                format: "TV",
+                title: { english: "Entertainment District" },
+                startDate: { year: 2021 },
+              },
+            },
+          ],
+        },
+      },
+    ];
+
+    const related = SM._collectAnilistRelatedMoviesFromSources(sources, chainIds);
+    expect(related).toHaveLength(1);
+    expect(related[0].node.id).toBe(129874);
+  });
+});
+
+describe("_isMovieLikeTvSpecial", () => {
+  const SM = window.WatchlistSeriesMetadata;
+
+  test("accepts TVDB-linked movies and long features, rejects recaps", () => {
+    expect(SM._isMovieLikeTvSpecial({ isMovie: true, title: "Seven Kings Must Die" })).toBe(true);
+    expect(SM._isMovieLikeTvSpecial({ linkedMovieId: 12345, title: "Feature" })).toBe(true);
+    expect(
+      SM._isMovieLikeTvSpecial({ runtimeMinutes: 114, title: "Seven Kings Must Die" })
+    ).toBe(true);
+    expect(SM._isMovieLikeTvSpecial({ runtimeMinutes: 90, title: "The Story So Far" })).toBe(false);
+    expect(SM._isMovieLikeTvSpecial({ runtimeMinutes: 60, title: "The Making of Season 2" })).toBe(false);
+    expect(SM._isMovieLikeTvSpecial({ runtimeMinutes: 60, title: "The Story So Far" })).toBe(false);
+  });
+});
+
+describe("_expandEpisodeListFromTvdbSkeleton", () => {
+  const SM = window.WatchlistSeriesMetadata;
+
+  test("grows a short AniList list to match TVDB absolute episodes", () => {
+    const anilist = [
+      { episodeNumber: 1, title: "Stream title", still: "thumb.jpg", overview: "" },
+      { episodeNumber: 2, title: "Episode 2", still: "", overview: "" },
+    ];
+    const tvdb = [
+      { episodeNumber: 1, title: "TVDB 1", still: "a.jpg", overview: "Plot 1" },
+      { episodeNumber: 2, title: "TVDB 2", still: "b.jpg", overview: "Plot 2" },
+      { episodeNumber: 3, title: "TVDB 3", still: "c.jpg", overview: "Plot 3" },
+    ];
+    const expanded = SM._expandEpisodeListFromTvdbSkeleton(anilist, tvdb, 1);
+    expect(expanded).toHaveLength(3);
+    expect(expanded[0].title).toBe("Stream title");
+    expect(expanded[2].title).toBe("TVDB 3");
+    expect(expanded[2].progressKey).toBe("1:3");
+  });
+});
+
+describe("_cleanEpisodeOverview", () => {
+  const SM = window.WatchlistSeriesMetadata;
+  const footnoteOnly = `*This includes the following special episodes:
+- Chopperman to the Rescue! Protect the TV Station by the Shore! (Episode 336)
+- The Strongest Tag-Team! Luffy and Toriko's Hard Struggle! (Episode 492)`;
+
+  test("removes TVDB special-episode footnote when it is the whole overview", () => {
+    expect(SM._cleanEpisodeOverview(footnoteOnly)).toBe("");
+  });
+
+  test("removes special-episode footnote from season overview block", () => {
+    const seasonOnly = `${footnoteOnly}
+- Team Formation! Save Chopper (Episode 542)
+- History's Strongest Collaboration vs. Glutton of the Sea (Episode 590)`;
+    expect(SM._cleanEpisodeOverview(seasonOnly)).toBe("");
+  });
+
+  test("keeps plot text before a special-episode footnote", () => {
+    const input = `The crew reaches the next island and faces a new threat.\n\n${footnoteOnly}`;
+    expect(SM._cleanEpisodeOverview(input)).toBe(
+      "The crew reaches the next island and faces a new threat."
+    );
+  });
+
+  test("leaves normal summaries unchanged", () => {
+    const plot =
+      "Leonard Watch moves to Jerusalem's Lot and joins Libra.";
+    expect(SM._cleanEpisodeOverview(plot)).toBe(plot);
+  });
+
+  test("removes OPM-style source attribution and recap notes", () => {
+    const input = `Saitama takes the hero exam while Genos fights Mosquito Girl.
+
+(Source: EMOTION Label YouTube Channel Description)
+
+Note: Excludes recap episode that aired a week before regular broadcast.`;
+    expect(SM._cleanEpisodeOverview(input)).toBe(
+      "Saitama takes the hero exam while Genos fights Mosquito Girl."
+    );
+  });
+
+  test("detects TVDB boilerplate metadata", () => {
+    expect(
+      SM._episodeOverviewLooksBoilerplate(
+        "(Source: EMOTION Label YouTube Channel Description)"
+      )
+    ).toBe(true);
+    expect(
+      SM._episodeOverviewLooksBoilerplate(
+        "Note: Excludes recap episode that aired a week before regular broadcast."
+      )
+    ).toBe(true);
+    expect(
+      SM._episodeOverviewLooksBoilerplate("A normal episode summary.")
+    ).toBe(false);
+  });
+});
+
 describe("_stripHtml", () => {
   let SM;
   beforeEach(() => { SM = loadModule(); });
