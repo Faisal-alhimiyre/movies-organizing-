@@ -1324,11 +1324,44 @@
     return meta.pickSeasonAnilistId?.(seasonSummary, _resolution, seasonNum) ?? null;
   }
 
+  async function ensureSeasonAnilistIdResolved(seasonNum) {
+    const meta = window.WatchlistSeriesMetadata;
+    if (!meta || !_resolution || seasonNum <= 0) return;
+    const seasonSummary = (_seriesResult?.seasons || []).find(
+      (s) => s.seasonNumber === seasonNum
+    );
+    if (!seasonSummary) return;
+    if (seasonAnilistIdFor(seasonNum)) return;
+    if (!meta.resolveSeasonAnilistId) return;
+    const id = await meta.resolveSeasonAnilistId(
+      seasonSummary,
+      _resolution,
+      seasonNum
+    );
+    if (id) seasonSummary.anilistId = id;
+  }
+
   function isSeasonCacheValid(seasonNum, cached) {
     if (!cached?.episodes?.length) return false;
+    if (cached.seasonNum != null && cached.seasonNum !== seasonNum) return false;
+
+    const seasonSummary = getSeasonByNum(seasonNum);
+    const expectedCount = seasonSummary?.episodeCount;
+    if (
+      expectedCount != null &&
+      cached.episodes.length > expectedCount
+    ) {
+      return false;
+    }
+
+    const root = Number(_resolution?.anilistId);
+    const cachedId = Number(cached.seasonAnilistId);
+    if (seasonNum > 1 && Number.isFinite(root) && cachedId === root) {
+      return false;
+    }
+
     const expectedId = seasonAnilistIdFor(seasonNum);
     if (expectedId == null) return seasonNum <= 1;
-    const cachedId = Number(cached.seasonAnilistId);
     if (!Number.isFinite(cachedId)) return false;
     return cachedId === expectedId;
   }
@@ -1340,6 +1373,7 @@
       displayEps !== result?.episodes
         ? { ...result, episodes: displayEps }
         : result;
+    stored.seasonNum = seasonNum;
     const seasonAnilistId = seasonAnilistIdFor(seasonNum);
     if (seasonAnilistId != null) {
       stored.seasonAnilistId = seasonAnilistId;
@@ -1371,6 +1405,8 @@
     if (!seasonSummary) return;
 
     try {
+      await ensureSeasonAnilistIdResolved(seasonNum);
+      if (!isValid(tok)) return;
       const result = await meta.fetchSeasonEpisodes(
         _resolution,
         seasonNum,
@@ -1391,6 +1427,7 @@
     if (!meta || !result) return;
     if (loadTok != null && loadTok !== _seasonEpisodeToken) return;
     if (_selectedSeason !== seasonNum) return;
+    if (result.seasonNum != null && result.seasonNum !== seasonNum) return;
 
     const displayEps = filterSpecialsEpisodes(seasonNum, result?.episodes);
     const displayResult =
@@ -1660,7 +1697,13 @@
   // ─── Season selection ──────────────────────────────────────────────────────
 
   function selectSeason(seasonNum, { animate = true, skipTabSwitch = false } = {}) {
-    if (_selectedSeason === seasonNum && animate) return;
+    if (
+      _selectedSeason === seasonNum &&
+      animate &&
+      _episodesResult?.seasonNum === seasonNum
+    ) {
+      return;
+    }
     closeEpisodeModal();
     resetEpisodeJumpInput();
     _seasonEpisodeToken += 1;
@@ -1683,6 +1726,27 @@
       scrollToSeasonCard(seasonNum, animate);
     }
     notifySeasonPresentation(seasonNum);
+
+    _episodesResult = null;
+    const listEl = _slot?.querySelector(".tds-episode-list");
+    if (listEl) listEl.innerHTML = "";
+    updateEpisodesTitle();
+
+    void continueSelectSeason(seasonNum, loadTok);
+  }
+
+  async function continueSelectSeason(seasonNum, loadTok) {
+    const cachedBefore = _episodesBySeason.get(seasonNum);
+    const quickValid =
+      cachedBefore && isSeasonCacheValid(seasonNum, cachedBefore);
+
+    if (!quickValid) {
+      showEpisodesLoading();
+      if (cachedBefore) _episodesBySeason.delete(seasonNum);
+    }
+
+    await ensureSeasonAnilistIdResolved(seasonNum);
+    if (loadTok !== _seasonEpisodeToken) return;
 
     const cached = _episodesBySeason.get(seasonNum);
     if (isSeasonCacheValid(seasonNum, cached)) {
@@ -3092,6 +3156,36 @@
     }
   }
 
+  function getCenteredSeasonCard() {
+    if (!_carouselEl) return null;
+    const cards = [..._carouselEl.querySelectorAll(".tds-season-card")];
+    if (!cards.length) return null;
+    const rect = _carouselEl.getBoundingClientRect();
+    const center = rect.left + rect.width / 2;
+    let best = null;
+    let bestDist = Infinity;
+    for (const card of cards) {
+      const cr = card.getBoundingClientRect();
+      const cardCenter = cr.left + cr.width / 2;
+      const dist = Math.abs(cardCenter - center);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = card;
+      }
+    }
+    return best;
+  }
+
+  function onCarouselScrollEnd() {
+    if (!_carouselEl || _isDragging) return;
+    const centered = getCenteredSeasonCard();
+    if (!centered) return;
+    const num = parseInt(centered.dataset.tdsSeason, 10);
+    if (Number.isFinite(num) && num !== _selectedSeason) {
+      selectSeason(num, { animate: false });
+    }
+  }
+
   function bindCarouselEvents() {
     if (!_carouselEl) return;
     // Mouse drag
@@ -3101,6 +3195,16 @@
     _carouselEl.addEventListener("mouseleave", onDragEnd);
     // Horizontal mouse wheel
     _carouselEl.addEventListener("wheel", onCarouselWheel, { passive: false });
+    // Touch / swipe — sync selection to centered card when scroll settles
+    let scrollEndTimer = null;
+    _carouselEl.addEventListener(
+      "scroll",
+      () => {
+        clearTimeout(scrollEndTimer);
+        scrollEndTimer = setTimeout(onCarouselScrollEnd, 120);
+      },
+      { passive: true }
+    );
   }
 
   function onDragStart(event) {
@@ -3119,7 +3223,7 @@
     if (!_isDragging) return;
     _isDragging = false;
     _carouselEl.classList.remove("tds-carousel--grabbing");
-    // Snap to nearest season by click (scroll-snap handles it natively)
+    setTimeout(onCarouselScrollEnd, 150);
   }
 
   function onCarouselWheel(event) {

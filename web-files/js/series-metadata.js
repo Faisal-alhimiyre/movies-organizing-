@@ -1021,7 +1021,8 @@
         const anilistRaw = await fetchAnilistEpisodes(
           seasonAnilistId,
           seasonNumber,
-          effectivePoster
+          effectivePoster,
+          { rootAnilistId }
         );
         let result = normalizeEpisodesToAppSeason(anilistRaw, seasonNumber);
         emitPartial(result);
@@ -2285,7 +2286,7 @@
    * AniList lists later cours as SEQUEL-of-SEQUEL (e.g. Demon Slayer → Mugen Train →
    * Entertainment District). Walk the main TV sequel chain instead of only direct sequels.
    */
-  async function collectAnilistSeasonChain(rootMedia, maxSeasons = 30) {
+  async function collectAnilistSeasonChainWalk(rootMedia, maxSeasons = 30) {
     const chain = [];
     const seen = new Set();
     let current = rootMedia;
@@ -2309,6 +2310,17 @@
     }
 
     return chain;
+  }
+
+  async function collectAnilistSeasonChain(rootMedia, maxSeasons = 30) {
+    const chain = await Promise.race([
+      collectAnilistSeasonChainWalk(rootMedia, maxSeasons),
+      new Promise((resolve) => {
+        setTimeout(() => resolve(null), 20000);
+      }),
+    ]);
+    if (Array.isArray(chain) && chain.length) return chain;
+    return rootMedia ? [rootMedia] : [];
   }
 
   function anilistStartSortKey(date) {
@@ -2566,10 +2578,15 @@
   async function fetchAnilistSeriesMetadata(anilistId, locale, fallbackPoster = "") {
     const cacheKey = `metadata:v13:series:anilist:${anilistId}:${locale}`;
     const cached = readCached(cacheKey, TTL_SERIES);
-    if (cached?.payload) {
+    if (cached?.payload?.seasons?.length) {
       if (!seasonsNeedChainRepair(cached.payload.seasons, anilistId)) {
         return parseCachedSeriesResult(cached, { isStale: isStale(cacheKey, TTL_SERIES) });
       }
+      // Serve cached seasons immediately; cour IDs resolve when episodes load.
+      return parseCachedSeriesResult(cached, {
+        isStale: true,
+        forceState: ResultState.AVAILABLE,
+      });
     }
 
     const data = await anilistQuery(
@@ -2692,17 +2709,49 @@
     };
   }
 
-  async function fetchAnilistEpisodes(anilistId, seasonNumber, fallbackPoster = "") {
+  async function fetchAnilistEpisodes(
+    anilistId,
+    seasonNumber,
+    fallbackPoster = "",
+    options = null
+  ) {
     const appSeasonNumber = Number(seasonNumber) || 1;
     const aid = Number(anilistId);
+    const rootAnilistId = Number(options?.rootAnilistId);
     void fallbackPoster;
 
-    const cacheKey = `metadata:v14:episodes:anilist:${anilistId}:${appSeasonNumber}`;
-    const cached = readCached(cacheKey, TTL_EPISODES);
-    if (cached?.payload) {
-      return parseCachedEpisodesResult(cached, {
-        isStale: isStale(cacheKey, TTL_EPISODES),
-      });
+    const cachePoisoned =
+      appSeasonNumber > 1 &&
+      Number.isFinite(rootAnilistId) &&
+      aid === rootAnilistId;
+
+    if (
+      appSeasonNumber > 1 &&
+      Number.isFinite(rootAnilistId) &&
+      aid === rootAnilistId
+    ) {
+      deleteAnilistEpisodeCacheKeys(aid, appSeasonNumber);
+    }
+
+    const cacheKey = `metadata:v15:episodes:anilist:${anilistId}:${appSeasonNumber}`;
+    if (!cachePoisoned) {
+      const cached = readCached(cacheKey, TTL_EPISODES);
+      if (cached?.payload) {
+        if (
+          isPoisonedAnilistEpisodeCache(
+            aid,
+            appSeasonNumber,
+            rootAnilistId,
+            cached
+          )
+        ) {
+          deleteAnilistEpisodeCacheKeys(aid, appSeasonNumber);
+        } else {
+          return parseCachedEpisodesResult(cached, {
+            isStale: isStale(cacheKey, TTL_EPISODES),
+          });
+        }
+      }
     }
 
     const data = await anilistQuery(
@@ -2749,7 +2798,19 @@
     }
 
     const result = { state, episodes };
-    writeSeriesCacheEntry(cacheKey, { payload: episodesResultPayload(result), state }, TTL_EPISODES);
+    if (!cachePoisoned) {
+      writeSeriesCacheEntry(
+        cacheKey,
+        {
+          payload: episodesResultPayload(result, {
+            fetchedAnilistId: aid,
+            appSeasonNumber,
+          }),
+          state,
+        },
+        TTL_EPISODES
+      );
+    }
     return result;
   }
 
@@ -2945,13 +3006,148 @@
     };
   }
 
-  function episodesResultPayload(result) {
+  function episodesResultPayload(result, meta = null) {
     if (!result?.episodes) return {};
     return {
       episodes: result.episodes,
       ...(result.seasonPoster ? { seasonPoster: result.seasonPoster } : {}),
       ...(result.seasonOverview ? { seasonOverview: result.seasonOverview } : {}),
+      ...(meta?.fetchedAnilistId
+        ? { fetchedAnilistId: meta.fetchedAnilistId }
+        : {}),
+      ...(meta?.appSeasonNumber != null
+        ? { appSeasonNumber: meta.appSeasonNumber }
+        : {}),
     };
+  }
+
+  const ANILIST_EPISODE_CACHE_VERSIONS = [
+    "v5",
+    "v12",
+    "v13",
+    "v14",
+    "v15",
+  ];
+
+  function deleteAnilistEpisodeCacheKeys(anilistId, appSeasonNumber) {
+    const cache = readSeriesCache();
+    let changed = false;
+    for (const ver of ANILIST_EPISODE_CACHE_VERSIONS) {
+      const key = `metadata:${ver}:episodes:anilist:${anilistId}:${appSeasonNumber}`;
+      if (cache[key]) {
+        delete cache[key];
+        _memory.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) {
+      try {
+        localStorage.setItem(SERIES_CACHE_KEY, JSON.stringify(cache));
+      } catch {
+        /* quota */
+      }
+    }
+  }
+
+  function isPoisonedAnilistEpisodeCache(
+    anilistId,
+    appSeasonNumber,
+    rootAnilistId,
+    cached
+  ) {
+    const sn = Number(appSeasonNumber);
+    const aid = Number(anilistId);
+    const root = Number(rootAnilistId);
+    if (!Number.isFinite(sn) || sn <= 1) return false;
+
+    if (Number.isFinite(root) && aid === root) return true;
+
+    const payload = cached?.payload;
+    const fetchedId = Number(payload?.fetchedAnilistId);
+    if (Number.isFinite(fetchedId) && Number.isFinite(root) && fetchedId === root) {
+      return true;
+    }
+    const cachedSeason = Number(payload?.appSeasonNumber);
+    if (Number.isFinite(cachedSeason) && cachedSeason !== sn) return true;
+
+    return false;
+  }
+
+  /**
+   * Removes episode cache entries written during the season-switch bug
+   * (season 2+ episodes stored under the franchise root AniList id).
+   * Runs on every load — users never need to clear site data manually.
+   */
+  function scrubPoisonedAnilistEpisodeCaches() {
+    try {
+      const cache = readSeriesCache();
+      const rootsNeedingRepair = new Set();
+      const episodeKeyRe = /^metadata:v\d+:episodes:anilist:(\d+):(\d+)$/;
+
+      for (const [key, entry] of Object.entries(cache)) {
+        const seriesMatch = key.match(/^metadata:v13:series:anilist:(\d+):/);
+        if (!seriesMatch || !entry?.payload?.seasons?.length) continue;
+        const rootId = Number(seriesMatch[1]);
+        if (seasonsNeedChainRepair(entry.payload.seasons, rootId)) {
+          rootsNeedingRepair.add(rootId);
+        }
+      }
+
+      const byMediaId = new Map();
+      for (const [key, entry] of Object.entries(cache)) {
+        const match = key.match(episodeKeyRe);
+        if (!match) continue;
+        const mediaId = match[1];
+        const appSeason = Number(match[2]);
+        const list = byMediaId.get(mediaId) || [];
+        list.push({ key, appSeason, entry });
+        byMediaId.set(mediaId, list);
+      }
+
+      let changed = false;
+      const dropKeys = new Set();
+
+      for (const key of Object.keys(cache)) {
+        const match = key.match(episodeKeyRe);
+        if (!match) continue;
+        const mediaId = Number(match[1]);
+        const appSeason = Number(match[2]);
+        if (appSeason <= 1 || !rootsNeedingRepair.has(mediaId)) continue;
+        dropKeys.add(key);
+      }
+
+      for (const [, entries] of byMediaId) {
+        const season1 = entries.find((e) => e.appSeason === 1);
+        if (!season1?.entry?.payload?.episodes?.length) continue;
+        const s1Sig = season1.entry.payload.episodes
+          .slice(0, 6)
+          .map((ep) => String(ep.title || "").trim())
+          .join("\0");
+        if (!s1Sig) continue;
+        for (const row of entries) {
+          if (row.appSeason <= 1) continue;
+          const eps = row.entry?.payload?.episodes;
+          if (!eps?.length) continue;
+          const sig = eps
+            .slice(0, 6)
+            .map((ep) => String(ep.title || "").trim())
+            .join("\0");
+          if (sig === s1Sig) dropKeys.add(row.key);
+        }
+      }
+
+      for (const key of dropKeys) {
+        delete cache[key];
+        _memory.delete(key);
+        changed = true;
+      }
+
+      if (changed) {
+        localStorage.setItem(SERIES_CACHE_KEY, JSON.stringify(cache));
+      }
+    } catch {
+      /* storage unavailable */
+    }
   }
 
   function parseCachedSeriesResult(cached, { isStale = false, forceState = null } = {}) {
@@ -3177,7 +3373,7 @@
   }
 
   // ─── One-time cache eviction ──────────────────────────────────
-  const CACHE_EVICT_VERSION = "v28";
+  const CACHE_EVICT_VERSION = "v29";
   (function evictObsoleteEpisodeCache() {
     try {
       const flagKey = `watchlist-series-cache-evict-${CACHE_EVICT_VERSION}`;
@@ -3194,6 +3390,7 @@
         "metadata:v12:series:anilist:",
         "metadata:v12:episodes:anilist:",
         "metadata:v13:episodes:anilist:",
+        "metadata:v14:episodes:anilist:",
         "metadata:v16:season:tvdb:",
         "metadata:v17:season:tvdb:",
         "metadata:v18:season:tvdb:",
@@ -3226,6 +3423,8 @@
       localStorage.setItem(flagKey, "1");
     } catch { /* storage unavailable — skip */ }
   })();
+
+  scrubPoisonedAnilistEpisodeCaches();
 
   // ─── TheTVDB provider ─────────────────────────────────────────
 
@@ -3845,6 +4044,7 @@
     clearItemResolutionCache,
     cleanEpisodeOverview: cleanEpisodeOverviewText,
     pickSeasonAnilistId,
+    resolveSeasonAnilistId,
     isTvSpecialLinkedMovie: isMovieLikeTvSpecial,
     // Normalization functions exposed for testing
     _normalizeTmdbSeries: normalizeTmdbSeries,
