@@ -1254,6 +1254,9 @@
           overview: cleanOverview(season.overview) || "",
         }));
       }
+      if (_resolution?.anilistId && meta.repairSeasonAnilistIds) {
+        result.seasons = await meta.repairSeasonAnilistIds(_resolution, result.seasons);
+      }
     }
 
     _seriesResult = result;
@@ -1373,6 +1376,22 @@
       displayEps !== result?.episodes
         ? { ...result, episodes: displayEps }
         : result;
+
+    const seasonSummary = (_seriesResult?.seasons || []).find(
+      (s) => s.seasonNumber === seasonNum
+    ) || null;
+    if (
+      displayEps.length > 0 &&
+      meta.episodesPlausibleForSeason &&
+      !meta.episodesPlausibleForSeason(displayEps, seasonSummary, seasonNum, {
+        seasonAnilistId: Number(seasonSummary?.anilistId),
+        rootAnilistId: Number(_resolution?.anilistId),
+      })
+    ) {
+      if (partial) return;
+      showEpisodesStatus(t("seasons.episodesError"), "retry-episodes");
+      return;
+    }
 
     const prevCount = _episodesResult?.episodes?.length || 0;
     _episodesResult = {
@@ -3116,6 +3135,43 @@
     _carouselEl.addEventListener("mouseleave", onDragEnd);
     // Horizontal mouse wheel
     _carouselEl.addEventListener("wheel", onCarouselWheel, { passive: false });
+    // Mobile: when scroll-snap settles on a new card, load that season's episodes
+    let scrollSyncTimer = null;
+    _carouselEl.addEventListener(
+      "scroll",
+      () => {
+        clearTimeout(scrollSyncTimer);
+        scrollSyncTimer = setTimeout(syncCarouselSelectionFromScroll, 150);
+      },
+      { passive: true }
+    );
+  }
+
+  function syncCarouselSelectionFromScroll() {
+    if (!_carouselEl || _isDragging) return;
+    const cards = [..._carouselEl.querySelectorAll(".tds-season-card")];
+    if (!cards.length) return;
+
+    const carouselRect = _carouselEl.getBoundingClientRect();
+    const center = carouselRect.left + carouselRect.width / 2;
+    let bestCard = null;
+    let bestDist = Infinity;
+
+    for (const card of cards) {
+      const rect = card.getBoundingClientRect();
+      const cardCenter = rect.left + rect.width / 2;
+      const dist = Math.abs(cardCenter - center);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestCard = card;
+      }
+    }
+
+    if (!bestCard) return;
+    const num = parseInt(bestCard.dataset.tdsSeason, 10);
+    if (Number.isFinite(num) && num !== _selectedSeason) {
+      selectSeason(num);
+    }
   }
 
   function onDragStart(event) {
