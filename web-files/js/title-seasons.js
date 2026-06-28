@@ -1172,7 +1172,7 @@
     const meta = window.WatchlistSeriesMetadata;
     if (!meta || !_item) return;
 
-    const SERIES_LOAD_TIMEOUT_MS = 45000;
+    const SERIES_LOAD_TIMEOUT_MS = 90000;
 
     // Log configuration status for debugging (never logs key values)
     if (!window.__tdsConfigLogged) {
@@ -1263,6 +1263,7 @@
     switch (result?.state) {
       case RS.AVAILABLE:
       case RS.PARTIALLY_AVAILABLE:
+      case RS.EPISODE_DETAILS_UNAVAILABLE:
         renderSeasonsSection(result);
         if (result.isStale) showStale(t("seasons.staleWarning"));
         break;
@@ -1334,8 +1335,29 @@
       if (loadTok != null && loadTok !== _seasonEpisodeToken) return;
       if (_selectedSeason !== seasonNum) return;
 
+      if (!result) {
+        showEpisodesStatus(t("seasons.episodesError"), "retry-episodes");
+        return;
+      }
+
       applyEpisodesPayload(seasonNum, result, { partial: false, loadTok });
+    } catch (err) {
+      if (!isValid(tok)) return;
+      if (loadTok != null && loadTok !== _seasonEpisodeToken) return;
+      if (_selectedSeason !== seasonNum) return;
+      console.warn("[title-seasons] episode load failed:", err?.message || err);
+      showEpisodesStatus(t("seasons.episodesError"), "retry-episodes");
     } finally {
+      if (
+        isValid(tok) &&
+        _selectedSeason === seasonNum &&
+        (loadTok == null || loadTok === _seasonEpisodeToken) &&
+        _episodesLoading &&
+        !_episodesPartialPainted &&
+        !_episodesResult?.episodes?.length
+      ) {
+        showEpisodesStatus(t("seasons.episodesError"), "retry-episodes");
+      }
       runPendingSpecialsCheck();
     }
   }
@@ -1850,6 +1872,8 @@
   function showEpisodesStatus(msg, retryAction, { keepList = false } = {}) {
     _episodesLoading = false;
     if (!keepList) setEpisodesSectionReady(false);
+    const sec = getP("episodes-section");
+    if (sec) sec.hidden = false;
     const statusEl = getP("episodes-status");
     const listEl   = _slot?.querySelector(".tds-episode-list");
     if (statusEl) {
@@ -1879,6 +1903,8 @@
   function renderEpisodeList(seasonNum, episodes) {
     const listEl   = _slot?.querySelector(".tds-episode-list");
     const statusEl = getP("episodes-status");
+    const sec = getP("episodes-section");
+    if (sec) sec.hidden = false;
     if (!listEl) return;
 
     cancelEpisodeListRender();
