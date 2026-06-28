@@ -66,7 +66,11 @@
   let _pendingSpecialsCheck = false;
   let _episodesBySeason = new Map();
   let _dragStartX     = 0;
+  let _dragPointerX   = 0;
   let _isDragging     = false;
+  let _carouselDidDrag = false;
+  let _carouselScrollEndTimer = null;
+  let _carouselScrollLocked = false;
   let _scrollToSeasonsObserver = null;
 
   // ─── i18n shorthand ──────────────────────────────────────────────────────
@@ -644,6 +648,7 @@
     _pendingSpecialsCheck = false;
     _episodesBySeason = new Map();
     _isDragging     = false;
+    _carouselDidDrag = false;
     disconnectScrollToSeasons();
   }
 
@@ -1650,7 +1655,7 @@
 
     if (seasonNum > 0) {
       updateCarouselSelection(seasonNum);
-      scrollToSeasonCard(seasonNum, animate);
+      requestAnimationFrame(() => scrollToSeasonCard(seasonNum, animate));
     }
     notifySeasonPresentation(seasonNum);
 
@@ -1684,12 +1689,16 @@
     if (!_carouselEl) return;
     const card = _carouselEl.querySelector(`[data-tds-season="${seasonNum}"]`);
     if (!card) return;
+    _carouselScrollLocked = true;
     // scrollIntoView with inline:'center' handles both LTR and RTL scroll containers
     card.scrollIntoView({
       inline: "center",
       block: "nearest",
       behavior: animate ? "smooth" : "instant",
     });
+    setTimeout(() => {
+      _carouselScrollLocked = false;
+    }, animate ? 500 : 80);
   }
 
   function updateNavButtons(seasons) {
@@ -2930,6 +2939,11 @@
   }
 
   function onSlotClick(event) {
+    if (_carouselDidDrag) {
+      _carouselDidDrag = false;
+      return;
+    }
+
     const target = event.target.closest("[data-tds-action]");
     if (!target) return;
 
@@ -2943,7 +2957,9 @@
       }
       case "select-season": {
         const num = parseInt(target.dataset.tdsSeason, 10);
-        if (Number.isFinite(num) && num !== _selectedSeason) selectSeason(num);
+        if (Number.isFinite(num) && num !== _selectedSeason) {
+          selectSeason(num, { animate: false });
+        }
         break;
       }
       case "mark-season":
@@ -3058,25 +3074,72 @@
     }
   }
 
+  function getCenteredSeasonCard() {
+    if (!_carouselEl) return null;
+    const cards = [..._carouselEl.querySelectorAll(".tds-season-card")];
+    if (!cards.length) return null;
+    const rect = _carouselEl.getBoundingClientRect();
+    const center = rect.left + rect.width / 2;
+    let best = null;
+    let bestDist = Infinity;
+    for (const card of cards) {
+      const cr = card.getBoundingClientRect();
+      const cardCenter = cr.left + cr.width / 2;
+      const dist = Math.abs(cardCenter - center);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = card;
+      }
+    }
+    return best;
+  }
+
+  function onCarouselScrollEnd() {
+    if (!_carouselEl || _isDragging || _carouselDidDrag || _carouselScrollLocked) {
+      return;
+    }
+    const centered = getCenteredSeasonCard();
+    if (!centered) return;
+    const num = parseInt(centered.dataset.tdsSeason, 10);
+    if (Number.isFinite(num) && num !== _selectedSeason) {
+      selectSeason(num, { animate: false });
+    }
+  }
+
   function bindCarouselEvents() {
-    if (!_carouselEl) return;
-    // Mouse drag
+    if (!_carouselEl || _carouselEl.dataset.tdsCarouselBound === "1") return;
+    _carouselEl.dataset.tdsCarouselBound = "1";
+    // Mouse drag (desktop)
     _carouselEl.addEventListener("mousedown", onDragStart);
     _carouselEl.addEventListener("mousemove", onDragMove);
     _carouselEl.addEventListener("mouseup", onDragEnd);
     _carouselEl.addEventListener("mouseleave", onDragEnd);
     // Horizontal mouse wheel
     _carouselEl.addEventListener("wheel", onCarouselWheel, { passive: false });
+    // After swipe/scroll, sync selection to the centered card
+    _carouselEl.addEventListener(
+      "scroll",
+      () => {
+        clearTimeout(_carouselScrollEndTimer);
+        _carouselScrollEndTimer = setTimeout(onCarouselScrollEnd, 150);
+      },
+      { passive: true }
+    );
   }
 
   function onDragStart(event) {
-    _isDragging  = true;
-    _dragStartX  = event.clientX + _carouselEl.scrollLeft;
+    if (event.button !== 0) return;
+    _isDragging = true;
+    _carouselDidDrag = false;
+    _dragPointerX = event.clientX;
+    _dragStartX = event.clientX + _carouselEl.scrollLeft;
     _carouselEl.classList.add("tds-carousel--grabbing");
   }
 
   function onDragMove(event) {
     if (!_isDragging) return;
+    if (Math.abs(event.clientX - _dragPointerX) < 8) return;
+    _carouselDidDrag = true;
     event.preventDefault();
     _carouselEl.scrollLeft = _dragStartX - event.clientX;
   }
@@ -3085,7 +3148,9 @@
     if (!_isDragging) return;
     _isDragging = false;
     _carouselEl.classList.remove("tds-carousel--grabbing");
-    // Snap to nearest season by click (scroll-snap handles it natively)
+    if (_carouselDidDrag) {
+      setTimeout(onCarouselScrollEnd, 150);
+    }
   }
 
   function onCarouselWheel(event) {
