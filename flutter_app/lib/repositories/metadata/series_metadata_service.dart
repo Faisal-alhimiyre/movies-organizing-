@@ -448,7 +448,9 @@ class SeriesMetadataService {
     required String locale,
     String? fallbackPoster,
     SeasonSummary? seasonSummary,
+    WatchlistItem? item,
     bool forceRefresh = false,
+    void Function(SeasonEpisodesResult)? onPartial,
   }) async {
     if (!resolution.hasUsableSource) {
       return const SeasonEpisodesResult(state: MetadataResultState.invalidId);
@@ -458,13 +460,20 @@ class SeriesMetadataService {
         ? seasonSummary!.poster
         : fallbackPoster;
 
-    // Anime: AniList episodes (stubs or streaming list) — not TVDB.
-    if (resolution.anilistId != null) {
+    final seasonAnilistId = _pickSeasonAnilistId(
+      seasonSummary,
+      resolution,
+      seasonNumber,
+    );
+
+    if (seasonAnilistId != null) {
       return _fetchAnilistEpisodes(
-        resolution.anilistId!,
+        seasonAnilistId,
         seasonNumber,
         fallbackPoster: effectivePoster,
         forceRefresh: forceRefresh,
+        item: item,
+        onPartial: onPartial,
       );
     }
 
@@ -1027,6 +1036,7 @@ class SeriesMetadataService {
       query ($id: Int) {
         Media(id: $id, type: ANIME) {
           id
+          format
           title { english romaji native }
           episodes
           coverImage { large }
@@ -1035,6 +1045,21 @@ class SeriesMetadataService {
           endDate { year month day }
           status
           streamingEpisodes { title thumbnail }
+          relations {
+            edges {
+              relationType
+              node {
+                id
+                type
+                format
+                episodes
+                title { english romaji native }
+                coverImage { large }
+                description(asHtml: false)
+                startDate { year month day }
+              }
+            }
+          }
         }
       }
       ''',
@@ -1063,29 +1088,32 @@ class SeriesMetadataService {
     final episodeCount = parsePositiveCount(media['episodes']);
     final streamingEps = (media['streamingEpisodes'] as List?)?.length ?? 0;
 
+    final seasonChain = await _collectAnilistSeasonChain(media);
+    final seasons = <SeasonSummary>[];
+    for (var i = 0; i < seasonChain.length; i++) {
+      seasons.add(
+        _buildAnilistSeasonSummary(
+          seasonChain[i],
+          i + 1,
+          posterUrl,
+        ),
+      );
+    }
+
+    final totalEpisodes =
+        _regularEpisodeTotalFromSeasons(seasons) ?? episodeCount;
+
     final series = SeriesSummary(
       source: 'anilist',
       anilistId: anilistId,
       title: title,
-      totalEpisodes: episodeCount,
-      totalSeasons: 1,
+      totalEpisodes: totalEpisodes,
+      totalSeasons: seasons.length,
       poster: posterUrl,
       overview: _stripHtml(media['description']?.toString() ?? ''),
       status: media['status']?.toString(),
       firstAirDate: _anilistDateStr(media['startDate'] as Map?),
       lastAirDate: _anilistDateStr(media['endDate'] as Map?),
-    );
-
-    final season = SeasonSummary(
-      source: 'anilist',
-      seasonNumber: 1,
-      name: 'Season 1',
-      poster: posterUrl,
-      episodeCount: episodeCount,
-      overview: series.overview,
-      airDate: series.firstAirDate,
-      isSpecials: false,
-      isSynthetic: true,
     );
 
     final hasEpDetails = streamingEps > 0 || episodeCount != null;
@@ -1094,11 +1122,51 @@ class SeriesMetadataService {
           ? MetadataResultState.available
           : MetadataResultState.episodeDetailsUnavailable,
       series: series,
-      seasons: [season],
+      seasons: seasons,
     );
 
     _writeRawCache(cacheKey, _seriesResultToJson(result), _seriesTtl);
     return result;
+  }
+
+  int? _pickSeasonAnilistId(
+    SeasonSummary? seasonSummary,
+    SeriesIdResolution resolution,
+    int seasonNumber,
+  ) {
+    final fromSummary = seasonSummary?.anilistId;
+    if (fromSummary != null && fromSummary > 0) return fromSummary;
+    if (seasonNumber <= 1) {
+      final root = resolution.anilistId;
+      if (root != null && root > 0) return root;
+    }
+    return null;
+  }
+
+  SeasonSummary _buildAnilistSeasonSummary(
+    Map<String, dynamic> node,
+    int seasonNumber,
+    String fallbackPoster,
+  ) {
+    final titleObj = node['title'] as Map?;
+    final title = titleObj?['english']?.toString() ??
+        titleObj?['romaji']?.toString() ??
+        titleObj?['native']?.toString() ??
+        '';
+    final poster =
+        node['coverImage']?['large']?.toString() ?? fallbackPoster;
+    return SeasonSummary(
+      source: 'anilist',
+      anilistId: node['id'] as int?,
+      seasonNumber: seasonNumber,
+      name: title.isNotEmpty ? title : 'Season $seasonNumber',
+      poster: poster,
+      episodeCount: parsePositiveCount(node['episodes']),
+      overview: _stripHtml(node['description']?.toString() ?? ''),
+      airDate: _anilistDateStr(node['startDate'] as Map?),
+      isSpecials: false,
+      isSynthetic: true,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -1107,16 +1175,14 @@ class SeriesMetadataService {
 
   Future<SeasonEpisodesResult> _fetchAnilistEpisodes(
     int anilistId,
-    int seasonNumber, {
+    int appSeasonNumber, {
     String? fallbackPoster,
     bool forceRefresh = false,
+    WatchlistItem? item,
+    void Function(SeasonEpisodesResult)? onPartial,
   }) async {
-    if (seasonNumber != 1) {
-      // AniList only models a single synthetic season.
-      return const SeasonEpisodesResult(state: MetadataResultState.unavailable);
-    }
-
-    final cacheKey = 'metadata:v7:episodes:anilist:$anilistId';
+    final seasonNum = appSeasonNumber > 0 ? appSeasonNumber : 1;
+    final cacheKey = 'metadata:v14:episodes:anilist:$anilistId:$seasonNum';
     if (!forceRefresh) {
       final cached = _readRawCache(cacheKey, _episodesTtl);
       if (cached != null) {
@@ -1124,7 +1190,7 @@ class SeriesMetadataService {
           cached,
           isStale: _isStale(cacheKey, _episodesTtl),
         );
-        return _enrichAniFillerEpisodes(parsed, anilistId);
+        return _enrichAniFillerEpisodes(parsed, anilistId, item: item);
       }
     }
 
@@ -1151,11 +1217,13 @@ class SeriesMetadataService {
           isStale: true,
           forceState: MetadataResultState.offlineWithCache,
         );
-        return _enrichAniFillerEpisodes(parsed, anilistId);
+        return _enrichAniFillerEpisodes(parsed, anilistId, item: item);
       }
       return const SeasonEpisodesResult(state: MetadataResultState.offlineNoCache);
     }
 
+    final poster =
+        media['coverImage']?['large']?.toString() ?? fallbackPoster ?? '';
     final episodeCount = parsePositiveCount(media['episodes']);
     final streamingEps = (media['streamingEpisodes'] as List? ?? [])
         .cast<Map<String, dynamic>>();
@@ -1167,7 +1235,7 @@ class SeriesMetadataService {
       episodes = _buildAnilistEpisodeList(
         episodeCount,
         streamingEps,
-        anilistId,
+        seasonNum,
         poster,
       );
       state = streamingEps.isNotEmpty
@@ -1177,7 +1245,7 @@ class SeriesMetadataService {
       episodes = _buildAnilistEpisodeList(
         streamingEps.length,
         streamingEps,
-        anilistId,
+        seasonNum,
         poster,
       );
       state = MetadataResultState.partiallyAvailable;
@@ -1187,21 +1255,31 @@ class SeriesMetadataService {
       );
     }
 
-    final result = SeasonEpisodesResult(state: state, episodes: episodes);
-    final enriched = await _enrichAniFillerEpisodes(result, anilistId);
+    final partial = SeasonEpisodesResult(state: state, episodes: episodes);
+    onPartial?.call(partial);
+
+    final enriched = await _enrichAniFillerEpisodes(
+      partial,
+      anilistId,
+      item: item,
+    );
     _writeRawCache(cacheKey, _episodesResultToJson(enriched), _episodesTtl);
     return enriched;
   }
 
   Future<SeasonEpisodesResult> _enrichAniFillerEpisodes(
     SeasonEpisodesResult result,
-    int anilistId,
-  ) async {
+    int anilistId, {
+    WatchlistItem? item,
+  }) async {
     if (result.episodes == null || result.episodes!.isEmpty) return result;
     await AniFillerService.instance.ensureLoaded();
+    final malId = item?.link != null
+        ? MetadataService.parseMalId(item!.link)
+        : null;
     final enriched = AniFillerService.instance.enrichEpisodes(
       anilistId,
-      null,
+      malId,
       result.episodes!,
     );
     return SeasonEpisodesResult(
@@ -1217,16 +1295,17 @@ class SeriesMetadataService {
   List<EpisodeDetail> _buildAnilistEpisodeList(
     int episodeCount,
     List<Map<String, dynamic>> streamingEps,
-    int anilistId,
+    int appSeasonNumber,
     String fallbackPoster,
   ) {
+    final seasonNum = appSeasonNumber > 0 ? appSeasonNumber : 1;
     return List.generate(episodeCount, (i) {
       final stream = i < streamingEps.length ? streamingEps[i] : null;
       final rawTitle = stream?['title']?.toString() ?? '';
       final thumb = stream?['thumbnail']?.toString() ?? '';
       return EpisodeDetail(
         source: 'anilist',
-        seasonNumber: 1,
+        seasonNumber: seasonNum,
         episodeNumber: i + 1,
         title: rawTitle.isNotEmpty ? rawTitle : 'Episode ${i + 1}',
         still: thumb.isNotEmpty ? thumb : '',
@@ -2579,9 +2658,19 @@ class SeriesMetadataService {
     required SeriesIdResolution resolution,
     required int seasonNumber,
     required String locale,
+    SeasonSummary? seasonSummary,
   }) async {
-    if (resolution.anilistId != null) {
-      await _cache.delete('metadata:v7:episodes:anilist:${resolution.anilistId}');
+    final seasonAnilistId = _pickSeasonAnilistId(
+      seasonSummary,
+      resolution,
+      seasonNumber,
+    );
+    if (seasonAnilistId != null) {
+      final seasonNum = seasonNumber > 0 ? seasonNumber : 1;
+      await _cache.delete(
+        'metadata:v14:episodes:anilist:$seasonAnilistId:$seasonNum',
+      );
+      await _cache.delete('metadata:v7:episodes:anilist:$seasonAnilistId');
     }
     if (!_config.isSupabaseConfigured) return;
     final tvdbId = await _resolveTvdbId(resolution);

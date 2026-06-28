@@ -301,11 +301,16 @@
     return t("seasons.epRuntime", { n: total });
   }
 
+  function movieWatchEntryForProgress(itemId) {
+    if (!window.WatchlistApp?.isWatched?.(itemId)) return null;
+    return window.WatchlistApp?.getWatchEntry?.(itemId) ?? null;
+  }
+
   function movieProgressMarkup(item, itemId) {
     const runtime = movieRuntimeMinutes(item);
     if (!runtime) return "";
 
-    const entry = getWatchEntry(itemId);
+    const entry = movieWatchEntryForProgress(itemId);
     const pos = window.WatchlistProgress?.getMoviePosition?.(entry) ?? 0;
     const watchedMin = Math.round(pos * runtime);
     const progressPct = runtime > 0 ? (watchedMin / runtime) * 100 : 0;
@@ -342,9 +347,47 @@
     slider.style.setProperty("--progress", `${pct}%`);
   }
 
+  function updateMovieProgressChipState(slider) {
+    if (!slider) return;
+    const wrap = slider.closest(".td-my-rating");
+    if (!wrap) return;
+    const runtime = Number(slider.max);
+    const watchedMin = Number(slider.value);
+    if (!Number.isFinite(runtime) || runtime <= 0) return;
+    const fraction = watchedMin / runtime;
+    const chip = wrap.querySelector("[data-td-action='quick-toggle-watched']");
+    if (!chip) return;
+
+    if (fraction <= 0) {
+      chip.className = "card__footer-badge card__footer-badge--unwatched";
+      chip.textContent = t("card.notWatchedShort");
+      wrap.classList.remove("td-my-rating--in-progress");
+      return;
+    }
+
+    wrap.classList.add("td-my-rating--in-progress");
+    if (fraction >= 0.97) {
+      chip.className = "card__watch-status card__watch-status--in-progress";
+      chip.textContent = t("card.inProgress");
+      return;
+    }
+
+    chip.className = "card__watch-status card__watch-status--in-progress";
+    chip.textContent = t("card.inProgress");
+  }
+
   function initMovieProgressSliders(root = _scroll) {
     root?.querySelectorAll("[data-td-action='movie-progress']").forEach((slider) => {
       updateMovieProgressFill(slider);
+      if (!slider.dataset.tdProgressBound) {
+        slider.dataset.tdProgressBound = "true";
+        slider.addEventListener("pointerdown", (event) => {
+          event.stopPropagation();
+        });
+        slider.addEventListener("touchstart", (event) => {
+          event.stopPropagation();
+        }, { passive: true });
+      }
     });
   }
 
@@ -361,7 +404,7 @@
     clearMovieProgressPersistTimer();
     movieProgressPersistTimer = setTimeout(() => {
       movieProgressPersistTimer = null;
-      void persistMovieProgress(slider);
+      void persistMovieProgress(slider, { refreshUi: false });
     }, 280);
   }
 
@@ -378,7 +421,7 @@
     updateMovieProgressFill(slider);
   }
 
-  async function persistMovieProgress(slider) {
+  async function persistMovieProgress(slider, { refreshUi = true } = {}) {
     const itemId = slider?.dataset?.tdsId || slider?.dataset?.tdId || _activeItemId;
     const item = findItem(itemId);
     const runtime = movieRuntimeMinutes(item);
@@ -402,7 +445,11 @@
       window.WatchlistApp?.saveWatchedEntry?.(itemId, next);
     }
 
-    updateMyRating();
+    if (refreshUi) {
+      updateMyRating();
+    } else {
+      updateMovieProgressChipState(slider);
+    }
     refreshMenuItems();
     window.WatchlistApp?.updateCardInPlace?.(itemId);
     Promise.resolve().then(() => { _ignoreMutations = false; });
@@ -1367,6 +1414,7 @@
     const slider = event.target.closest("[data-td-action='movie-progress']");
     if (!slider) return;
     updateMovieProgressLabels(slider);
+    updateMovieProgressChipState(slider);
     scheduleMovieProgressPersist(slider);
   }
 
@@ -1374,14 +1422,14 @@
     const slider = event.target.closest("[data-td-action='movie-progress']");
     if (!slider) return;
     clearMovieProgressPersistTimer();
-    void persistMovieProgress(slider);
+    void persistMovieProgress(slider, { refreshUi: true });
   }
 
   function onOverlayChange(event) {
     const slider = event.target.closest("[data-td-action='movie-progress']");
     if (!slider) return;
     clearMovieProgressPersistTimer();
-    void persistMovieProgress(slider);
+    void persistMovieProgress(slider, { refreshUi: true });
   }
 
   function onOverlayClick(event) {

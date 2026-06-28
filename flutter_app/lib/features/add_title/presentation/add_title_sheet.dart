@@ -520,24 +520,39 @@ class _SearchTab extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              TextField(
-                controller: searchController,
-                autofocus: true,
-                decoration: InputDecoration(
-                  hintText: l10n.titleSearchPlaceholder,
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: searching
-                      ? const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        )
-                      : null,
-                ),
-                onChanged: onQueryChanged,
+              ValueListenableBuilder<TextEditingValue>(
+                valueListenable: searchController,
+                builder: (context, value, _) {
+                  return TextField(
+                    controller: searchController,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      hintText: l10n.titleSearchPlaceholder,
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: searching
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: SizedBox(
+                                width: 18,
+                                height: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            )
+                          : value.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.close),
+                                  tooltip: l10n.titleSearchClear,
+                                  onPressed: () {
+                                    searchController.clear();
+                                    onQueryChanged('');
+                                  },
+                                )
+                              : null,
+                    ),
+                    onChanged: onQueryChanged,
+                  );
+                },
               ),
               const SizedBox(height: 10),
               _SearchTypeChips(

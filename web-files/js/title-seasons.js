@@ -65,6 +65,7 @@
   let _episodesPartialPainted = false;
   let _pendingSpecialsCheck = false;
   let _episodesBySeason = new Map();
+  let _seasonEpisodeToken = 0;
   let _dragStartX     = 0;
   let _isDragging     = false;
   let _scrollToSeasonsObserver = null;
@@ -643,6 +644,7 @@
     _episodesPartialPainted = false;
     _pendingSpecialsCheck = false;
     _episodesBySeason = new Map();
+    _seasonEpisodeToken = 0;
     _isDragging     = false;
     disconnectScrollToSeasons();
   }
@@ -1168,6 +1170,8 @@
     const meta = window.WatchlistSeriesMetadata;
     if (!meta || !_item) return;
 
+    const SERIES_LOAD_TIMEOUT_MS = 45000;
+
     // Log configuration status for debugging (never logs key values)
     if (!window.__tdsConfigLogged) {
       window.__tdsConfigLogged = true;
@@ -1181,25 +1185,58 @@
       );
     }
 
-    // Resolve the series identity (IMDb → TMDb/OMDb, AniList, MAL → AniList)
-    await ensureAnimeItemLink();
-    const resolution = await meta.resolveSeriesId(_item);
-    if (!isValid(tok)) return;
+    const loadWithTimeout = () =>
+      Promise.race([
+        (async () => {
+          await ensureAnimeItemLink();
+          const resolution = await meta.resolveSeriesId(_item);
+          if (!isValid(tok)) return null;
 
-    _resolution = resolution;
-    const WM = window.WatchlistMetadata;
-    const linkImdb =
-      WM?.extractImdbId?.(_item?.imdbLink) ||
-      WM?.extractImdbId?.(_item?.link);
-    if (linkImdb && !_resolution.imdbId) {
-      _resolution = { ..._resolution, imdbId: linkImdb };
+          _resolution = resolution;
+          const WM = window.WatchlistMetadata;
+          const linkImdb =
+            WM?.extractImdbId?.(_item?.imdbLink) ||
+            WM?.extractImdbId?.(_item?.link);
+          if (linkImdb && !_resolution.imdbId) {
+            _resolution = { ..._resolution, imdbId: linkImdb };
+          }
+
+          void loadRelatedMovies(tok);
+
+          const locale = getLocale();
+          const poster = getItemPoster();
+          return meta.fetchSeriesMetadata(_resolution, locale, poster);
+        })(),
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error("series-metadata-timeout")), SERIES_LOAD_TIMEOUT_MS);
+        }),
+      ]);
+
+    let result;
+    try {
+      result = await loadWithTimeout();
+    } catch (err) {
+      if (!isValid(tok)) return;
+      console.warn("[title-seasons] series metadata load failed:", err?.message || err);
+      const RS = meta.ResultState;
+      const stale = _seriesResult?.seasons?.length
+        ? { ..._seriesResult, state: RS.OFFLINE_WITH_CACHE, isStale: true }
+        : null;
+      if (stale) {
+        _seriesResult = stale;
+        renderSeasonsSection(stale);
+        showStale(t("seasons.staleWarning"));
+      } else {
+        showError(
+          err?.message === "series-metadata-timeout"
+            ? t("seasons.error")
+            : (navigator.onLine === false ? t("seasons.offlineNoCache") : t("seasons.error")),
+          "retry-series"
+        );
+      }
+      return;
     }
 
-    void loadRelatedMovies(tok);
-
-    const locale = getLocale();
-    const poster = getItemPoster();
-    const result = await meta.fetchSeriesMetadata(_resolution, locale, poster);
     if (!isValid(tok)) return;
 
     const seriesImdb = result?.series?.imdbId;
@@ -1225,10 +1262,6 @@
       case RS.AVAILABLE:
       case RS.PARTIALLY_AVAILABLE:
         renderSeasonsSection(result);
-        // Only surface the stale banner when the data is genuinely stale (TTL
-        // expired and network refresh failed). PARTIALLY_AVAILABLE on its own
-        // means "AniList could only provide partial series data" which is normal
-        // and should not alarm the user on every cache hit.
         if (result.isStale) showStale(t("seasons.staleWarning"));
         break;
 
@@ -1239,6 +1272,10 @@
 
       case RS.OFFLINE_NO_CACHE:
         showError(t("seasons.offlineNoCache"), "retry-series");
+        break;
+
+      case RS.API_FAILURE:
+        showError(t("seasons.error"), "retry-series");
         break;
 
       case RS.RATE_LIMITED:
@@ -1254,14 +1291,13 @@
         break;
 
       case RS.UNAVAILABLE:
-      case RS.API_FAILURE:
       default:
         showError(t("seasons.error"), "retry-series");
         break;
     }
   }
 
-  async function loadEpisodes(seasonNum, { background = false } = {}) {
+  async function loadEpisodes(seasonNum, { background = false, loadTok = null } = {}) {
     const tok = _token;
     const meta = window.WatchlistSeriesMetadata;
     if (!meta || !_item || !_resolution) return;
@@ -1288,27 +1324,47 @@
         {
           onPartial: (partial) => {
             if (!isValid(tok)) return;
+            if (loadTok != null && loadTok !== _seasonEpisodeToken) return;
             rememberSeasonEpisodes(seasonNum, partial);
             if (background || _selectedSeason !== seasonNum) return;
-            applyEpisodesPayload(seasonNum, partial, { partial: true });
+            applyEpisodesPayload(seasonNum, partial, { partial: true, loadTok });
           },
         }
       );
       if (!isValid(tok)) return;
+      if (loadTok != null && loadTok !== _seasonEpisodeToken) return;
       rememberSeasonEpisodes(seasonNum, result);
       if (background) {
         if (_selectedSeason === seasonNum) {
-          applyEpisodesPayload(seasonNum, result, { partial: false });
+          applyEpisodesPayload(seasonNum, result, { partial: false, loadTok });
         }
         return;
       }
       if (_selectedSeason !== seasonNum) return;
 
-      applyEpisodesPayload(seasonNum, result, { partial: false });
+      applyEpisodesPayload(seasonNum, result, { partial: false, loadTok });
       prefetchNeighborSeasons(seasonNum);
     } finally {
       if (!background) runPendingSpecialsCheck();
     }
+  }
+
+  function seasonAnilistIdFor(seasonNum) {
+    const seasonSummary = (_seriesResult?.seasons || []).find(
+      (s) => s.seasonNumber === seasonNum
+    );
+    const meta = window.WatchlistSeriesMetadata;
+    if (!meta || !_resolution) return null;
+    return meta.pickSeasonAnilistId?.(seasonSummary, _resolution, seasonNum) ?? null;
+  }
+
+  function isSeasonCacheValid(seasonNum, cached) {
+    if (!cached?.episodes?.length) return false;
+    const expectedId = seasonAnilistIdFor(seasonNum);
+    if (expectedId == null) return seasonNum <= 1;
+    const cachedId = Number(cached.seasonAnilistId);
+    if (!Number.isFinite(cachedId)) return false;
+    return cachedId === expectedId;
   }
 
   function rememberSeasonEpisodes(seasonNum, result) {
@@ -1318,6 +1374,10 @@
       displayEps !== result?.episodes
         ? { ...result, episodes: displayEps }
         : result;
+    const seasonAnilistId = seasonAnilistIdFor(seasonNum);
+    if (seasonAnilistId != null) {
+      stored.seasonAnilistId = seasonAnilistId;
+    }
     _episodesBySeason.set(seasonNum, stored);
   }
 
@@ -1360,9 +1420,11 @@
     }
   }
 
-  function applyEpisodesPayload(seasonNum, result, { partial = false } = {}) {
+  function applyEpisodesPayload(seasonNum, result, { partial = false, loadTok = null } = {}) {
     const meta = window.WatchlistSeriesMetadata;
     if (!meta || !result) return;
+    if (loadTok != null && loadTok !== _seasonEpisodeToken) return;
+    if (_selectedSeason !== seasonNum) return;
 
     const displayEps = filterSpecialsEpisodes(seasonNum, result?.episodes);
     const displayResult =
@@ -1436,7 +1498,16 @@
       case RS.OFFLINE_NO_CACHE:
         if (partial) return;
         if (seasonNum === 0) { removeSpecialsFromCarousel(); return; }
-        showEpisodesStatus(t("seasons.offlineNoCache"), "retry-episodes");
+        showEpisodesStatus(
+          navigator.onLine === false ? t("seasons.offlineNoCache") : t("seasons.episodesError"),
+          "retry-episodes"
+        );
+        return;
+
+      case RS.API_FAILURE:
+        if (partial) return;
+        if (seasonNum === 0) { removeSpecialsFromCarousel(); return; }
+        showEpisodesStatus(t("seasons.episodesError"), "retry-episodes");
         return;
 
       case RS.EPISODE_DETAILS_UNAVAILABLE:
@@ -1632,9 +1703,13 @@
   // ─── Season selection ──────────────────────────────────────────────────────
 
   function selectSeason(seasonNum, { animate = true, skipTabSwitch = false } = {}) {
-    if (_selectedSeason === seasonNum && animate) return;
+    if (_selectedSeason === seasonNum && animate && _episodesResult?.seasonNum === seasonNum) {
+      return;
+    }
     closeEpisodeModal();
     resetEpisodeJumpInput();
+    _seasonEpisodeToken += 1;
+    const loadTok = _seasonEpisodeToken;
     _selectedSeason = seasonNum;
 
     if (!skipTabSwitch) {
@@ -1654,15 +1729,26 @@
     }
     notifySeasonPresentation(seasonNum);
 
+    // Always clear stale rows immediately when the season changes.
+    if (_episodesResult?.seasonNum !== seasonNum) {
+      _episodesResult = { seasonNum, episodes: [] };
+      showEpisodesLoading();
+      updateEpisodesTitle();
+    }
+
     const cached = _episodesBySeason.get(seasonNum);
-    if (cached?.episodes?.length) {
-      applyEpisodesPayload(seasonNum, cached, { partial: false });
+    if (isSeasonCacheValid(seasonNum, cached)) {
+      applyEpisodesPayload(seasonNum, cached, { partial: false, loadTok });
       updateNavButtons(getRegularSeasons());
-      void loadEpisodes(seasonNum, { background: true });
+      void loadEpisodes(seasonNum, { background: true, loadTok });
       return;
     }
 
-    loadEpisodes(seasonNum);
+    if (cached && !isSeasonCacheValid(seasonNum, cached)) {
+      _episodesBySeason.delete(seasonNum);
+    }
+
+    void loadEpisodes(seasonNum, { loadTok });
     updateNavButtons(getRegularSeasons());
   }
 

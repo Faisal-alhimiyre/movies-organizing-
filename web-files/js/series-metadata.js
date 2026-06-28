@@ -132,6 +132,31 @@
   const TTL_RESOLVE = 30 * 24 * 60 * 60 * 1000;       // 30 days
   const TTL_NEGATIVE = 2 * 60 * 60 * 1000;            // 2 hours
   const STALE_RATIO = 0.8;
+  const FETCH_TIMEOUT_MS = 20000;
+
+  function isBrowserOffline() {
+    return typeof navigator !== "undefined" && navigator.onLine === false;
+  }
+
+  /** Distinguish real offline from transient API/network failures on mobile. */
+  function failWithoutCache(debugMessage) {
+    return {
+      state: isBrowserOffline()
+        ? ResultState.OFFLINE_NO_CACHE
+        : ResultState.API_FAILURE,
+      debugMessage,
+    };
+  }
+
+  async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   // ─── Result state enum ────────────────────────────────────────
   const ResultState = Object.freeze({
@@ -507,11 +532,17 @@
    * Season 1 = your item's AniList link. Season 2+ = each cour's own ID on the season card.
    */
   function pickSeasonAnilistId(seasonSummary, resolution, seasonNumber) {
-    const fromSummary = Number(seasonSummary?.anilistId);
-    if (Number.isFinite(fromSummary) && fromSummary > 0) return fromSummary;
     const sn = Number(seasonNumber);
+    const root = Number(resolution?.anilistId);
+    const fromSummary = Number(seasonSummary?.anilistId);
+    if (Number.isFinite(fromSummary) && fromSummary > 0) {
+      // Cached season rows sometimes repeat the root ID — never use it for S2+.
+      if (Number.isFinite(sn) && sn > 1 && Number.isFinite(root) && fromSummary === root) {
+        return null;
+      }
+      return fromSummary;
+    }
     if (!Number.isFinite(sn) || sn <= 1) {
-      const root = Number(resolution?.anilistId);
       return Number.isFinite(root) && root > 0 ? root : null;
     }
     return null;
@@ -727,7 +758,7 @@
     if (stale?.payload) {
       return parseCachedSeriesResult(stale, { isStale: true, forceState: ResultState.OFFLINE_WITH_CACHE });
     }
-    return { state: ResultState.OFFLINE_NO_CACHE, debugMessage: `TMDb tv/${tmdbId} failed` };
+    return failWithoutCache(`TMDb tv/${tmdbId} failed`);
   }
 
   function normalizeTmdbSeriesResult(json, tmdbId, fallbackPoster) {
@@ -928,11 +959,19 @@
     if (resolution?.isNegative) return { state: ResultState.INVALID_ID };
     const effectivePoster = seasonSummary?.poster || fallbackPoster;
 
-    const seasonAnilistId = pickSeasonAnilistId(
+    let seasonAnilistId = pickSeasonAnilistId(
       seasonSummary,
       resolution,
       seasonNumber
     );
+    if (!seasonAnilistId && Number(seasonNumber) > 1 && resolution?.anilistId) {
+      seasonAnilistId = await resolveSeasonAnilistId(
+        seasonSummary,
+        resolution,
+        seasonNumber
+      );
+      repairSeasonSummaryAnilistId(seasonSummary, seasonAnilistId);
+    }
 
     const emitPartial = (partial) => {
       if (typeof onPartial !== "function") return;
@@ -2141,7 +2180,7 @@
     if (stale?.payload) {
       return parseCachedEpisodesResult(stale, { isStale: true, forceState: ResultState.OFFLINE_WITH_CACHE });
     }
-    return { state: ResultState.OFFLINE_NO_CACHE };
+    return failWithoutCache(`TMDb season ${season} failed`);
   }
 
   function normalizeTmdbSeasonEpisodes(json, tmdbId, season, fallbackPoster = "") {
@@ -2592,7 +2631,7 @@
       if (stale?.payload) {
         return parseCachedSeriesResult(stale, { isStale: true, forceState: ResultState.OFFLINE_WITH_CACHE });
       }
-      return { state: ResultState.OFFLINE_NO_CACHE };
+      return failWithoutCache("AniList series metadata failed");
     }
 
     const title =
@@ -2706,7 +2745,7 @@
           forceState: ResultState.OFFLINE_WITH_CACHE,
         });
       }
-      return { state: ResultState.OFFLINE_NO_CACHE };
+      return failWithoutCache(`AniList episodes ${anilistId} failed`);
     }
 
     const episodeCount = parsePositiveCount(media.episodes);
@@ -2892,7 +2931,7 @@
 
     const run = (async () => {
       try {
-        const res = await fetch(ANILIST_API, {
+        const res = await fetchWithTimeout(ANILIST_API, {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({ query, variables }),
@@ -2905,7 +2944,10 @@
         const json = await res.json().catch(() => null);
         if (!res.ok || (json?.errors && json.errors.length > 0)) return null;
         return json?.data ?? null;
-      } catch {
+      } catch (err) {
+        if (err?.name === "AbortError") {
+          console.warn("[series-metadata] AniList request timed out");
+        }
         return null;
       } finally {
         _anilistInflight.delete(key);
@@ -3824,6 +3866,7 @@
     regularEpisodeTotalFromSeasons,
     clearItemResolutionCache,
     cleanEpisodeOverview: cleanEpisodeOverviewText,
+    pickSeasonAnilistId,
     isTvSpecialLinkedMovie: isMovieLikeTvSpecial,
     // Normalization functions exposed for testing
     _normalizeTmdbSeries: normalizeTmdbSeries,
