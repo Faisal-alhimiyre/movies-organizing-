@@ -1199,67 +1199,65 @@
 
     const locale = getLocale();
     const poster = getItemPoster();
-    try {
-      const result = await meta.fetchSeriesMetadata(_resolution, locale, poster);
-      if (!isValid(tok)) return;
+    const result = await meta.fetchSeriesMetadata(_resolution, locale, poster);
+    if (!isValid(tok)) return;
 
-      const seriesImdb = result?.series?.imdbId;
-      if (seriesImdb && !_resolution.imdbId) {
-        _resolution = { ..._resolution, imdbId: seriesImdb };
+    const seriesImdb = result?.series?.imdbId;
+    if (seriesImdb && !_resolution.imdbId) {
+      _resolution = { ..._resolution, imdbId: seriesImdb };
+    }
+
+    if (result?.seasons?.length) {
+      const cleanOverview = meta.cleanEpisodeOverview;
+      if (cleanOverview) {
+        result.seasons = result.seasons.map((season) => ({
+          ...season,
+          overview: cleanOverview(season.overview) || "",
+        }));
       }
+    }
 
-      if (result?.seasons?.length) {
-        const cleanOverview = meta.cleanEpisodeOverview;
-        if (cleanOverview) {
-          result.seasons = result.seasons.map((season) => ({
-            ...season,
-            overview: cleanOverview(season.overview) || "",
-          }));
-        }
-      }
+    _seriesResult = result;
+    persistRegularEpisodeTotal();
+    const RS = meta.ResultState;
 
-      _seriesResult = result;
-      persistRegularEpisodeTotal();
-      const RS = meta.ResultState;
+    switch (result?.state) {
+      case RS.AVAILABLE:
+      case RS.PARTIALLY_AVAILABLE:
+        renderSeasonsSection(result);
+        // Only surface the stale banner when the data is genuinely stale (TTL
+        // expired and network refresh failed). PARTIALLY_AVAILABLE on its own
+        // means "AniList could only provide partial series data" which is normal
+        // and should not alarm the user on every cache hit.
+        if (result.isStale) showStale(t("seasons.staleWarning"));
+        break;
 
-      switch (result?.state) {
-        case RS.AVAILABLE:
-        case RS.PARTIALLY_AVAILABLE:
-          renderSeasonsSection(result);
-          if (result.isStale) showStale(t("seasons.staleWarning"));
-          break;
+      case RS.OFFLINE_WITH_CACHE:
+        renderSeasonsSection(result);
+        showStale(t("seasons.offline"));
+        break;
 
-        case RS.OFFLINE_WITH_CACHE:
-          renderSeasonsSection(result);
-          showStale(t("seasons.offline"));
-          break;
+      case RS.OFFLINE_NO_CACHE:
+        showError(t("seasons.offlineNoCache"), "retry-series");
+        break;
 
-        case RS.OFFLINE_NO_CACHE:
-          showError(t("seasons.offlineNoCache"), "retry-series");
-          break;
+      case RS.RATE_LIMITED:
+        showError(t("seasons.rateLimited"), "retry-series");
+        break;
 
-        case RS.RATE_LIMITED:
-          showError(t("seasons.rateLimited"), "retry-series");
-          break;
+      case RS.INVALID_ID:
+        showError(t("seasons.invalidId"), null);
+        break;
 
-        case RS.INVALID_ID:
-          showError(t("seasons.invalidId"), null);
-          break;
+      case RS.NO_SEASONS:
+        showError(t("seasons.noSeasons"), null);
+        break;
 
-        case RS.NO_SEASONS:
-          showError(t("seasons.noSeasons"), null);
-          break;
-
-        case RS.UNAVAILABLE:
-        case RS.API_FAILURE:
-        default:
-          showError(t("seasons.error"), "retry-series");
-          break;
-      }
-    } catch (err) {
-      if (!isValid(tok)) return;
-      console.warn("[title-seasons] loadSeriesMetadata failed:", err?.message || err);
-      showError(t("seasons.error"), "retry-series");
+      case RS.UNAVAILABLE:
+      case RS.API_FAILURE:
+      default:
+        showError(t("seasons.error"), "retry-series");
+        break;
     }
   }
 
@@ -1308,12 +1306,6 @@
 
       applyEpisodesPayload(seasonNum, result, { partial: false });
       prefetchNeighborSeasons(seasonNum);
-    } catch (err) {
-      if (!isValid(tok)) return;
-      console.warn("[title-seasons] loadEpisodes failed:", err?.message || err);
-      if (!background && _selectedSeason === seasonNum) {
-        showEpisodesStatus(t("seasons.episodesError"), "retry-episodes");
-      }
     } finally {
       if (!background) runPendingSpecialsCheck();
     }
@@ -1330,7 +1322,6 @@
   }
 
   function prefetchNeighborSeasons(seasonNum) {
-    if (window.WatchlistSeriesMetadata?.isAnilistRateLimited?.()) return;
     const seasons = getRegularSeasons();
     const idx = seasons.findIndex((s) => s.seasonNumber === seasonNum);
     if (idx < 0) return;

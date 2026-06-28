@@ -2266,13 +2266,12 @@
    * AniList lists later cours as SEQUEL-of-SEQUEL (e.g. Demon Slayer → Mugen Train →
    * Entertainment District). Walk the main TV sequel chain instead of only direct sequels.
    */
-  async function collectAnilistSeasonChainWalk(rootMedia, maxSeasons = 30) {
+  async function collectAnilistSeasonChain(rootMedia, maxSeasons = 30) {
     const chain = [];
     const seen = new Set();
     let current = rootMedia;
 
     while (current && chain.length < maxSeasons) {
-      if (isAnilistRateLimited()) break;
       const currentId = Number(current.id);
       if (!Number.isFinite(currentId) || seen.has(currentId)) break;
       seen.add(currentId);
@@ -2291,19 +2290,6 @@
     }
 
     return chain;
-  }
-
-  async function collectAnilistSeasonChain(rootMedia, maxSeasons = 30) {
-    if (isAnilistRateLimited()) return rootMedia ? [rootMedia] : [];
-
-    const chain = await Promise.race([
-      collectAnilistSeasonChainWalk(rootMedia, maxSeasons),
-      new Promise((resolve) => {
-        setTimeout(() => resolve(null), 18000);
-      }),
-    ]);
-    if (Array.isArray(chain) && chain.length) return chain;
-    return rootMedia ? [rootMedia] : [];
   }
 
   function anilistStartSortKey(date) {
@@ -2561,26 +2547,10 @@
   async function fetchAnilistSeriesMetadata(anilistId, locale, fallbackPoster = "") {
     const cacheKey = `metadata:v13:series:anilist:${anilistId}:${locale}`;
     const cached = readCached(cacheKey, TTL_SERIES);
-    if (cached?.payload?.seasons?.length) {
+    if (cached?.payload) {
       if (!seasonsNeedChainRepair(cached.payload.seasons, anilistId)) {
         return parseCachedSeriesResult(cached, { isStale: isStale(cacheKey, TTL_SERIES) });
       }
-      // Use cached seasons immediately; cour IDs resolve when episodes load.
-      return parseCachedSeriesResult(cached, {
-        isStale: true,
-        forceState: ResultState.AVAILABLE,
-      });
-    }
-
-    if (isAnilistRateLimited()) {
-      const stale = readCacheStale(cacheKey);
-      if (stale?.payload) {
-        return parseCachedSeriesResult(stale, {
-          isStale: true,
-          forceState: ResultState.OFFLINE_WITH_CACHE,
-        });
-      }
-      return { state: ResultState.RATE_LIMITED };
     }
 
     const data = await anilistQuery(
@@ -2620,13 +2590,7 @@
     if (!media) {
       const stale = readCacheStale(cacheKey);
       if (stale?.payload) {
-        return parseCachedSeriesResult(stale, {
-          isStale: true,
-          forceState: ResultState.OFFLINE_WITH_CACHE,
-        });
-      }
-      if (isAnilistRateLimited()) {
-        return { state: ResultState.RATE_LIMITED };
+        return parseCachedSeriesResult(stale, { isStale: true, forceState: ResultState.OFFLINE_WITH_CACHE });
       }
       return { state: ResultState.OFFLINE_NO_CACHE };
     }
@@ -2741,9 +2705,6 @@
           isStale: true,
           forceState: ResultState.OFFLINE_WITH_CACHE,
         });
-      }
-      if (isAnilistRateLimited()) {
-        return { state: ResultState.RATE_LIMITED };
       }
       return { state: ResultState.OFFLINE_NO_CACHE };
     }
@@ -3863,7 +3824,6 @@
     regularEpisodeTotalFromSeasons,
     clearItemResolutionCache,
     cleanEpisodeOverview: cleanEpisodeOverviewText,
-    isAnilistRateLimited,
     isTvSpecialLinkedMovie: isMovieLikeTvSpecial,
     // Normalization functions exposed for testing
     _normalizeTmdbSeries: normalizeTmdbSeries,
