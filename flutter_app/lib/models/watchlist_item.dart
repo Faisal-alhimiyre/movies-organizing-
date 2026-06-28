@@ -106,6 +106,7 @@ class WatchProgress {
     this.completed,
     this.seasonTotals,
     this.episodeRatings,
+    this.moviePosition,
   });
 
   static const int currentVersion = 1;
@@ -129,6 +130,9 @@ class WatchProgress {
   /// Per-episode external ratings from TMDB/OMDb: `{"1:1": 8.5}`.
   final Map<String, double>? episodeRatings;
 
+  /// Movie playback position as a 0–1 fraction through runtime.
+  final double? moviePosition;
+
   String episodeKey(int season, int episode) => '$season:$episode';
 
   bool hasEpisode(int season, int episode) =>
@@ -143,6 +147,7 @@ class WatchProgress {
       completed: completed,
       seasonTotals: seasonTotals,
       episodeRatings: episodeRatings,
+      moviePosition: moviePosition,
     );
   }
 
@@ -154,6 +159,7 @@ class WatchProgress {
       completed: false,
       seasonTotals: seasonTotals,
       episodeRatings: episodeRatings,
+      moviePosition: moviePosition,
     );
   }
 
@@ -164,6 +170,7 @@ class WatchProgress {
       completed: false,
       seasonTotals: seasonTotals,
       episodeRatings: episodeRatings,
+      moviePosition: moviePosition,
     );
   }
 
@@ -178,6 +185,9 @@ class WatchProgress {
     }
     if (episodeRatings != null && episodeRatings!.isNotEmpty) {
       json['episodeRatings'] = episodeRatings;
+    }
+    if (moviePosition != null && moviePosition! > 0) {
+      json['moviePosition'] = moviePosition;
     }
     return json;
   }
@@ -220,12 +230,22 @@ class WatchProgress {
       }
     }
 
+    double? moviePosition;
+    final moviePosRaw = map['moviePosition'];
+    if (moviePosRaw is num && moviePosRaw.isFinite) {
+      final pos = moviePosRaw.toDouble().clamp(0.0, 1.0);
+      if (pos > 0) {
+        moviePosition = (pos * 1000).round() / 1000;
+      }
+    }
+
     return WatchProgress(
       version: currentVersion,
       episodes: eps,
       completed: completed,
       seasonTotals: seasonTotals,
       episodeRatings: episodeRatings,
+      moviePosition: moviePosition,
     );
   }
 

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/utils/title_meta_format.dart';
 import '../../../core/widgets/content_badges.dart';
 import '../../../l10n/l10n.dart';
+import '../../../core/widgets/poster_lightbox.dart';
 import '../../../models/metadata_detail.dart';
 import '../../../models/title_search_result.dart';
 import '../../../models/watchlist_item.dart';
@@ -77,6 +78,7 @@ class _AddTitleSheetState extends ConsumerState<AddTitleSheet>
   bool _searching = false;
   bool _loadingDetails = false;
   MetadataDetail? _confirmDetails;
+  String? _confirmResultKey;
   late String _confirmContentType;
   late String _confirmGenre;
   List<String> _confirmSecondaryGenres = const [];
@@ -202,11 +204,12 @@ class _AddTitleSheetState extends ConsumerState<AddTitleSheet>
       secondaryGenres: secondary,
     );
 
-    // Fall back to confirm step when essential data is missing
-    if (item.title.isEmpty || item.summary.isEmpty || item.lead.isEmpty) {
+    // Fall back to confirm step when title or summary is missing
+    if (item.title.isEmpty || item.summary.isEmpty) {
       setState(() {
         _addingKeys.remove(key);
         _confirmDetails = details;
+        _confirmResultKey = key;
         _confirmContentType = contentType;
         _confirmGenre = genre;
         _confirmSecondaryGenres = secondary;
@@ -270,6 +273,7 @@ class _AddTitleSheetState extends ConsumerState<AddTitleSheet>
     setState(() {
       _loadingDetails = false;
       _confirmDetails = details;
+      _confirmResultKey = result.dedupeKey();
       _confirmContentType = details.contentType;
       _confirmGenre = primary;
       _confirmSecondaryGenres = normalizeSecondaryGenres(
@@ -283,6 +287,7 @@ class _AddTitleSheetState extends ConsumerState<AddTitleSheet>
   void _backToSearch() {
     setState(() {
       _confirmDetails = null;
+      _confirmResultKey = null;
       _confirmSecondaryGenres = const [];
       _errorKey = null;
     });
@@ -330,10 +335,6 @@ class _AddTitleSheetState extends ConsumerState<AddTitleSheet>
       setState(() => _errorKey = 'search.incomplete');
       return;
     }
-    if (item.lead.isEmpty) {
-      setState(() => _errorKey = 'search.missingActors');
-      return;
-    }
 
     final duplicate = findDuplicateTitle(widget.existingItems, item);
     if (duplicate != null) {
@@ -350,7 +351,18 @@ class _AddTitleSheetState extends ConsumerState<AddTitleSheet>
     if (!mounted) return;
 
     if (errorKey == null) {
-      Navigator.of(context).pop(true);
+      final resultKey = _confirmResultKey ??
+          '${item.title}::${details.year ?? ''}';
+      setState(() {
+        _saving = false;
+        _confirmDetails = null;
+        _confirmResultKey = null;
+        _confirmSecondaryGenres = const [];
+        _errorKey = null;
+        _addedKeys.add(resultKey);
+        _statusKey = 'search.addedStatus:${item.title}';
+        _statusError = false;
+      });
       return;
     }
 
@@ -562,6 +574,7 @@ class _SearchTab extends StatelessWidget {
               final result = results[i];
               final key = result.dedupeKey();
               return _ResultRow(
+                l10n: l10n,
                 result: result,
                 isAdded: addedKeys.contains(key),
                 isAdding: addingKeys.contains(key),
@@ -589,21 +602,36 @@ class _SearchTab extends StatelessWidget {
 }
 
 class _ResultPoster extends StatelessWidget {
-  const _ResultPoster({required this.poster});
+  const _ResultPoster({
+    required this.l10n,
+    required this.poster,
+    this.title = '',
+  });
 
+  final L10n l10n;
   final String poster;
+  final String title;
 
   @override
   Widget build(BuildContext context) {
     if (poster.startsWith('http')) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(4),
-        child: CachedNetworkImage(
+      return GestureDetector(
+        onTap: () => showPosterLightbox(
+          context,
           imageUrl: poster,
-          width: 44,
-          height: 66,
-          fit: BoxFit.cover,
-          errorWidget: (_, __, ___) => const _PosterPlaceholder(),
+          semanticsLabel: title.isNotEmpty
+              ? l10n.detailViewPoster(title)
+              : null,
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: CachedNetworkImage(
+            imageUrl: poster,
+            width: 44,
+            height: 66,
+            fit: BoxFit.cover,
+            errorWidget: (_, __, ___) => const _PosterPlaceholder(),
+          ),
         ),
       );
     }
@@ -630,6 +658,7 @@ class _PosterPlaceholder extends StatelessWidget {
 
 class _ResultRow extends StatelessWidget {
   const _ResultRow({
+    required this.l10n,
     required this.result,
     required this.isAdded,
     required this.isAdding,
@@ -637,6 +666,7 @@ class _ResultRow extends StatelessWidget {
     required this.onDirectAdd,
   });
 
+  final L10n l10n;
   final TitleSearchResult result;
   final bool isAdded;
   final bool isAdding;
@@ -675,7 +705,11 @@ class _ResultRow extends StatelessWidget {
                 padding: const EdgeInsets.all(10),
                 child: Row(
                   children: [
-                    _ResultPoster(poster: result.poster),
+                    _ResultPoster(
+                      l10n: l10n,
+                      poster: result.poster,
+                      title: result.title,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -879,13 +913,20 @@ class _ConfirmStep extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
             children: [
               if (details.poster.startsWith('http'))
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: CachedNetworkImage(
+                GestureDetector(
+                  onTap: () => showPosterLightbox(
+                    context,
                     imageUrl: details.poster,
-                    height: 180,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
+                    semanticsLabel: l10n.detailViewPoster(details.title),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: CachedNetworkImage(
+                      imageUrl: details.poster,
+                      height: 180,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    ),
                   ),
                 ),
               const SizedBox(height: 12),

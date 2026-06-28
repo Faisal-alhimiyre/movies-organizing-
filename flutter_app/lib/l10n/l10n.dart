@@ -184,6 +184,30 @@ class L10n {
   String get progressClearAllWatched => _ar ? 'إلغاء تحديد الكل' : 'Unwatch all';
   String get progressSeasons => _ar ? 'المواسم والحلقات' : 'Seasons & Episodes';
   String get seasonsSectionTitle => _ar ? 'المواسم' : 'Seasons';
+  String get detailTabSeasons => _ar ? 'المواسم' : 'Seasons';
+  String get detailTabSpecials => _ar ? 'حلقات خاصة' : 'Specials';
+  String get detailTabMovies => _ar ? 'أفلام' : 'Movies';
+  String get detailRelatedMoviesEmpty => _ar
+      ? 'لا توجد أفلام مرتبطة بهذا العنوان'
+      : 'no movies related to this title';
+  String get detailRelatedSpecialsEmpty => _ar
+      ? 'لا توجد حلقات خاصة لهذا العنوان.'
+      : 'No specials for this title.';
+  String get detailMovieProgressHint => _ar
+      ? 'اختر أين توقفت'
+      : 'Select where you left off';
+  String get detailMovieProgressLabel => _ar
+      ? 'تقدّم الفيلم'
+      : 'Movie progress';
+  String detailViewPoster(String title) => _ar
+      ? 'عرض الملصق الكامل لـ $title'
+      : 'View full poster for $title';
+  String get statsFilterAll => _ar ? 'عرض كل العناوين' : 'Show all titles';
+  String get statsFilterWatched =>
+      _ar ? 'تصفية العناوين المشاهَدة' : 'Filter watched titles';
+  String get statsFilterInProgress => _ar
+      ? 'تصفية العناوين قيد المشاهدة'
+      : 'Filter in-progress titles';
   String get seasonsGapPromptTitle =>
       _ar ? 'حلقات سابقة غير مشاهَدة' : 'Earlier episodes unwatched';
   String get seasonsGapPromptMessage => _ar
@@ -209,6 +233,9 @@ class L10n {
   String get seasonsSpoilerMode => _ar ? 'إخفاء صورة الحلقة' : 'Hide episode still';
   String get seasonsHideEpisodeRatings =>
       _ar ? 'إخفاء تقييمات الحلقات' : 'Hide episode ratings';
+  String get seasonsHideFiller =>
+      _ar ? 'إخفاء حلقات الفيلر' : 'Hide filler episodes';
+  String get seasonsFillerBadge => _ar ? 'حشو' : 'Filler';
   String seasonsWatchedProgress(int watched, int total) => _ar
       ? '$watched / $total مشاهَد'
       : '$watched / $total watched';

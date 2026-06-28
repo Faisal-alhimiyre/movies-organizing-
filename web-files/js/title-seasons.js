@@ -55,12 +55,19 @@
   let _carouselEl     = null;  // .tds-carousel DOM element
   let _spoilerPosters = false; // hide episode stills behind season poster
   let _hideEpisodeRatings = false;
+  let _hideFiller = false;
+  let _fillerUiAvailable = false;
   let _activeEpisodeKey = null;
   let _episodeModalEditing = false;
   let _episodeModalEl = null;
   let _episodeListRender = null;
+  let _episodesLoading = false;
+  let _episodesPartialPainted = false;
+  let _pendingSpecialsCheck = false;
+  let _episodesBySeason = new Map();
   let _dragStartX     = 0;
   let _isDragging     = false;
+  let _scrollToSeasonsObserver = null;
 
   // ─── i18n shorthand ──────────────────────────────────────────────────────
   function t(key, vars) {
@@ -367,6 +374,31 @@
     );
   }
 
+  function maxEpisodeNumberFromKeys(keys) {
+    let max = 0;
+    for (const key of keys || []) {
+      const n = parseInt(String(key).split(":")[1], 10);
+      if (Number.isFinite(n) && n > max) max = n;
+    }
+    return max;
+  }
+
+  async function promptGapFillKeys(entry, seasonNum, epNum) {
+    if (!shouldPromptGapFill(entry, seasonNum, epNum) || !window.WatchlistDialog?.confirm) {
+      return null;
+    }
+    const markAll = await window.WatchlistDialog.confirm(
+      t("seasons.gapPromptMessage"),
+      {
+        title: t("seasons.gapPromptTitle"),
+        confirmLabel: t("seasons.gapMarkAll"),
+        cancelLabel: t("seasons.gapNo") || "No",
+      }
+    );
+    if (!markAll) return null;
+    return gapFillWatchKeys(entry, seasonNum, epNum);
+  }
+
   /** Episode keys for prior seasons (full) plus current season through epNum. */
   function gapFillWatchKeys(entry, seasonNum, epNum) {
     const keys = [];
@@ -580,6 +612,7 @@
     _slot.hidden = false;
     _slot.innerHTML = buildRootHtml();
     _carouselEl = _slot.querySelector(".tds-carousel");
+    void window.WatchlistAniFiller?.ensureLoaded?.();
     bindSlotEvents();
     loadSeriesMetadata();
   }
@@ -602,9 +635,106 @@
     _carouselEl     = null;
     _spoilerPosters = false;
     _hideEpisodeRatings = false;
+    _hideFiller = false;
+    _fillerUiAvailable = false;
     _activeEpisodeKey = null;
     _episodeListRender = null;
+    _episodesLoading = false;
+    _episodesPartialPainted = false;
+    _pendingSpecialsCheck = false;
+    _episodesBySeason = new Map();
     _isDragging     = false;
+    disconnectScrollToSeasons();
+  }
+
+  // ─── Scroll-to-seasons FAB ────────────────────────────────────────────────
+
+  function getDetailScrollEl() {
+    return document.getElementById("tdScroll");
+  }
+
+  function disconnectScrollToSeasons() {
+    _scrollToSeasonsObserver?.disconnect();
+    _scrollToSeasonsObserver = null;
+    const btn = getP("scroll-to-seasons");
+    if (btn) btn.hidden = true;
+  }
+
+  function pickScrollWatchTarget() {
+    const jump = getP("episode-jump");
+    if (jump && !jump.hidden) return jump;
+    const spoiler = getP("spoiler-row");
+    if (spoiler && !spoiler.hidden) return spoiler;
+    return getP("episodes-section")?.querySelector(".tds-episodes-header") || null;
+  }
+
+  function updateScrollToSeasonsButton(entry) {
+    const btn = getP("scroll-to-seasons");
+    const episodesSec = getP("episodes-section");
+    if (!btn || !episodesSec || episodesSec.hidden) {
+      btn?.setAttribute("hidden", "");
+      return;
+    }
+    if (!getP("episode-modal")?.hidden) {
+      btn.hidden = true;
+      return;
+    }
+    if (_activeTab === "movies" || !_episodesResult?.episodes?.length) {
+      btn.hidden = true;
+      return;
+    }
+
+    const scrollEl = getDetailScrollEl();
+    if (!scrollEl || !entry) {
+      btn.hidden = true;
+      return;
+    }
+
+    const rootRect = scrollEl.getBoundingClientRect();
+    const show = !entry.isIntersecting && entry.boundingClientRect.bottom < rootRect.top;
+    btn.hidden = !show;
+  }
+
+  function syncScrollToSeasonsWatcher() {
+    disconnectScrollToSeasons();
+
+    const scrollEl = getDetailScrollEl();
+    const episodesSec = getP("episodes-section");
+    const target = pickScrollWatchTarget();
+    if (!scrollEl || !episodesSec || episodesSec.hidden || !target) return;
+    if (_activeTab === "movies" || !_episodesResult?.episodes?.length) return;
+
+    _scrollToSeasonsObserver = new IntersectionObserver(
+      (entries) => updateScrollToSeasonsButton(entries[0]),
+      { root: scrollEl, threshold: 0 }
+    );
+    _scrollToSeasonsObserver.observe(target);
+
+    const btn = getP("scroll-to-seasons");
+    if (btn) {
+      btn.setAttribute("aria-label", t("seasons.scrollToControls"));
+      btn.setAttribute("title", t("seasons.scrollToControls"));
+    }
+  }
+
+  function scrollToSeasonsControls() {
+    const scrollEl = getDetailScrollEl();
+    if (!scrollEl || !_slot) return;
+
+    let target = _slot.querySelector(".tds-series-tabs");
+    if (_activeTab === "specials") {
+      const specials = getP("specials-section");
+      if (specials && !specials.hidden) target = specials;
+    } else {
+      const seasons = getP("seasons-section");
+      if (seasons && !seasons.hidden) target = seasons;
+    }
+    if (!target) return;
+
+    const scrollRect = scrollEl.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const top = scrollEl.scrollTop + (targetRect.top - scrollRect.top) - 4;
+    scrollEl.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
   }
 
   // ─── Root HTML scaffold ───────────────────────────────────────────────────
@@ -690,6 +820,13 @@
                 <span class="tds-spoiler-toggle__thumb"></span>
               </span>
             </button>
+            <button type="button" class="tds-spoiler-toggle" role="switch"
+              aria-checked="false" data-tds-action="toggle-hide-filler" hidden>
+              <span class="tds-spoiler-toggle__label">${esc(t("seasons.hideFiller"))}</span>
+              <span class="tds-spoiler-toggle__track" aria-hidden="true">
+                <span class="tds-spoiler-toggle__thumb"></span>
+              </span>
+            </button>
           </div>
           <div class="tds-episode-jump" data-tds-part="episode-jump" hidden>
             <label class="tds-episode-jump__label" for="tdsEpisodeJumpInput">${esc(t("seasons.jumpToEpisode"))}</label>
@@ -707,6 +844,12 @@
           <div class="tds-episodes-status" data-tds-part="episodes-status" hidden></div>
           <div class="tds-episode-list" role="list" aria-live="polite"></div>
         </div>
+        <button type="button" class="tds-scroll-to-seasons" data-tds-part="scroll-to-seasons"
+          data-tds-action="scroll-to-seasons" hidden
+          aria-label="${esc(t("seasons.scrollToControls"))}"
+          title="${esc(t("seasons.scrollToControls"))}">
+          ${chevronSvg("up")}
+        </button>
         <div class="tds-episode-modal" data-tds-part="episode-modal" hidden>
           <div class="tds-episode-modal__backdrop" data-tds-action="close-episode-modal"></div>
           <div class="tds-episode-modal__panel" role="dialog" aria-modal="true" aria-labelledby="tdsEpisodeModalTitle">
@@ -733,11 +876,12 @@
   }
 
   function chevronSvg(dir) {
-    // Always render left/right chevrons; JS handles RTL semantics
-    const d = dir === "left"
-      ? "M15 18l-6-6 6-6"
-      : "M9 18l6-6-6-6";
-    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="${d === "M15 18l-6-6 6-6" ? "15 18 9 12 15 6" : "9 18 15 12 9 6"}"></polyline></svg>`;
+    const points = dir === "left"
+      ? "15 18 9 12 15 6"
+      : dir === "up"
+        ? "18 15 12 9 6 15"
+        : "9 18 15 12 9 6";
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="${points}"></polyline></svg>`;
   }
 
   function checkSvg(checked) {
@@ -794,7 +938,12 @@
 
   function hideEpisodesSection() {
     const sec = getP("episodes-section");
-    if (sec) sec.hidden = true;
+    if (sec) {
+      sec.hidden = true;
+      sec.classList.remove("tds-episodes-section--ready");
+    }
+    _episodesLoading = false;
+    disconnectScrollToSeasons();
     closeEpisodeModal();
     const listEl = _slot?.querySelector(".tds-episode-list");
     if (listEl) listEl.innerHTML = "";
@@ -859,6 +1008,7 @@
     const episodesSec = getP("episodes-section");
     if (next === "movies") {
       episodesSec?.setAttribute("hidden", "");
+      disconnectScrollToSeasons();
       closeEpisodeModal();
       _callbacks?.resetHeaderSeasonPresentation?.();
     }
@@ -1111,23 +1261,108 @@
     }
   }
 
-  async function loadEpisodes(seasonNum) {
+  async function loadEpisodes(seasonNum, { background = false } = {}) {
     const tok = _token;
     const meta = window.WatchlistSeriesMetadata;
     if (!meta || !_item || !_resolution) return;
 
-    showEpisodesLoading();
+    if (!background) {
+      showEpisodesLoading();
+      _episodesPartialPainted = false;
+    }
 
     const locale = getLocale();
     const poster = getItemPoster();
-    // Find the season summary for poster fallback
     const seasonSummary = (_seriesResult?.seasons || []).find(
       (s) => s.seasonNumber === seasonNum
     ) || null;
-    const result = await meta.fetchSeasonEpisodes(
-      _resolution, seasonNum, locale, poster, seasonSummary, _item
+
+    try {
+      const result = await meta.fetchSeasonEpisodes(
+        _resolution,
+        seasonNum,
+        locale,
+        poster,
+        seasonSummary,
+        _item,
+        {
+          onPartial: (partial) => {
+            if (!isValid(tok)) return;
+            rememberSeasonEpisodes(seasonNum, partial);
+            if (background || _selectedSeason !== seasonNum) return;
+            applyEpisodesPayload(seasonNum, partial, { partial: true });
+          },
+        }
+      );
+      if (!isValid(tok)) return;
+      rememberSeasonEpisodes(seasonNum, result);
+      if (background) {
+        if (_selectedSeason === seasonNum) {
+          applyEpisodesPayload(seasonNum, result, { partial: false });
+        }
+        return;
+      }
+      if (_selectedSeason !== seasonNum) return;
+
+      applyEpisodesPayload(seasonNum, result, { partial: false });
+      prefetchNeighborSeasons(seasonNum);
+    } finally {
+      if (!background) runPendingSpecialsCheck();
+    }
+  }
+
+  function rememberSeasonEpisodes(seasonNum, result) {
+    const displayEps = filterSpecialsEpisodes(seasonNum, result?.episodes);
+    if (!displayEps.length) return;
+    const stored =
+      displayEps !== result?.episodes
+        ? { ...result, episodes: displayEps }
+        : result;
+    _episodesBySeason.set(seasonNum, stored);
+  }
+
+  function prefetchNeighborSeasons(seasonNum) {
+    const seasons = getRegularSeasons();
+    const idx = seasons.findIndex((s) => s.seasonNumber === seasonNum);
+    if (idx < 0) return;
+    for (const offset of [-1, 1]) {
+      const neighbor = seasons[idx + offset];
+      if (neighbor && !_episodesBySeason.has(neighbor.seasonNumber)) {
+        void prefetchSeasonEpisodes(neighbor.seasonNumber);
+      }
+    }
+  }
+
+  async function prefetchSeasonEpisodes(seasonNum) {
+    if (_episodesBySeason.has(seasonNum)) return;
+    const tok = _token;
+    const meta = window.WatchlistSeriesMetadata;
+    if (!meta || !_item || !_resolution) return;
+
+    const seasonSummary = (_seriesResult?.seasons || []).find(
+      (s) => s.seasonNumber === seasonNum
     );
-    if (!isValid(tok) || _selectedSeason !== seasonNum) return;
+    if (!seasonSummary) return;
+
+    try {
+      const result = await meta.fetchSeasonEpisodes(
+        _resolution,
+        seasonNum,
+        getLocale(),
+        getItemPoster(),
+        seasonSummary,
+        _item
+      );
+      if (!isValid(tok)) return;
+      rememberSeasonEpisodes(seasonNum, result);
+    } catch {
+      // Prefetch is best-effort.
+    }
+  }
+
+  function applyEpisodesPayload(seasonNum, result, { partial = false } = {}) {
+    const meta = window.WatchlistSeriesMetadata;
+    if (!meta || !result) return;
 
     const displayEps = filterSpecialsEpisodes(seasonNum, result?.episodes);
     const displayResult =
@@ -1135,6 +1370,7 @@
         ? { ...result, episodes: displayEps }
         : result;
 
+    const prevCount = _episodesResult?.episodes?.length || 0;
     _episodesResult = {
       ...displayResult,
       seasonNum,
@@ -1144,9 +1380,12 @@
         progressKey: `${seasonNum}:${ep.episodeNumber}`,
       })),
     };
+    _fillerUiAvailable = Boolean(displayResult?.fillerUiAvailable);
     const RS = meta.ResultState;
 
-    patchSeasonFromEpisodeResult(seasonNum, displayResult);
+    if (!partial) {
+      patchSeasonFromEpisodeResult(seasonNum, displayResult);
+    }
 
     switch (displayResult?.state) {
       case RS.AVAILABLE:
@@ -1157,52 +1396,79 @@
         if (eps.length > 0) {
           if (seasonNum === 0) {
             const airedCount = eps.filter((ep) => ep.isAired !== false).length;
-            if (airedCount === 0) { removeSpecialsFromCarousel(); break; }
+            if (airedCount === 0) {
+              if (!partial) removeSpecialsFromCarousel();
+              return;
+            }
           }
-          renderEpisodeList(seasonNum, eps);
-          if (result.state === RS.OFFLINE_WITH_CACHE) showEpisodesStatus(t("seasons.offline"), null);
-          else if (displayResult.state === RS.EPISODE_DETAILS_UNAVAILABLE) {
-            showEpisodesStatus(t("seasons.episodesUnavailable"), null);
+          if (partial) {
+            _episodesPartialPainted = true;
+            renderEpisodeList(seasonNum, eps);
+            rememberSeasonEpisodes(seasonNum, displayResult);
+            return;
+          }
+          if (_episodesPartialPainted && eps.length === prevCount) {
+            patchEpisodeRowsEnrichment(seasonNum, eps);
+          } else {
+            renderEpisodeList(seasonNum, eps);
+          }
+          _episodesPartialPainted = false;
+          if (result.state === RS.OFFLINE_WITH_CACHE) {
+            showEpisodesStatus(t("seasons.offline"), null, { keepList: true });
+          } else if (displayResult.state === RS.EPISODE_DETAILS_UNAVAILABLE) {
+            showEpisodesStatus(t("seasons.episodesUnavailable"), null, { keepList: true });
           }
           refreshSeasonCard(seasonNum);
-          reannotateExistingEntry();
-          break;
+          if (!partial) reannotateExistingEntry();
+          rememberSeasonEpisodes(seasonNum, displayResult);
+          return;
         }
-        if (seasonNum === 0) { removeSpecialsFromCarousel(); break; }
+        if (partial) return;
+        if (seasonNum === 0) { removeSpecialsFromCarousel(); return; }
         if (displayResult.state === RS.EPISODE_DETAILS_UNAVAILABLE) {
           showEpisodesStatus(t("seasons.episodesUnavailable"), null);
-          break;
+          return;
         }
         showEpisodesStatus(t("seasons.episodesError"), "retry-episodes");
-        break;
+        return;
       }
 
       case RS.OFFLINE_NO_CACHE:
-        if (seasonNum === 0) { removeSpecialsFromCarousel(); break; }
+        if (partial) return;
+        if (seasonNum === 0) { removeSpecialsFromCarousel(); return; }
         showEpisodesStatus(t("seasons.offlineNoCache"), "retry-episodes");
-        break;
+        return;
 
       case RS.EPISODE_DETAILS_UNAVAILABLE:
-        if (seasonNum === 0) { removeSpecialsFromCarousel(); break; }
+        if (partial) return;
+        if (seasonNum === 0) { removeSpecialsFromCarousel(); return; }
         showEpisodesStatus(t("seasons.episodesUnavailable"), null);
-        break;
+        return;
 
       case RS.RATE_LIMITED:
+        if (partial) return;
         showEpisodesStatus(t("seasons.rateLimited"), "retry-episodes");
-        break;
+        return;
 
       case null:
       case undefined:
-        // No episode data available yet (e.g. series loaded from OMDb)
-        if (seasonNum === 0) { removeSpecialsFromCarousel(); break; }
+        if (partial) return;
+        if (seasonNum === 0) { removeSpecialsFromCarousel(); return; }
         showEpisodesStatus(t("seasons.episodesUnavailable"), null);
-        break;
+        return;
 
       default:
-        if (seasonNum === 0) { removeSpecialsFromCarousel(); break; }
+        if (partial) return;
+        if (seasonNum === 0) { removeSpecialsFromCarousel(); return; }
         showEpisodesStatus(t("seasons.episodesError"), "retry-episodes");
-        break;
+        return;
     }
+  }
+
+  function runPendingSpecialsCheck() {
+    if (!_pendingSpecialsCheck) return;
+    _pendingSpecialsCheck = false;
+    void silentlyCheckSpecials();
   }
 
   /** Remove specials from metadata and hide the Specials tab when season 0 is empty. */
@@ -1255,7 +1521,7 @@
     renderCarousel(regularSeasons);
 
     if (specialsSeason && specialsSeason.episodeCount == null) {
-      silentlyCheckSpecials();
+      _pendingSpecialsCheck = true;
     }
 
     const saved = _item?.lastSelectedSeason;
@@ -1386,8 +1652,16 @@
       updateCarouselSelection(seasonNum);
       scrollToSeasonCard(seasonNum, animate);
     }
-    showEpisodesLoading();
     notifySeasonPresentation(seasonNum);
+
+    const cached = _episodesBySeason.get(seasonNum);
+    if (cached?.episodes?.length) {
+      applyEpisodesPayload(seasonNum, cached, { partial: false });
+      updateNavButtons(getRegularSeasons());
+      void loadEpisodes(seasonNum, { background: true });
+      return;
+    }
+
     loadEpisodes(seasonNum);
     updateNavButtons(getRegularSeasons());
   }
@@ -1543,11 +1817,19 @@
 
   // ─── Rendering: episode list ───────────────────────────────────────────────
 
+  function setEpisodesSectionReady(ready) {
+    const sec = getP("episodes-section");
+    if (sec) sec.classList.toggle("tds-episodes-section--ready", ready);
+  }
+
   function showEpisodesLoading() {
     const sec = getP("episodes-section");
     const statusEl = getP("episodes-status");
     const listEl = _slot?.querySelector(".tds-episode-list");
     if (!sec) return;
+
+    _episodesLoading = true;
+    setEpisodesSectionReady(false);
 
     if (statusEl) {
       statusEl.innerHTML = `<span class="tds-spinner" role="status" aria-label="${esc(t("seasons.episodesLoading"))}"></span>${esc(t("seasons.episodesLoading"))}`;
@@ -1557,9 +1839,12 @@
     sec.hidden = false;
 
     updateEpisodesTitle();
+    syncScrollToSeasonsWatcher();
   }
 
-  function showEpisodesStatus(msg, retryAction) {
+  function showEpisodesStatus(msg, retryAction, { keepList = false } = {}) {
+    _episodesLoading = false;
+    if (!keepList) setEpisodesSectionReady(false);
     const statusEl = getP("episodes-status");
     const listEl   = _slot?.querySelector(".tds-episode-list");
     if (statusEl) {
@@ -1569,7 +1854,21 @@
           : "");
       statusEl.hidden = false;
     }
-    if (listEl) listEl.innerHTML = "";
+    if (listEl && !keepList) listEl.innerHTML = "";
+    if (!keepList) updateEpisodesTitle();
+  }
+
+  function episodesForDisplay(episodes) {
+    const list = episodes || [];
+    const AF = window.WatchlistAniFiller;
+    if (!_hideFiller || !AF) return list;
+    return list.filter((ep) => !AF.shouldHideEpisode(ep, true));
+  }
+
+  function fillerBadgeHtml(fillerKind) {
+    const AF = window.WatchlistAniFiller;
+    if (!AF?.isBadgeKind?.(fillerKind)) return "";
+    return `<span class="tds-ep-filler-badge tds-ep-filler-badge--filler">${esc(t("seasons.fillerBadge"))}</span>`;
   }
 
   function renderEpisodeList(seasonNum, episodes) {
@@ -1577,9 +1876,11 @@
     const statusEl = getP("episodes-status");
     if (!listEl) return;
 
+    _episodesLoading = false;
+
     if (statusEl) statusEl.hidden = true;
 
-    const scopedEps = (episodes || []).map((ep) => ({
+    const scopedEps = episodesForDisplay(episodes || []).map((ep) => ({
       ...ep,
       seasonNumber: seasonNum,
       progressKey: `${seasonNum}:${ep.episodeNumber}`,
@@ -1588,8 +1889,15 @@
     if (!scopedEps.length) {
       _episodeListRender = null;
       listEl.innerHTML = `<div class="tds-episodes-status">${esc(t("seasons.emptySeason"))}</div>`;
+      updateEpisodesTitle();
+      setEpisodesSectionReady(true);
+      disconnectScrollToSeasons();
       return;
     }
+
+    // Paint header, toggles, and jump bar before episode rows (avoids list-first flash).
+    updateEpisodesTitle();
+    updateSeasonActions(seasonNum);
 
     const entry = getEntry();
     const BATCH = 40;
@@ -1603,34 +1911,162 @@
       batch: BATCH,
     };
 
-    if (scopedEps.length <= BATCH) {
-      listEl.innerHTML = scopedEps.map((ep) => episodeRowHtml(ep, entry)).join("");
-      _episodeListRender.index = scopedEps.length;
-      updateEpisodesTitle();
-      updateSeasonActions(seasonNum);
-      return;
-    }
-
-    listEl.innerHTML = "";
-    let index = 0;
-
-    const appendBatch = () => {
-      const slice = scopedEps.slice(index, index + BATCH);
+    const appendBatchSlice = (startIndex) => {
+      const slice = scopedEps.slice(startIndex, startIndex + BATCH);
       listEl.insertAdjacentHTML(
         "beforeend",
         slice.map((ep) => episodeRowHtml(ep, entry)).join("")
       );
-      index += BATCH;
-      if (_episodeListRender) _episodeListRender.index = index;
+      return startIndex + slice.length;
+    };
+
+    listEl.innerHTML = "";
+    let index = appendBatchSlice(0);
+    if (_episodeListRender) _episodeListRender.index = index;
+    setEpisodesSectionReady(true);
+    syncScrollToSeasonsWatcher();
+
+    if (index >= scopedEps.length) return;
+
+    const appendRemainingBatches = () => {
+      if (!_episodeListRender || index >= scopedEps.length) return;
+      index = appendBatchSlice(index);
+      _episodeListRender.index = index;
       if (index < scopedEps.length) {
-        requestAnimationFrame(appendBatch);
+        requestAnimationFrame(appendRemainingBatches);
       } else {
-        updateEpisodesTitle();
         updateSeasonActions(seasonNum);
       }
     };
 
-    requestAnimationFrame(appendBatch);
+    requestAnimationFrame(appendRemainingBatches);
+  }
+
+  /** Update episode rows in place after background enrichment (ratings, stills, filler). */
+  function patchEpisodeRowsEnrichment(seasonNum, episodes) {
+    const entry = getEntry();
+    const scopedEps = episodesForDisplay(episodes || []).map((ep) => ({
+      ...ep,
+      seasonNumber: seasonNum,
+      progressKey: `${seasonNum}:${ep.episodeNumber}`,
+    }));
+
+    scopedEps.forEach((ep) => {
+      const row = findEpisodeRowEl(seasonNum, ep.episodeNumber);
+      if (!row) return;
+
+      const displayTitle = cleanEpisodeDisplayTitle(ep.title, ep.episodeNumber);
+      const titleEl = row.querySelector(".tds-ep-title");
+      if (titleEl) {
+        if (displayTitle) titleEl.textContent = displayTitle;
+      } else if (displayTitle) {
+        const header = row.querySelector(".tds-ep-header");
+        const numEl = header?.querySelector(".tds-ep-num");
+        if (header && numEl) {
+          const h4 = document.createElement("h4");
+          h4.className = "tds-ep-title";
+          h4.textContent = displayTitle;
+          numEl.insertAdjacentElement("afterend", h4);
+        }
+      }
+
+      const seasonPoster = getSeasonPoster(seasonNum);
+      const still = (_spoilerPosters && seasonPoster) ? seasonPoster : (ep.still || "");
+      const stillWrap = row.querySelector(".tds-ep-still-wrap");
+      if (stillWrap) {
+        let img = stillWrap.querySelector(".tds-ep-still");
+        const placeholder = stillWrap.querySelector(".tds-ep-still-placeholder");
+        if (still) {
+          if (!img) {
+            img = document.createElement("img");
+            img.className = "tds-ep-still";
+            img.alt = "";
+            img.loading = "lazy";
+            img.onerror = function onStillError() {
+              this.classList.add("tds-img--broken");
+              this.hidden = true;
+              if (this.nextElementSibling) this.nextElementSibling.hidden = false;
+            };
+            stillWrap.insertBefore(img, placeholder);
+          }
+          if (img.getAttribute("src") !== still) img.setAttribute("src", still);
+          img.hidden = false;
+          if (placeholder) placeholder.hidden = true;
+        }
+      }
+
+      const header = row.querySelector(".tds-ep-header");
+      if (header) {
+        const existingBadge = header.querySelector(".tds-ep-filler-badge");
+        const badgeHtml = fillerBadgeHtml(ep.fillerKind);
+        if (badgeHtml) {
+          if (existingBadge) {
+            existingBadge.outerHTML = badgeHtml;
+          } else {
+            const titleNode = header.querySelector(".tds-ep-title") || header.querySelector(".tds-ep-num");
+            titleNode?.insertAdjacentHTML("afterend", badgeHtml);
+          }
+        } else if (existingBadge) {
+          existingBadge.remove();
+        }
+
+        const sourceRating = episodeExternalRating(ep);
+        let ratingEl = header.querySelector(".tds-ep-source-rating");
+        if (sourceRating != null) {
+          const ratingHtml =
+            `<span class="tds-ep-source-rating" title="${esc(t("seasons.episodeRatingSource", { rating: formatRatingValue(sourceRating) }))}">`
+            + `${esc(formatRatingValue(sourceRating))}<span class="tds-ep-source-rating__max">/10</span></span>`;
+          if (ratingEl) {
+            ratingEl.outerHTML = ratingHtml;
+          } else {
+            header.insertAdjacentHTML("beforeend", ratingHtml);
+          }
+        } else if (ratingEl) {
+          ratingEl.remove();
+        }
+      }
+
+      const overviewText = episodeOverviewForDisplay(ep.overview);
+      let overviewEl = row.querySelector(".tds-ep-overview");
+      if (overviewText) {
+        if (overviewEl) {
+          overviewEl.textContent = overviewText;
+        } else {
+          const content = row.querySelector(".tds-ep-content");
+          const metaEl = content?.querySelector(".tds-ep-meta");
+          const p = document.createElement("p");
+          p.className = "tds-ep-overview";
+          p.textContent = overviewText;
+          if (metaEl) content.insertBefore(p, metaEl);
+          else content?.appendChild(p);
+        }
+      } else if (overviewEl) {
+        overviewEl.remove();
+      }
+
+      const metaParts = [];
+      if (ep.runtimeMinutes) metaParts.push(t("seasons.epRuntime", { n: ep.runtimeMinutes }));
+      if (ep.airDate) metaParts.push(t("seasons.epAiredOn", { date: ep.airDate.slice(0, 10) }));
+      const metaEl = row.querySelector(".tds-ep-meta");
+      if (metaParts.length) {
+        const metaText = metaParts.join(" · ");
+        if (metaEl) {
+          metaEl.textContent = metaText;
+        } else {
+          const content = row.querySelector(".tds-ep-content");
+          const p = document.createElement("p");
+          p.className = "tds-ep-meta";
+          p.textContent = metaText;
+          content?.appendChild(p);
+        }
+      }
+
+      updateEpisodeRowStateFromEntry(entry, seasonNum, ep.episodeNumber, ep);
+    });
+
+    updateSpoilerRow();
+    updateSeasonActions(seasonNum);
+    syncScrollToSeasonsWatcher();
   }
 
   function findEpisodeRowEl(seasonNum, epNum) {
@@ -1865,6 +2301,7 @@
         <div class="tds-ep-header">
           <span class="tds-ep-num">${esc(t("seasons.episodeNum", { n: epNum }))}</span>
           ${displayTitle ? `<h4 class="tds-ep-title">${esc(displayTitle)}</h4>` : ""}
+          ${fillerBadgeHtml(ep.fillerKind)}
           ${sourceRating != null
             ? `<span class="tds-ep-source-rating" title="${esc(t("seasons.episodeRatingSource", { rating: formatRatingValue(sourceRating) }))}">${esc(formatRatingValue(sourceRating))}<span class="tds-ep-source-rating__max">/10</span></span>`
             : ""}
@@ -1897,13 +2334,14 @@
     }
     updateSpoilerRow();
     updateEpisodeJumpRow();
+    syncScrollToSeasonsWatcher();
   }
 
   function updateEpisodeJumpRow() {
     const jumpRow = getP("episode-jump");
     if (!jumpRow) return;
     const sec = getP("episodes-section");
-    const hasEpisodes = Boolean(_episodesResult?.episodes?.length);
+    const hasEpisodes = !_episodesLoading && Boolean(_episodesResult?.episodes?.length);
     const show = sec && !sec.hidden && hasEpisodes && _selectedSeason > 0;
     jumpRow.hidden = !show;
 
@@ -1924,7 +2362,7 @@
     const row = getP("spoiler-row");
     if (!row) return;
     const sec = getP("episodes-section");
-    const hasEpisodes = Boolean(_episodesResult?.episodes?.length);
+    const hasEpisodes = !_episodesLoading && Boolean(_episodesResult?.episodes?.length);
     const show = sec && !sec.hidden && hasEpisodes && _selectedSeason > 0;
     row.hidden = !show;
 
@@ -1942,6 +2380,17 @@
     if (ratingsBtn) {
       ratingsBtn.setAttribute("aria-checked", String(_hideEpisodeRatings));
       ratingsBtn.classList.toggle("tds-spoiler-toggle--on", _hideEpisodeRatings);
+    }
+
+    const fillerBtn = row.querySelector("[data-tds-action='toggle-hide-filler']");
+    const fillerLabel = fillerBtn?.querySelector(".tds-spoiler-toggle__label");
+    const showFillerToggle =
+      _item?.contentType === "anime" && _fillerUiAvailable && _selectedSeason > 0;
+    if (fillerBtn) fillerBtn.hidden = !showFillerToggle;
+    if (fillerLabel) fillerLabel.textContent = t("seasons.hideFiller");
+    if (fillerBtn) {
+      fillerBtn.setAttribute("aria-checked", String(_hideFiller));
+      fillerBtn.classList.toggle("tds-spoiler-toggle--on", _hideFiller);
     }
 
     if (sec) {
@@ -2032,6 +2481,8 @@
     }
 
     modal.hidden = false;
+    const scrollBtn = getP("scroll-to-seasons");
+    if (scrollBtn) scrollBtn.hidden = true;
     if (inputEl && !inputEl.hidden) {
       inputEl.focus();
       requestAnimationFrame(() => {
@@ -2049,6 +2500,7 @@
     modal.hidden = true;
     _activeEpisodeKey = null;
     _episodeModalEditing = false;
+    syncScrollToSeasonsWatcher();
   }
 
   function saveEpisodeRatingFromModal({ clear = false } = {}) {
@@ -2277,20 +2729,9 @@
     let newEntry;
     if (watched) {
       newEntry = P()?.unmarkEpisodeWatched(entry, seasonNum, epNum, allAired);
-    } else if (
-      shouldPromptGapFill(entry, seasonNum, epNum) &&
-      window.WatchlistDialog?.confirm
-    ) {
-      const markAll = await window.WatchlistDialog.confirm(
-        t("seasons.gapPromptMessage"),
-        {
-          title: t("seasons.gapPromptTitle"),
-          confirmLabel: t("seasons.gapMarkAll"),
-          cancelLabel: t("seasons.gapNo") || "No",
-        }
-      );
-      if (markAll) {
-        const keys = gapFillWatchKeys(entry, seasonNum, epNum);
+    } else if (shouldPromptGapFill(entry, seasonNum, epNum)) {
+      const keys = await promptGapFillKeys(entry, seasonNum, epNum);
+      if (keys) {
         newEntry = P()?.markSeasonWatched(entry, keys);
       } else {
         newEntry = P()?.markEpisodeWatched(entry, seasonNum, epNum, allAired);
@@ -2366,7 +2807,9 @@
       newEntry = P()?.unmarkSeasonWatched(entry, seasonNum, airedKeys);
     } else {
       if (!airedKeys.length) return;
-      newEntry = P()?.markSeasonWatched(entry, airedKeys);
+      const maxEp = maxEpisodeNumberFromKeys(airedKeys);
+      const gapKeys = await promptGapFillKeys(entry, seasonNum, maxEp);
+      newEntry = P()?.markSeasonWatched(entry, gapKeys || airedKeys);
     }
 
     saveEntry(newEntry);
@@ -2427,6 +2870,12 @@
     }
     if (_activeEpisodeKey) {
       openEpisodeModal(_activeEpisodeKey);
+    }
+
+    const scrollBtn = getP("scroll-to-seasons");
+    if (scrollBtn) {
+      scrollBtn.setAttribute("aria-label", t("seasons.scrollToControls"));
+      scrollBtn.setAttribute("title", t("seasons.scrollToControls"));
     }
   }
 
@@ -2532,9 +2981,19 @@
         updateSpoilerRow();
         break;
       }
+      case "toggle-hide-filler": {
+        _hideFiller = !_hideFiller;
+        updateSpoilerRow();
+        refreshEpisodeListDisplay();
+        break;
+      }
       case "jump-episode": {
         const input = getP("episode-jump-input");
         jumpToEpisodeNumber(input?.value);
+        break;
+      }
+      case "scroll-to-seasons": {
+        scrollToSeasonsControls();
         break;
       }
       case "prev-season": {

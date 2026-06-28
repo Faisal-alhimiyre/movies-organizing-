@@ -51,12 +51,16 @@ class WatchlistSnapshot {
 
   int get watchedCount => items
       .where((i) =>
-          itemProgressStateForId(i.id, watched) == ItemProgressState.watched)
+          itemProgressStateForId(i.id, watched,
+                  contentType: i.contentType) ==
+              ItemProgressState.watched)
       .length;
 
   int get inProgressCount => items
       .where((i) =>
-          itemProgressStateForId(i.id, watched) == ItemProgressState.inProgress)
+          itemProgressStateForId(i.id, watched,
+                  contentType: i.contentType) ==
+              ItemProgressState.inProgress)
       .length;
 
   WatchlistSnapshot copyWith({

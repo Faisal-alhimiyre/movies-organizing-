@@ -8,6 +8,7 @@ import '../../../../models/list_library_entry.dart';
 import '../../../../models/watchlist_item.dart';
 import '../../../../repositories/auth_repository.dart';
 import '../../application/watchlist_controller.dart';
+import '../../application/watchlist_filters.dart';
 import 'account_menu_panel.dart';
 import 'list_title_dropdown.dart';
 
@@ -37,6 +38,8 @@ class WatchlistHeader extends ConsumerWidget {
     required this.total,
     required this.watchedCount,
     this.inProgressCount = 0,
+    this.watchedFilter = WatchedFilter.all,
+    this.onWatchedFilterChanged,
     required this.syncStatus,
     required this.cloudConfigured,
     required this.sharePublishing,
@@ -54,6 +57,8 @@ class WatchlistHeader extends ConsumerWidget {
   final int total;
   final int watchedCount;
   final int inProgressCount;
+  final WatchedFilter watchedFilter;
+  final ValueChanged<WatchedFilter>? onWatchedFilterChanged;
   final SyncDisplayStatus syncStatus;
   final bool cloudConfigured;
   final bool sharePublishing;
@@ -159,6 +164,8 @@ class WatchlistHeader extends ConsumerWidget {
               total: total,
               watchedCount: watchedCount,
               inProgressCount: inProgressCount,
+              watchedFilter: watchedFilter,
+              onWatchedFilterChanged: onWatchedFilterChanged,
               syncStatus: syncStatus,
               cloudConfigured: cloudConfigured,
               l10n: l10n,
@@ -388,6 +395,8 @@ class _StatsRow extends StatelessWidget {
     required this.total,
     required this.watchedCount,
     this.inProgressCount = 0,
+    this.watchedFilter = WatchedFilter.all,
+    this.onWatchedFilterChanged,
     required this.syncStatus,
     required this.cloudConfigured,
     required this.l10n,
@@ -398,6 +407,8 @@ class _StatsRow extends StatelessWidget {
   final int total;
   final int watchedCount;
   final int inProgressCount;
+  final WatchedFilter watchedFilter;
+  final ValueChanged<WatchedFilter>? onWatchedFilterChanged;
   final SyncDisplayStatus syncStatus;
   final bool cloudConfigured;
   final L10n l10n;
@@ -421,20 +432,34 @@ class _StatsRow extends StatelessWidget {
           value: '$total',
           label: l10n.statsTotal,
           onSurface: onSurface,
+          isActive: watchedFilter == WatchedFilter.all,
+          semanticsLabel: l10n.statsFilterAll,
+          onTap: onWatchedFilterChanged == null
+              ? null
+              : () => onWatchedFilterChanged!(WatchedFilter.all),
         ),
         _StatChip(
           value: '$watchedCount',
           label: l10n.statsWatched,
           valueColor: watchedColor,
           onSurface: onSurface,
+          isActive: watchedFilter == WatchedFilter.watched,
+          semanticsLabel: l10n.statsFilterWatched,
+          onTap: onWatchedFilterChanged == null
+              ? null
+              : () => onWatchedFilterChanged!(WatchedFilter.watched),
         ),
-        if (inProgressCount > 0)
-          _StatChip(
-            value: '$inProgressCount',
-            label: l10n.statsInProgress,
-            valueColor: inProgressColor,
-            onSurface: onSurface,
-          ),
+        _StatChip(
+          value: '$inProgressCount',
+          label: l10n.statsInProgress,
+          valueColor: inProgressColor,
+          onSurface: onSurface,
+          isActive: watchedFilter == WatchedFilter.inProgress,
+          semanticsLabel: l10n.statsFilterInProgress,
+          onTap: onWatchedFilterChanged == null
+              ? null
+              : () => onWatchedFilterChanged!(WatchedFilter.inProgress),
+        ),
         if (!cloudConfigured)
           _SyncLabel(
             icon: Icons.storage_outlined,
@@ -469,19 +494,32 @@ class _StatChip extends StatelessWidget {
     required this.label,
     required this.onSurface,
     this.valueColor,
+    this.isActive = false,
+    this.onTap,
+    this.semanticsLabel,
   });
 
   final String value;
   final String label;
   final Color onSurface;
   final Color? valueColor;
+  final bool isActive;
+  final VoidCallback? onTap;
+  final String? semanticsLabel;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
+    final borderColor = isActive
+        ? (valueColor ?? onSurface).withValues(alpha: 0.55)
+        : onSurface.withValues(alpha: 0.14);
+
+    final chip = DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: onSurface.withValues(alpha: 0.14)),
+        border: Border.all(color: borderColor, width: isActive ? 1.5 : 1),
+        color: isActive
+            ? (valueColor ?? onSurface).withValues(alpha: 0.08)
+            : null,
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
@@ -507,6 +545,21 @@ class _StatChip extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+
+    if (onTap == null) return chip;
+
+    return Semantics(
+      button: true,
+      label: semanticsLabel,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(999),
+          child: chip,
         ),
       ),
     );

@@ -348,6 +348,23 @@
     });
   }
 
+  let movieProgressPersistTimer = null;
+
+  function clearMovieProgressPersistTimer() {
+    if (movieProgressPersistTimer) {
+      clearTimeout(movieProgressPersistTimer);
+      movieProgressPersistTimer = null;
+    }
+  }
+
+  function scheduleMovieProgressPersist(slider) {
+    clearMovieProgressPersistTimer();
+    movieProgressPersistTimer = setTimeout(() => {
+      movieProgressPersistTimer = null;
+      void persistMovieProgress(slider);
+    }, 280);
+  }
+
   function updateMovieProgressLabels(slider) {
     if (!slider) return;
     const runtime = Number(slider.max);
@@ -1073,6 +1090,8 @@
     _overlay.addEventListener("click", onOverlayClick);
     _overlay.addEventListener("input", onOverlayInput);
     _overlay.addEventListener("change", onOverlayChange);
+    _overlay.addEventListener("pointerup", onOverlayPointerUp);
+    _overlay.addEventListener("touchend", onOverlayPointerUp);
     _overlay.addEventListener("keydown", onOverlayKeydown);
     _titleObserver = null;
     setupSwipeToDismiss();
@@ -1348,11 +1367,20 @@
     const slider = event.target.closest("[data-td-action='movie-progress']");
     if (!slider) return;
     updateMovieProgressLabels(slider);
+    scheduleMovieProgressPersist(slider);
+  }
+
+  function onOverlayPointerUp(event) {
+    const slider = event.target.closest("[data-td-action='movie-progress']");
+    if (!slider) return;
+    clearMovieProgressPersistTimer();
+    void persistMovieProgress(slider);
   }
 
   function onOverlayChange(event) {
     const slider = event.target.closest("[data-td-action='movie-progress']");
     if (!slider) return;
+    clearMovieProgressPersistTimer();
     void persistMovieProgress(slider);
   }
 

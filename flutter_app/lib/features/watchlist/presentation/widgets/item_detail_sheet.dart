@@ -17,11 +17,13 @@ import '../../../../repositories/metadata/series_metadata_service.dart';
 import '../../application/title_meta_backfill.dart';
 import '../../../../repositories/watchlist_repository.dart';
 import '../../application/watchlist_controller.dart';
+import '../../../../core/utils/watch_progress.dart';
+import '../../../../core/widgets/poster_lightbox.dart';
 import 'card_poster.dart';
+import 'movie_progress_bar.dart';
 import 'season_sheet.dart';
 
 enum ItemDetailAction {
-  openLink,
   toggleWatched,
   edit,
   moveToList,
@@ -250,6 +252,23 @@ class _ItemDetailSheetState extends ConsumerState<ItemDetailSheet> {
             _close(context, ItemDetailAction.toggleWatched),
         onSeasonPresentation: (presentation) {
           setState(() => _seasonPresentation = presentation);
+        },
+        onHeaderReset: () => setState(() => _seasonPresentation = null),
+        onMovieProgressChanged: (entry) {
+          final snapshot = ref.read(watchlistControllerProvider).value;
+          if (snapshot == null) return;
+          final watchedMap = Map<String, WatchEntry>.from(snapshot.watched);
+          if (entry == null) {
+            watchedMap.remove(item.id);
+          } else {
+            watchedMap[item.id] = entry;
+          }
+          unawaited(
+            ref.read(watchlistControllerProvider.notifier).replaceItems(
+                  snapshot.items,
+                  watched: watchedMap,
+                ),
+          );
         },
       ),
     );
@@ -504,6 +523,8 @@ class _DetailContent extends StatelessWidget {
     required this.onRate,
     required this.onQuickToggleWatched,
     required this.onSeasonPresentation,
+    required this.onHeaderReset,
+    required this.onMovieProgressChanged,
   });
 
   final L10n l10n;
@@ -515,6 +536,8 @@ class _DetailContent extends StatelessWidget {
   final VoidCallback onRate;
   final VoidCallback onQuickToggleWatched;
   final ValueChanged<SeasonPresentation?> onSeasonPresentation;
+  final VoidCallback onHeaderReset;
+  final ValueChanged<WatchEntry?> onMovieProgressChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -538,10 +561,21 @@ class _DetailContent extends StatelessWidget {
               child: SizedBox(
                 width: posterWidth,
                 height: posterHeight,
-                child: CardPoster(
-                  key: ValueKey(headerPoster ?? item.displayPoster ?? item.id),
-                  item: item,
-                  posterOverride: headerPoster,
+                child: GestureDetector(
+                  onTap: headerPoster != null && headerPoster.isNotEmpty
+                      ? () => showPosterLightbox(
+                            context,
+                            imageUrl: headerPoster,
+                            semanticsLabel:
+                                l10n.detailViewPoster(item.title),
+                          )
+                      : null,
+                  child: CardPoster(
+                    key: ValueKey(
+                        headerPoster ?? item.displayPoster ?? item.id),
+                    item: item,
+                    posterOverride: headerPoster,
+                  ),
                 ),
               ),
             ),
@@ -665,9 +699,11 @@ class _DetailContent extends StatelessWidget {
         const SizedBox(height: 12),
         _RatingBlock(
           l10n: l10n,
+          item: item,
           watched: watched,
           onRate: onRate,
           onQuickToggleWatched: onQuickToggleWatched,
+          onMovieProgressChanged: onMovieProgressChanged,
         ),
         if (showSeasons)
           TitleSeasonsPanel(
@@ -676,6 +712,7 @@ class _DetailContent extends StatelessWidget {
             watched: watched,
             embedded: true,
             onSeasonPresentation: onSeasonPresentation,
+            onHeaderReset: onHeaderReset,
           ),
       ],
     );
@@ -685,15 +722,19 @@ class _DetailContent extends StatelessWidget {
 class _RatingBlock extends StatelessWidget {
   const _RatingBlock({
     required this.l10n,
+    required this.item,
     required this.watched,
     required this.onRate,
     required this.onQuickToggleWatched,
+    required this.onMovieProgressChanged,
   });
 
   final L10n l10n;
+  final WatchlistItem item;
   final WatchEntry? watched;
   final VoidCallback onRate;
   final VoidCallback onQuickToggleWatched;
+  final ValueChanged<WatchEntry?> onMovieProgressChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -701,9 +742,20 @@ class _RatingBlock extends StatelessWidget {
     final tc = theme.extension<AppTypeColors>();
     final isWatched = watched != null;
     final hasRating = hasWatchRating(watched);
-    final isFullyWatched = watched?.isFullyWatched ?? false;
-    final isInProgress = watched?.isInProgress ?? false;
+    final movieState = item.contentType == 'movies'
+        ? movieWatchState(watched)
+        : null;
+    final isFullyWatched = item.contentType == 'movies'
+        ? movieState == WatchState.watched
+        : (watched?.isFullyWatched ?? false);
+    final isInProgress = item.contentType == 'movies'
+        ? movieState == WatchState.inprogress
+        : (watched?.isInProgress ?? false);
+    final isUnwatched = item.contentType == 'movies'
+        ? movieState == WatchState.unwatched
+        : !isWatched;
     final inProgressColor = tc?.inProgress ?? const Color(0xFFFB923C);
+    final showMovieProgress = item.contentType == 'movies' && !isFullyWatched;
 
     final decoration = BoxDecoration(
       color: theme.colorScheme.onSurface.withValues(alpha: 0.04),
@@ -713,8 +765,26 @@ class _RatingBlock extends StatelessWidget {
       ),
     );
 
-    if (!isWatched) {
-      return Align(
+    Widget withMovieProgress(Widget child) {
+      if (!showMovieProgress) return child;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          MovieProgressBar(
+            l10n: l10n,
+            item: item,
+            entry: watched,
+            onChanged: onMovieProgressChanged,
+          ),
+          const SizedBox(height: 12),
+          child,
+        ],
+      );
+    }
+
+    if (isUnwatched) {
+      return withMovieProgress(
+        Align(
         alignment: AlignmentDirectional.centerStart,
         child: Material(
           color: Colors.transparent,
@@ -730,6 +800,7 @@ class _RatingBlock extends StatelessWidget {
             ),
           ),
         ),
+      ),
       );
     }
 
@@ -737,7 +808,8 @@ class _RatingBlock extends StatelessWidget {
       final note = watched?.note?.trim();
       final hasNote = note != null && note.isNotEmpty;
       final maxWidth = MediaQuery.sizeOf(context).width - 32;
-      return Align(
+      return withMovieProgress(
+        Align(
         alignment: AlignmentDirectional.centerStart,
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxWidth),
@@ -818,6 +890,7 @@ class _RatingBlock extends StatelessWidget {
             ),
           ),
         ),
+      ),
       );
     }
 
@@ -922,30 +995,34 @@ class _RatingBlock extends StatelessWidget {
 
     if (!interactive) {
       if (isFullyWatched && !hasRating) {
-        return content;
+        return withMovieProgress(content);
       }
-      return DecoratedBox(
+      return withMovieProgress(
+        DecoratedBox(
         decoration: decoration,
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: content,
         ),
+      ),
       );
     }
 
-    return Semantics(
-      button: true,
-      label: hasRating ? l10n.mobileEditRating : l10n.mobileRateTitle,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onRate,
-          borderRadius: BorderRadius.circular(8),
-          child: Ink(
-            decoration: decoration,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: content,
+    return withMovieProgress(
+      Semantics(
+        button: true,
+        label: hasRating ? l10n.mobileEditRating : l10n.mobileRateTitle,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onRate,
+            borderRadius: BorderRadius.circular(8),
+            child: Ink(
+              decoration: decoration,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: content,
+              ),
             ),
           ),
         ),

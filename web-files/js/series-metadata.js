@@ -924,7 +924,7 @@
     item = null,
     options = null
   ) {
-    void options;
+    const onPartial = options?.onPartial;
     if (resolution?.isNegative) return { state: ResultState.INVALID_ID };
     const effectivePoster = seasonSummary?.poster || fallbackPoster;
 
@@ -934,21 +934,84 @@
       seasonNumber
     );
 
+    const emitPartial = (partial) => {
+      if (typeof onPartial !== "function") return;
+      const epCount = partial?.episodes?.length || 0;
+      if (epCount <= 0) return;
+      if (
+        partial?.state === ResultState.OFFLINE_NO_CACHE ||
+        partial?.state === ResultState.UNAVAILABLE
+      ) {
+        return;
+      }
+      try {
+        onPartial(normalizeEpisodesToAppSeason({ ...partial }, seasonNumber));
+      } catch (err) {
+        console.warn("[series-metadata] onPartial failed:", err?.message || err);
+      }
+    };
+
+    const enrichRatingsAndFiller = async (baseResult, seasonImdb) => {
+      if (item?.contentType === "anime") {
+        const [rated, filler] = await Promise.all([
+          enrichEpisodeRatings(
+            baseResult,
+            resolution,
+            seasonNumber,
+            locale,
+            effectivePoster,
+            item,
+            seasonSummary,
+            seasonImdb
+          ),
+          enrichAniFillerEpisodes(baseResult, seasonAnilistId, item),
+        ]);
+        const fillerByNum = new Map(
+          (filler?.episodes || []).map((ep) => [ep.episodeNumber, ep])
+        );
+        return {
+          ...rated,
+          episodes: (rated.episodes || []).map((ep) => {
+            const f = fillerByNum.get(ep.episodeNumber);
+            if (!f?.fillerKind) return ep;
+            return { ...ep, fillerKind: f.fillerKind };
+          }),
+          fillerUiAvailable: filler.fillerUiAvailable,
+          fillerHideAvailable: filler.fillerHideAvailable,
+        };
+      }
+      return enrichEpisodeRatings(
+        baseResult,
+        resolution,
+        seasonNumber,
+        locale,
+        effectivePoster,
+        item,
+        seasonSummary,
+        seasonImdb
+      );
+    };
+
     if (seasonAnilistId) {
       try {
-        const seasonImdb = await resolveSeasonImdbForCour(
+        // Resolve IMDb in parallel — do not block the first episode paint on it.
+        const seasonImdbPromise = resolveSeasonImdbForCour(
           seasonAnilistId,
           resolution,
           item,
           seasonSummary,
           seasonNumber
         );
-        let result = await fetchAnilistEpisodes(
+        const anilistRaw = await fetchAnilistEpisodes(
           seasonAnilistId,
           seasonNumber,
           effectivePoster
         );
-        result = normalizeEpisodesToAppSeason(result, seasonNumber);
+        let result = normalizeEpisodesToAppSeason(anilistRaw, seasonNumber);
+        emitPartial(result);
+
+        const seasonImdb = await seasonImdbPromise;
+
         if (item?.contentType === "anime" || resolution?.anilistId) {
           result = await enrichAnilistEpisodesWithTvdb(
             result,
@@ -962,6 +1025,7 @@
             seasonImdb
           );
           result = normalizeEpisodesToAppSeason(result, seasonNumber);
+          emitPartial(result);
         }
         const epCount = result?.episodes?.length || 0;
         if (
@@ -969,16 +1033,7 @@
           result?.state !== ResultState.OFFLINE_NO_CACHE &&
           result?.state !== ResultState.UNAVAILABLE
         ) {
-          return await enrichEpisodeRatings(
-            result,
-            resolution,
-            seasonNumber,
-            locale,
-            effectivePoster,
-            item,
-            seasonSummary,
-            seasonImdb
-          );
+          return enrichRatingsAndFiller(result, seasonImdb);
         }
       } catch (err) {
         console.warn(
@@ -1632,6 +1687,25 @@
    * AniList often has episode totals but not per-episode art/titles (streaming list is partial).
    * Merge TVDB episode metadata into the AniList list when stubs dominate.
    */
+  async function enrichAniFillerEpisodes(result, seasonAnilistId, item) {
+    const AF = window.WatchlistAniFiller;
+    if (!AF || !result?.episodes?.length || item?.contentType !== "anime") {
+      return result;
+    }
+
+    await AF.ensureLoaded();
+    const WM = window.WatchlistMetadata;
+    const malId = WM?.extractMalId?.(item?.link) || item?.malId || null;
+    const enriched = AF.enrichEpisodes(seasonAnilistId, malId, result.episodes);
+
+    return {
+      ...result,
+      episodes: enriched.episodes,
+      fillerUiAvailable: enriched.hasFillerUi,
+      fillerHideAvailable: enriched.hasHideable,
+    };
+  }
+
   async function enrichAnilistEpisodesWithTvdb(
     result,
     resolution,

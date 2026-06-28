@@ -8,11 +8,13 @@ import 'package:http/http.dart' as http;
 import '../../core/config/app_config.dart';
 import '../../core/config/environment.dart';
 import '../../core/storage/hive_boxes.dart';
-import '../../core/utils/item_links.dart';
+import '../../core/utils/item_links.dart' show getAnilistIdFromItem;
 import '../../core/utils/title_meta_format.dart' show parsePositiveCount;
 import '../../models/series_metadata.dart';
 import '../../models/watchlist_item.dart';
 import 'metadata_service.dart' show MetadataService;
+import 'anifiller_service.dart';
+import 'series_movie_filter.dart';
 
 // ─────────────────────────────────────────────────────────────
 // Provider
@@ -514,6 +516,39 @@ class SeriesMetadataService {
       default:
         return const SeasonEpisodesResult(state: MetadataResultState.unavailable);
     }
+  }
+
+  /// Standalone movies related to a TV series or anime (not season-carousel entries).
+  Future<RelatedMoviesResult> fetchRelatedMovies({
+    required SeriesIdResolution resolution,
+    required WatchlistItem item,
+    required String locale,
+  }) async {
+    if (!resolution.hasUsableSource) {
+      return const RelatedMoviesResult(state: MetadataResultState.invalidId);
+    }
+
+    var anilistId = resolution.anilistId;
+    if (anilistId == null && item.contentType == 'anime') {
+      anilistId = getAnilistIdFromItem(item);
+      if (anilistId == null) {
+        final resolved = await resolveSeriesId(item);
+        anilistId = resolved.anilistId;
+      }
+    }
+
+    if (anilistId != null) {
+      return _fetchAnilistRelatedMovies(anilistId, locale);
+    }
+
+    if (_config.isSupabaseConfigured) {
+      final tvdbId = await _resolveTvdbId(resolution);
+      if (tvdbId != null) {
+        return _fetchTvdbRelatedMovies(tvdbId, locale);
+      }
+    }
+
+    return const RelatedMoviesResult(state: MetadataResultState.noSeasons);
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -1085,10 +1120,11 @@ class SeriesMetadataService {
     if (!forceRefresh) {
       final cached = _readRawCache(cacheKey, _episodesTtl);
       if (cached != null) {
-        return _parseCachedEpisodesResult(
+        final parsed = _parseCachedEpisodesResult(
           cached,
           isStale: _isStale(cacheKey, _episodesTtl),
         );
+        return _enrichAniFillerEpisodes(parsed, anilistId);
       }
     }
 
@@ -1110,11 +1146,12 @@ class SeriesMetadataService {
     if (media == null) {
       final stale = _readRawCacheStale(cacheKey);
       if (stale != null) {
-        return _parseCachedEpisodesResult(
+        final parsed = _parseCachedEpisodesResult(
           stale,
           isStale: true,
           forceState: MetadataResultState.offlineWithCache,
         );
+        return _enrichAniFillerEpisodes(parsed, anilistId);
       }
       return const SeasonEpisodesResult(state: MetadataResultState.offlineNoCache);
     }
@@ -1151,8 +1188,30 @@ class SeriesMetadataService {
     }
 
     final result = SeasonEpisodesResult(state: state, episodes: episodes);
-    _writeRawCache(cacheKey, _episodesResultToJson(result), _episodesTtl);
-    return result;
+    final enriched = await _enrichAniFillerEpisodes(result, anilistId);
+    _writeRawCache(cacheKey, _episodesResultToJson(enriched), _episodesTtl);
+    return enriched;
+  }
+
+  Future<SeasonEpisodesResult> _enrichAniFillerEpisodes(
+    SeasonEpisodesResult result,
+    int anilistId,
+  ) async {
+    if (result.episodes == null || result.episodes!.isEmpty) return result;
+    await AniFillerService.instance.ensureLoaded();
+    final enriched = AniFillerService.instance.enrichEpisodes(
+      anilistId,
+      null,
+      result.episodes!,
+    );
+    return SeasonEpisodesResult(
+      state: result.state,
+      episodes: enriched.episodes,
+      seasonPoster: result.seasonPoster,
+      seasonOverview: result.seasonOverview,
+      isStale: result.isStale,
+      debugMessage: result.debugMessage,
+    );
   }
 
   List<EpisodeDetail> _buildAnilistEpisodeList(
@@ -1932,6 +1991,10 @@ class SeriesMetadataService {
         }).toList();
       }
 
+      if (season == 0) {
+        episodes = filterSpecialsEpisodes(episodes);
+      }
+
       if (episodes.isEmpty) {
         return const SeasonEpisodesResult(
           state: MetadataResultState.unavailable,
@@ -1978,6 +2041,7 @@ class SeriesMetadataService {
 
     return EpisodeDetail(
       source: 'tvdb',
+      seriesTvdbId: parsePositiveCount(json['seriesTvdbId'] ?? json['tvdbId']),
       seasonNumber: season,
       episodeNumber: episode,
       title: json['title']?.toString() ?? 'Episode $episode',
@@ -1986,6 +2050,335 @@ class SeriesMetadataService {
       runtimeMinutes: parsePositiveCount(json['runtimeMinutes']),
       airDate: json['airDate']?.toString(),
       isAired: json['isAired'] != false,
+      isMovie: json['isMovie'] == true || json['isMovie'] == 1,
+      linkedMovieId: parsePositiveCount(json['linkedMovieId']),
+    );
+  }
+
+  Future<RelatedMoviesResult> _fetchTvdbRelatedMovies(
+    int tvdbId,
+    String locale,
+  ) async {
+    final cacheKey = '${_v5Prefix}related:movies:tvdb:$tvdbId:$locale';
+    final cached = _readRawCache(cacheKey, _seriesTtl);
+    if (cached != null && cached['movies'] is List) {
+      final movies = (cached['movies'] as List)
+          .whereType<Map>()
+          .map((m) => RelatedMovie.fromJson(Map<String, dynamic>.from(m)))
+          .where((m) => m.title.isNotEmpty)
+          .toList();
+      return RelatedMoviesResult(
+        state: movies.isNotEmpty
+            ? MetadataResultState.available
+            : MetadataResultState.noSeasons,
+        movies: movies,
+        isStale: _isStale(cacheKey, _seriesTtl),
+      );
+    }
+
+    try {
+      final result = await _invokeTvdbEdge({
+        'action': 'episodes',
+        'tvdbId': tvdbId,
+        'season': 0,
+        'locale': locale,
+      });
+      final rawEps = result?['episodes'] as List? ?? [];
+      final movies = rawEps
+          .whereType<Map>()
+          .map((raw) => _normalizeTvdbEpisode(Map<String, dynamic>.from(raw)))
+          .where(isMovieLikeTvSpecial)
+          .map(_normalizeTvdbRelatedMovie)
+          .where((m) => m.title.isNotEmpty)
+          .toList();
+
+      _writeRawCache(cacheKey, {
+        'movies': movies.map((m) => m.toJson()).toList(),
+      }, _seriesTtl);
+
+      return RelatedMoviesResult(
+        state: movies.isNotEmpty
+            ? MetadataResultState.available
+            : MetadataResultState.noSeasons,
+        movies: movies,
+      );
+    } catch (_) {
+      final stale = _readRawCacheStale(cacheKey);
+      if (stale != null && stale['movies'] is List) {
+        final movies = (stale['movies'] as List)
+            .whereType<Map>()
+            .map((m) => RelatedMovie.fromJson(Map<String, dynamic>.from(m)))
+            .toList();
+        return RelatedMoviesResult(
+          state: MetadataResultState.offlineWithCache,
+          movies: movies,
+          isStale: true,
+        );
+      }
+      return const RelatedMoviesResult(state: MetadataResultState.unavailable);
+    }
+  }
+
+  RelatedMovie _normalizeTvdbRelatedMovie(EpisodeDetail episode) {
+    final year = episode.airDate != null && episode.airDate!.length >= 4
+        ? episode.airDate!.substring(0, 4)
+        : '';
+    return RelatedMovie(
+      source: 'tvdb',
+      title: episode.title.trim(),
+      poster: episode.still,
+      year: year,
+      overview: episode.overview,
+      runtimeMinutes: episode.runtimeMinutes,
+    );
+  }
+
+  static const _anilistRelatedNodeFields = '''
+    id
+    type
+    format
+    duration
+    averageScore
+    episodes
+    title { english romaji native }
+    coverImage { large }
+    description(asHtml: false)
+    startDate { year month day }
+  ''';
+
+  Future<RelatedMoviesResult> _fetchAnilistRelatedMovies(
+    int anilistId,
+    String locale,
+  ) async {
+    final cacheKey = '${_v5Prefix}related:movies:anilist:$anilistId:$locale';
+    final cached = _readRawCache(cacheKey, _seriesTtl);
+    if (cached != null && cached['movies'] is List) {
+      final movies = (cached['movies'] as List)
+          .whereType<Map>()
+          .map((m) => RelatedMovie.fromJson(Map<String, dynamic>.from(m)))
+          .where((m) => m.title.isNotEmpty)
+          .toList();
+      return RelatedMoviesResult(
+        state: movies.isNotEmpty
+            ? MetadataResultState.available
+            : MetadataResultState.noSeasons,
+        movies: movies,
+        isStale: _isStale(cacheKey, _seriesTtl),
+      );
+    }
+
+    final data = await _anilistQuery(
+      '''
+      query (\$id: Int) {
+        Media(id: \$id, type: ANIME) {
+          $_anilistRelatedNodeFields
+          relations {
+            edges {
+              relationType
+              node {
+                $_anilistRelatedNodeFields
+                relations {
+                  edges {
+                    relationType
+                    node { $_anilistRelatedNodeFields }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      ''',
+      {'id': anilistId},
+    );
+
+    final media = data?['Media'] as Map<String, dynamic>?;
+    if (media == null) {
+      final stale = _readRawCacheStale(cacheKey);
+      if (stale != null && stale['movies'] is List) {
+        final movies = (stale['movies'] as List)
+            .whereType<Map>()
+            .map((m) => RelatedMovie.fromJson(Map<String, dynamic>.from(m)))
+            .toList();
+        return RelatedMoviesResult(
+          state: MetadataResultState.offlineWithCache,
+          movies: movies,
+          isStale: true,
+        );
+      }
+      return const RelatedMoviesResult(
+        state: MetadataResultState.offlineNoCache,
+      );
+    }
+
+    final chain = await _collectAnilistSeasonChain(media);
+    final chainIds = chain
+        .map((n) => n['id'])
+        .whereType<int>()
+        .toSet();
+    final sources = <Map<String, dynamic>>[media];
+    for (final node in chain) {
+      final id = node['id'] as int?;
+      if (id != null && id != anilistId) {
+        final expanded = await _fetchAnilistRelatedNode(id);
+        if (expanded != null) sources.add(expanded);
+      }
+    }
+
+    final related = _collectAnilistRelatedMoviesFromSources(sources, chainIds);
+    final movies = related
+        .map(_normalizeAnilistRelatedMovie)
+        .where((m) => m.title.isNotEmpty)
+        .toList();
+
+    _writeRawCache(cacheKey, {
+      'movies': movies.map((m) => m.toJson()).toList(),
+    }, _seriesTtl);
+
+    return RelatedMoviesResult(
+      state: movies.isNotEmpty
+          ? MetadataResultState.available
+          : MetadataResultState.noSeasons,
+      movies: movies,
+    );
+  }
+
+  Future<Map<String, dynamic>?> _fetchAnilistRelatedNode(int anilistId) async {
+    final data = await _anilistQuery(
+      '''
+      query (\$id: Int) {
+        Media(id: \$id, type: ANIME) {
+          $_anilistRelatedNodeFields
+          relations {
+            edges {
+              relationType
+              node { $_anilistRelatedNodeFields }
+            }
+          }
+        }
+      }
+      ''',
+      {'id': anilistId},
+    );
+    return data?['Media'] as Map<String, dynamic>?;
+  }
+
+  Future<List<Map<String, dynamic>>> _collectAnilistSeasonChain(
+    Map<String, dynamic> root, {
+    int maxSeasons = 30,
+  }) async {
+    final chain = <Map<String, dynamic>>[];
+    final seen = <int>{};
+    var current = root;
+
+    while (chain.length < maxSeasons) {
+      final currentId = current['id'] as int?;
+      if (currentId == null || seen.contains(currentId)) break;
+      seen.add(currentId);
+      chain.add(current);
+
+      final nextStub = _pickBestAnilistSequel(
+        current['relations']?['edges'] as List?,
+      );
+      if (nextStub == null) break;
+      final nextId = nextStub['id'] as int?;
+      if (nextId == null || seen.contains(nextId)) break;
+
+      final expanded = await _fetchAnilistRelatedNode(nextId);
+      if (expanded == null) break;
+
+      final nextEpisodeCount = parsePositiveCount(expanded['episodes']);
+      if (nextEpisodeCount == null || nextEpisodeCount <= 0) break;
+      current = expanded;
+    }
+
+    return chain;
+  }
+
+  Map<String, dynamic>? _pickBestAnilistSequel(List? edges) {
+    if (edges == null) return null;
+    const sequelTypes = {'SEQUEL', 'SIDE_STORY', 'ALTERNATIVE'};
+    Map<String, dynamic>? best;
+    var bestPriority = -1;
+
+    for (final edge in edges.whereType<Map>()) {
+      final relationType =
+          edge['relationType']?.toString().toUpperCase() ?? '';
+      if (!sequelTypes.contains(relationType)) continue;
+      final node = edge['node'] as Map<String, dynamic>?;
+      if (node == null || node['type']?.toString() != 'ANIME') continue;
+      final format = node['format']?.toString().toUpperCase() ?? '';
+      if (format == 'MOVIE' || format == 'MUSIC' || format == 'SPECIAL') {
+        continue;
+      }
+      final priority = relationType == 'SEQUEL' ? 3 : 1;
+      if (priority > bestPriority) {
+        bestPriority = priority;
+        best = node;
+      }
+    }
+    return best;
+  }
+
+  List<Map<String, dynamic>> _collectAnilistRelatedMoviesFromSources(
+    List<Map<String, dynamic>> sources,
+    Set<int> chainIds,
+  ) {
+    final seen = <int>{};
+    final movies = <Map<String, dynamic>>[];
+
+    for (final media in sources) {
+      final edges = media['relations']?['edges'] as List? ?? [];
+      for (final edge in edges.whereType<Map>()) {
+        final node = edge['node'] as Map<String, dynamic>?;
+        if (node == null || node['type']?.toString() != 'ANIME') continue;
+        final id = node['id'] as int?;
+        if (id == null || chainIds.contains(id) || seen.contains(id)) continue;
+        final format = node['format']?.toString().toUpperCase() ?? '';
+        if (format != 'MOVIE') continue;
+        final relationType =
+            edge['relationType']?.toString().toUpperCase() ?? '';
+        if (relationType == 'CHARACTER') continue;
+        seen.add(id);
+        movies.add(node);
+      }
+    }
+
+    movies.sort((a, b) {
+      final aKey = _anilistStartSortKey(a['startDate'] as Map?);
+      final bKey = _anilistStartSortKey(b['startDate'] as Map?);
+      return aKey.compareTo(bKey);
+    });
+    return movies;
+  }
+
+  int _anilistStartSortKey(Map? date) {
+    if (date == null) return 0;
+    final y = date['year'] as int? ?? 0;
+    final m = date['month'] as int? ?? 0;
+    final d = date['day'] as int? ?? 0;
+    return y * 10000 + m * 100 + d;
+  }
+
+  RelatedMovie _normalizeAnilistRelatedMovie(Map<String, dynamic> node) {
+    final titleObj = node['title'] as Map?;
+    final title = titleObj?['english']?.toString() ??
+        titleObj?['romaji']?.toString() ??
+        titleObj?['native']?.toString() ??
+        '';
+    final startDate = node['startDate'] as Map?;
+    final year = startDate?['year']?.toString() ?? '';
+    final scoreRaw = node['averageScore'];
+    final score = scoreRaw is num ? scoreRaw.toDouble() : null;
+    return RelatedMovie(
+      source: 'anilist',
+      anilistId: node['id'] as int?,
+      title: title,
+      poster: node['coverImage']?['large']?.toString() ?? '',
+      year: year,
+      overview: _stripHtml(node['description']?.toString() ?? ''),
+      runtimeMinutes: parsePositiveCount(node['duration']),
+      score: score,
     );
   }
 

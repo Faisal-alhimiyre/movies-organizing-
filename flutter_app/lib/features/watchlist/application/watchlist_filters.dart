@@ -187,7 +187,8 @@ bool itemMatchesWatchedFilter(
   WatchedFilter filter,
   Map<String, WatchEntry> watched,
 ) {
-  final state = itemProgressStateForId(item.id, watched);
+  final state =
+      itemProgressStateForId(item.id, watched, contentType: item.contentType);
   return switch (filter) {
     WatchedFilter.all => true,
     WatchedFilter.unwatched => state == ItemProgressState.unwatched,

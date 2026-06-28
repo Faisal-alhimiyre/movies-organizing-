@@ -565,6 +565,59 @@ body {
   appearance: none;
 }
 
+.search__clear {
+  position: absolute;
+  inset-inline-end: 0.3rem;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.search__clear:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.search__clear:focus-visible {
+  outline: 2px solid rgba(232, 184, 74, 0.45);
+  outline-offset: 1px;
+}
+
+.search__clear[hidden] {
+  display: none;
+}
+
+.search__clear svg {
+  display: block;
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.search__input.search__input--has-clear,
+.search:has(.search__clear:not([hidden])) .search__input {
+  padding-inline-end: 2.15rem;
+}
+
+.panel__filters .search:has(.search__clear:not([hidden])) .search__input {
+  padding-inline-end: 2.35rem;
+}
+
+.search:has(.search__clear:not([hidden])) .search__fake-placeholder {
+  max-width: calc(100% - 3.25rem);
+}
+
 .filter {
   width: auto;
   min-width: 150px;

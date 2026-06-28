@@ -78,17 +78,32 @@ WatchProgress? exportProgressObject(dynamic raw) {
   if (parsed.seasonTotals != null && parsed.seasonTotals!.isNotEmpty) {
     return parsed;
   }
+  if (parsed.moviePosition != null && parsed.moviePosition! > 0) return parsed;
   if (parsed.completed == true) return parsed;
   return null;
 }
 
 /// Three-state progress for filters, stats, and cards (no episode-count lookup).
-ItemProgressState itemProgressState(WatchEntry? entry) {
+/// Pass [contentType] `"movies"` to use movie position semantics.
+ItemProgressState itemProgressState(
+  WatchEntry? entry, {
+  String? contentType,
+}) {
   if (entry == null) return ItemProgressState.unwatched;
+  if (contentType == 'movies') {
+    return switch (movieWatchState(entry)) {
+      WatchState.inprogress => ItemProgressState.inProgress,
+      WatchState.watched => ItemProgressState.watched,
+      WatchState.unwatched => ItemProgressState.unwatched,
+    };
+  }
   if (entry.isLegacyComplete) return ItemProgressState.watched;
   final prog = entry.progress;
   if (prog == null) return ItemProgressState.unwatched;
   if (prog.completed == true) return ItemProgressState.watched;
+  if (prog.moviePosition != null && prog.moviePosition! > 0) {
+    return ItemProgressState.inProgress;
+  }
   final hasRegularEpisode =
       prog.episodes.any((k) => !k.startsWith('0:'));
   if (hasRegularEpisode) return ItemProgressState.inProgress;
@@ -97,9 +112,70 @@ ItemProgressState itemProgressState(WatchEntry? entry) {
 
 ItemProgressState itemProgressStateForId(
   String id,
-  Map<String, WatchEntry> watched,
-) =>
-    itemProgressState(watched[id]);
+  Map<String, WatchEntry> watched, {
+  String? contentType,
+}) =>
+    itemProgressState(watched[id], contentType: contentType);
+
+double getMoviePosition(WatchEntry? entry) {
+  final pos = entry?.progress?.moviePosition;
+  if (pos == null || !pos.isFinite || pos <= 0) return 0;
+  return pos.clamp(0.0, 1.0);
+}
+
+WatchEntry? setMoviePosition(WatchEntry? entry, double fraction) {
+  final pos = fraction.clamp(0.0, 1.0);
+  if (pos <= 0) {
+    if (entry == null) return null;
+    final base = entry.progress;
+    if (base == null) return entry;
+    final next = WatchProgress(
+      version: WatchProgress.currentVersion,
+      episodes: base.episodes,
+      completed: false,
+      seasonTotals: base.seasonTotals,
+      episodeRatings: base.episodeRatings,
+    );
+    if (next.episodes.isEmpty &&
+        (next.episodeRatings == null || next.episodeRatings!.isEmpty) &&
+        (next.seasonTotals == null || next.seasonTotals!.isEmpty)) {
+      if (entry.rating == null && (entry.note == null || entry.note!.isEmpty)) {
+        return null;
+      }
+      return WatchEntry(rating: entry.rating, note: entry.note);
+    }
+    return WatchEntry(
+      rating: entry.rating,
+      note: entry.note,
+      progress: next,
+    );
+  }
+
+  final base = entry?.progress ?? WatchProgress.empty;
+  final rounded = (pos * 1000).round() / 1000;
+  return WatchEntry(
+    rating: entry?.rating,
+    note: entry?.note,
+    progress: WatchProgress(
+      version: WatchProgress.currentVersion,
+      episodes: List<String>.from(base.episodes),
+      completed: base.completed,
+      seasonTotals: base.seasonTotals,
+      episodeRatings: base.episodeRatings,
+      moviePosition: rounded,
+    ),
+  );
+}
+
+/// Movie watch state from stored position (0–1).
+WatchState movieWatchState(WatchEntry? entry, {double completeThreshold = 0.97}) {
+  if (entry == null) return WatchState.unwatched;
+  if (entry.isLegacyComplete) return WatchState.watched;
+  final pos = getMoviePosition(entry);
+  if (pos <= 0) return WatchState.unwatched;
+  if (pos >= completeThreshold) return WatchState.watched;
+  return WatchState.inprogress;
+}
 
 class WatchStateResult {
   const WatchStateResult({
@@ -389,6 +465,7 @@ WatchProgress _rebuildProgress(
     completed: completed ?? base?.completed,
     seasonTotals: base?.seasonTotals,
     episodeRatings: base?.episodeRatings,
+    moviePosition: base?.moviePosition,
   );
 }
 
@@ -423,6 +500,7 @@ WatchEntry? setEpisodeRating(
       completed: base.completed,
       seasonTotals: base.seasonTotals,
       episodeRatings: ratings,
+      moviePosition: base.moviePosition,
     ),
   );
 }
@@ -444,6 +522,7 @@ WatchEntry? clearEpisodeRating(WatchEntry? entry, int season, int episode) {
       completed: base.completed,
       seasonTotals: base.seasonTotals,
       episodeRatings: ratings.isEmpty ? null : ratings,
+      moviePosition: base.moviePosition,
     ),
   );
 }

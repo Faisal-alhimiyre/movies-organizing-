@@ -313,8 +313,6 @@ void main() {
     });
   });
 
-  // ─── itemProgressState ───────────────────────────────────────────────────────
-
   group('itemProgressState', () {
     test('null entry → unwatched', () {
       expect(itemProgressState(null), ItemProgressState.unwatched);
@@ -353,6 +351,60 @@ void main() {
         progress: WatchProgress(version: 1, episodes: ['0:1']),
       );
       expect(itemProgressState(entry), ItemProgressState.unwatched);
+    });
+  });
+
+  group('moviePosition', () {
+    test('getMoviePosition returns 0 when absent', () {
+      expect(getMoviePosition(null), 0);
+      expect(getMoviePosition(const WatchEntry()), 0);
+    });
+
+    test('setMoviePosition stores rounded fraction', () {
+      final entry = setMoviePosition(null, 0.4567);
+      expect(getMoviePosition(entry), 0.457);
+    });
+
+    test('setMoviePosition at 0 clears progress', () {
+      final entry = setMoviePosition(
+        WatchEntry(
+          progress: WatchProgress(
+            version: 1,
+            episodes: const [],
+            moviePosition: 0.5,
+          ),
+        ),
+        0,
+      );
+      expect(entry?.progress, isNull);
+    });
+
+    test('movieWatchState watched at >= 97%', () {
+      final entry = setMoviePosition(null, 0.97);
+      expect(movieWatchState(entry), WatchState.watched);
+    });
+
+    test('movieWatchState inprogress between 0 and 97%', () {
+      final entry = setMoviePosition(null, 0.5);
+      expect(movieWatchState(entry), WatchState.inprogress);
+    });
+
+    test('itemProgressState uses movie semantics for movies', () {
+      final entry = setMoviePosition(null, 0.5);
+      expect(
+        itemProgressState(entry, contentType: 'movies'),
+        ItemProgressState.inProgress,
+      );
+    });
+
+    test('WatchProgress round-trips moviePosition', () {
+      final progress = WatchProgress.fromJson({
+        'version': 1,
+        'episodes': [],
+        'moviePosition': 0.333,
+      });
+      expect(progress.moviePosition, 0.333);
+      expect(progress.toJson()['moviePosition'], 0.333);
     });
   });
 

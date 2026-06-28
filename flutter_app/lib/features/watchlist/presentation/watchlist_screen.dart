@@ -557,6 +557,8 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
     final listName = auth.listLabel(session?.listId, session?.accountId);
     final watchlistAsync = ref.watch(watchlistControllerProvider);
     final typeFilter = ref.watch(watchlistTypeFilterProvider);
+    final filters = ref.watch(watchlistFilterProvider);
+    final filterNotifier = ref.read(watchlistFilterProvider.notifier);
     final showArrival = _resolvedShareId != null ||
         _arrivalLoading ||
         _arrivalError != null ||
@@ -576,6 +578,8 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
           total: total,
           watchedCount: watchedCount,
           inProgressCount: inProgressCount,
+          watchedFilter: filters.watchedFilter,
+          onWatchedFilterChanged: filterNotifier.setWatchedFilter,
           syncStatus: syncStatus,
           cloudConfigured: cloud,
           sharePublishing: _sharePublishing,
@@ -719,8 +723,6 @@ class _WatchlistScreenState extends ConsumerState<WatchlistScreen> {
     ItemDetailAction action,
   ) async {
     switch (action) {
-      case ItemDetailAction.openLink:
-        await openItemLink(item.link);
       case ItemDetailAction.rate:
         await _openRatingSheet(context, ref, l10n, item, snapshot);
       case ItemDetailAction.edit:

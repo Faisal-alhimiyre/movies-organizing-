@@ -541,6 +541,10 @@
   margin-top: 0.9rem;
 }
 
+.tds-episodes-section:not(.tds-episodes-section--ready) .tds-episode-list {
+  display: none;
+}
+
 .tds-episodes-header {
   padding: 0 1.25rem 0.25rem;
   display: flex;
@@ -782,8 +786,34 @@
 .tds-ep-header {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 0.4rem;
   margin-bottom: 0.2rem;
+}
+
+.tds-ep-filler-badge {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 0.2rem 0.4rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tds-ep-filler-badge--filler {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
+.tds-ep-filler-badge--mixed {
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.35);
 }
 
 .tds-ep-num {
@@ -1313,4 +1343,44 @@ html[data-theme="pink"] .tds-season-mark-btn--complete { border-color: #fff; col
   font-size: 0.76rem;
   font-weight: 600;
   color: var(--accent, #7c6aff);
+}
+
+/* ── Scroll back to season controls ─────────────────────────────────────── */
+
+.tds-scroll-to-seasons {
+  position: fixed;
+  inset-inline-end: max(1rem, env(safe-area-inset-right, 0px));
+  top: max(3.75rem, calc(env(safe-area-inset-top, 0px) + 3.25rem));
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: 1px solid var(--border-strong, #525252);
+  border-radius: 50%;
+  background: var(--bg-elevated, #121212);
+  color: var(--text, #fafafa);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.tds-scroll-to-seasons:not([hidden]):active {
+  transform: scale(0.94);
+}
+
+.tds-scroll-to-seasons svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tds-scroll-to-seasons {
+    transition: none;
+  }
+  .tds-scroll-to-seasons:not([hidden]):active {
+    transform: none;
+  }
 }

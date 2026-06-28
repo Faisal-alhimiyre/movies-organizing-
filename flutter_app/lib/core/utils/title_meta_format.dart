@@ -238,6 +238,17 @@ int? parsePositiveCount(dynamic raw) {
   return parsed != null && parsed > 0 ? parsed : null;
 }
 
+/// First integer in a runtime string (e.g. `"148 min"` → 148). Mirrors web `parseRuntimeMinutes`.
+int? parseRuntimeMinutes(String? runtime) {
+  final raw = runtime?.trim() ?? '';
+  if (raw.isEmpty) return null;
+  final match = RegExp(r'(\d{1,4})').firstMatch(raw);
+  if (match == null) return null;
+  final minutes = int.tryParse(match.group(1)!);
+  if (minutes == null || minutes <= 0) return null;
+  return minutes;
+}
+
 String formatRuntimeMinutes(int? minutes, {bool arabic = false}) {
   if (minutes == null || minutes <= 0) return '';
   return arabic ? '$minutes دقيقة' : '$minutes min';

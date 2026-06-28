@@ -79,7 +79,7 @@ class _PosterTitleCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final tc = theme.extension<AppTypeColors>();
-    final watchState = _cardWatchState(watched);
+    final watchState = _cardWatchState(watched, item.contentType);
     final isWatched = watched != null;
     final yearLabel = _formatReleaseYear(item.year);
     final cardBg = theme.colorScheme.surface; // #121212
@@ -301,7 +301,7 @@ class _HoverTitleCardState extends ConsumerState<_HoverTitleCard> {
     final theme = Theme.of(context);
     final tc = theme.extension<AppTypeColors>();
     final item = widget.item;
-    final watchState = _cardWatchState(widget.watched);
+    final watchState = _cardWatchState(widget.watched, item.contentType);
     final isWatched = widget.watched != null;
     final isDesktop = AppBreakpoints.isDesktop(context);
     final yearLabel = _formatReleaseYear(item.year);
@@ -1001,6 +1001,7 @@ class _CardMenuButton extends StatelessWidget {
 
     final button = PopupMenuButton<TitleCardAction>(
       padding: const EdgeInsets.all(4),
+      offset: compact ? const Offset(-14, 4) : Offset.zero,
       icon: Icon(Icons.more_vert, color: iconColor, size: compact ? 18 : 22),
       onSelected: onAction,
       itemBuilder: (context) => [
@@ -1062,8 +1063,8 @@ String? _formatReleaseYear(int? year) {
 
 /// Derive the three-state watch state for a card without needing season data.
 /// Mirrors web `itemProgressState` in `app.js`.
-WatchState _cardWatchState(WatchEntry? entry) {
-  return switch (itemProgressState(entry)) {
+WatchState _cardWatchState(WatchEntry? entry, String contentType) {
+  return switch (itemProgressState(entry, contentType: contentType)) {
     ItemProgressState.unwatched => WatchState.unwatched,
     ItemProgressState.inProgress => WatchState.inprogress,
     ItemProgressState.watched => WatchState.watched,

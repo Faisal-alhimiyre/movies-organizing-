@@ -124,6 +124,7 @@
     searchResultFocusIndex: -1,
     searchLoading: false,
     searchPickDetails: null,
+    searchPickResultKey: null,
     searchConfirmSecondary: [],
     searchAddedKeys: new Set(),
     searchAddingKeys: new Set(),
@@ -236,6 +237,7 @@
     loading: document.getElementById("loading"),
     stats: document.getElementById("stats"),
     search: document.getElementById("searchInput"),
+    searchClear: document.getElementById("searchClearBtn"),
     genre: document.getElementById("genreSelect"),
     genreFilter: document.querySelector(".genre-filter"),
     watchedFilterWrap: document.querySelector(".watched-filter"),
@@ -309,6 +311,7 @@
     searchAddPanel: document.getElementById("searchAddPanel"),
     searchAddStep: document.getElementById("searchAddStep"),
     titleSearchInput: document.getElementById("titleSearchInput"),
+    titleSearchClear: document.getElementById("titleSearchClearBtn"),
     titleSearchType: document.getElementById("titleSearchType"),
     titleSearchStatus: document.getElementById("titleSearchStatus"),
     titleSearchResults: document.getElementById("titleSearchResults"),
@@ -2500,6 +2503,7 @@
     state.watchedFilter = "all";
     applyRatingFilter("all");
     if (els.search) els.search.value = "";
+    if (els.searchClear) els.searchClear.hidden = true;
     if (els.watchedFilter) els.watchedFilter.value = "all";
     if (els.ratingFilter) els.ratingFilter.value = "all";
     els.typeTabs.forEach((tab) => {
@@ -4528,11 +4532,13 @@
     state.searchResultFocusIndex = -1;
     state.searchLoading = false;
     state.searchPickDetails = null;
+    state.searchPickResultKey = null;
     state.searchConfirmSecondary = [];
     state.searchAddedKeys = new Set();
     state.searchAddingKeys = new Set();
 
     if (els.titleSearchInput) els.titleSearchInput.value = "";
+    if (els.titleSearchClear) els.titleSearchClear.hidden = true;
     if (els.titleSearchType) {
       const typeFilter =
         state.type === "movies"
@@ -4662,6 +4668,7 @@
 
   function hideSearchConfirmStep() {
     state.searchPickDetails = null;
+    state.searchPickResultKey = null;
     state.searchConfirmSecondary = [];
     if (els.searchAddStep) els.searchAddStep.hidden = false;
     if (els.searchConfirmStep) els.searchConfirmStep.hidden = true;
@@ -4797,6 +4804,11 @@
         };
       }
 
+      const resultKey =
+        pickButton.dataset.resultKey ||
+        searchResult?.resultKey ||
+        `${searchResult?.title || details.title}::${searchResult?.year || details.year || ""}`;
+      state.searchPickResultKey = resultKey;
       setTitleSearchStatus("");
       showSearchConfirmStep(details);
     } finally {
@@ -4886,9 +4898,10 @@
 
     state.searchAddingKeys.delete(resultKey);
 
-    // Fall back to confirm step when data is incomplete
-    if (!item.title || !item.summary || !item.leads.length) {
+    // Fall back to confirm step when title or summary is missing
+    if (!item.title || !item.summary) {
       renderTitleSearchResults();
+      state.searchPickResultKey = resultKey;
       showSearchConfirmStep(details);
       return;
     }
@@ -5018,13 +5031,6 @@
       return;
     }
 
-    if (!item.leads.length) {
-      await window.WatchlistDialog.alert(t("alert.missingActors"), {
-        title: t("alert.missingActorsTitle"),
-      });
-      return;
-    }
-
     const duplicate = findDuplicate(item, null);
     if (duplicate) {
       await window.WatchlistDialog.alert(t("alert.duplicateOnList"), {
@@ -5042,10 +5048,17 @@
       state.items.push(item);
       state.data = itemsToNested(state.items);
       saveData();
-      closeModal();
       updateGenreOptions();
       render();
       queueItemBadgeEnrichment(item.id);
+
+      const resultKey =
+        state.searchPickResultKey ||
+        `${item.title}::${resolvedDetails.year || details.year || ""}`;
+      hideSearchConfirmStep();
+      if (resultKey) state.searchAddedKeys.add(resultKey);
+      renderTitleSearchResults();
+      setTitleSearchStatus(t("search.addedStatus", { title: item.title }));
     } finally {
       addSaveInFlight = false;
       setButtonLoading(els.searchConfirmAdd, false);
@@ -7084,6 +7097,22 @@
     };
   }
 
+  function bindSearchClear(input, clearBtn, onClear) {
+    if (!input || !clearBtn) return;
+    const sync = () => {
+      clearBtn.hidden = input.value.length === 0;
+    };
+    input.addEventListener("input", sync);
+    clearBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      input.value = "";
+      sync();
+      onClear();
+      input.focus();
+    });
+    sync();
+  }
+
   function bindEvents() {
     document.getElementById("app")?.addEventListener("click", async (event) => {
       const target = event.target.closest("[data-action]");
@@ -7128,6 +7157,18 @@
     els.search.addEventListener("input", () => {
       state.search = els.search.value;
       render();
+    });
+
+    bindSearchClear(els.search, els.searchClear, () => {
+      state.search = "";
+      render();
+    });
+
+    bindSearchClear(els.titleSearchInput, els.titleSearchClear, () => {
+      clearTimeout(searchDebounceTimer);
+      state.searchQuery = "";
+      state.searchPage = 1;
+      runTitleSearch();
     });
 
     els.genre.addEventListener("change", () => {

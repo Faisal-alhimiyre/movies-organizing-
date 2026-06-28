@@ -268,6 +268,7 @@ class EpisodeDetail {
   const EpisodeDetail({
     required this.source,
     this.seriesTmdbId,
+    this.seriesTvdbId,
     required this.seasonNumber,
     required this.episodeNumber,
     required this.title,
@@ -278,10 +279,14 @@ class EpisodeDetail {
     this.isAired = true,
     this.episodeRating,
     this.episodeRatingSource,
+    this.isMovie,
+    this.linkedMovieId,
+    this.fillerKind,
   });
 
   final String source;
   final int? seriesTmdbId;
+  final int? seriesTvdbId;
   final int seasonNumber;
   final int episodeNumber;
   final String title;
@@ -307,6 +312,15 @@ class EpisodeDetail {
   /// `"imdb"` or `"tmdb"` when [episodeRating] is set.
   final String? episodeRatingSource;
 
+  /// TVDB marks season-0 feature films.
+  final bool? isMovie;
+
+  /// TVDB linked standalone movie id, when present.
+  final int? linkedMovieId;
+
+  /// AniFiller label (`filler`) when the episode is community-tagged as filler.
+  final String? fillerKind;
+
   /// Stable progress key used by [WatchProgress] (format: `season:episode`).
   String get progressKey => '$seasonNumber:$episodeNumber';
 
@@ -324,7 +338,33 @@ class EpisodeDetail {
         if (episodeRating != null) 'episodeRating': episodeRating,
         if (episodeRatingSource != null)
           'episodeRatingSource': episodeRatingSource,
+        if (isMovie != null) 'isMovie': isMovie,
+        if (linkedMovieId != null) 'linkedMovieId': linkedMovieId,
+        if (seriesTvdbId != null) 'seriesTvdbId': seriesTvdbId,
+        if (fillerKind != null) 'fillerKind': fillerKind,
       };
+
+  EpisodeDetail copyWith({
+    String? fillerKind,
+  }) =>
+      EpisodeDetail(
+        source: source,
+        seriesTmdbId: seriesTmdbId,
+        seriesTvdbId: seriesTvdbId,
+        seasonNumber: seasonNumber,
+        episodeNumber: episodeNumber,
+        title: title,
+        still: still,
+        overview: overview,
+        runtimeMinutes: runtimeMinutes,
+        airDate: airDate,
+        isAired: isAired,
+        episodeRating: episodeRating,
+        episodeRatingSource: episodeRatingSource,
+        isMovie: isMovie,
+        linkedMovieId: linkedMovieId,
+        fillerKind: fillerKind ?? this.fillerKind,
+      );
 
   factory EpisodeDetail.fromJson(Map<String, dynamic> json) => EpisodeDetail(
         source: json['source']?.toString() ?? 'unknown',
@@ -339,6 +379,14 @@ class EpisodeDetail {
         isAired: json['isAired'] != false,
         episodeRating: _parseEpisodeRating(json['episodeRating']),
         episodeRatingSource: json['episodeRatingSource']?.toString(),
+        isMovie: json['isMovie'] == true || json['isMovie'] == 1,
+        linkedMovieId: json['linkedMovieId'] is int
+            ? json['linkedMovieId'] as int
+            : int.tryParse(json['linkedMovieId']?.toString() ?? ''),
+        seriesTvdbId: json['seriesTvdbId'] is int
+            ? json['seriesTvdbId'] as int
+            : int.tryParse(json['seriesTvdbId']?.toString() ?? ''),
+        fillerKind: json['fillerKind']?.toString(),
       );
 }
 
@@ -404,4 +452,66 @@ class SeasonEpisodesResult {
   final String? debugMessage;
 
   bool get isUsable => episodes?.isNotEmpty == true;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Related movies (TV series / anime spin-off films)
+// ─────────────────────────────────────────────────────────────
+
+/// A standalone film related to a series (AniList MOVIE or TVDB S0 film).
+class RelatedMovie {
+  const RelatedMovie({
+    required this.source,
+    required this.title,
+    this.poster = '',
+    this.year = '',
+    this.overview = '',
+    this.runtimeMinutes,
+    this.anilistId,
+    this.score,
+  });
+
+  final String source;
+  final String title;
+  final String poster;
+  final String year;
+  final String overview;
+  final int? runtimeMinutes;
+  final int? anilistId;
+  final double? score;
+
+  Map<String, dynamic> toJson() => {
+        'source': source,
+        'title': title,
+        'poster': poster,
+        'year': year,
+        'overview': overview,
+        if (runtimeMinutes != null) 'runtimeMinutes': runtimeMinutes,
+        if (anilistId != null) 'anilistId': anilistId,
+        if (score != null) 'score': score,
+      };
+
+  factory RelatedMovie.fromJson(Map<String, dynamic> json) => RelatedMovie(
+        source: json['source']?.toString() ?? 'unknown',
+        title: json['title']?.toString() ?? '',
+        poster: json['poster']?.toString() ?? '',
+        year: json['year']?.toString() ?? '',
+        overview: json['overview']?.toString() ?? '',
+        runtimeMinutes: json['runtimeMinutes'] as int?,
+        anilistId: json['anilistId'] as int?,
+        score: (json['score'] as num?)?.toDouble(),
+      );
+}
+
+/// Result of [SeriesMetadataService.fetchRelatedMovies].
+class RelatedMoviesResult {
+  const RelatedMoviesResult({
+    required this.state,
+    this.movies = const [],
+    this.isStale = false,
+  });
+
+  final MetadataResultState state;
+  final List<RelatedMovie> movies;
+  final bool isStale;
 }

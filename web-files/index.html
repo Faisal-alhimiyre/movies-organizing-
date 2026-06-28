@@ -60,7 +60,7 @@
     <link rel="stylesheet" href="css/accessibility.css" />
     <link rel="stylesheet" href="css/rtl.css" />
     <link rel="stylesheet" href="css/title-detail.css" />
-    <link rel="stylesheet" href="css/title-seasons.css" />
+    <link rel="stylesheet" href="css/title-seasons.css?v=20250628d" />
     <script src="js/themes.js"></script>
     <link
       rel="stylesheet"
@@ -294,6 +294,17 @@
               autocomplete="off"
               data-i18n-aria="filter.searchAria"
             />
+            <button
+              type="button"
+              class="search__clear"
+              id="searchClearBtn"
+              hidden
+              data-i18n-aria="filter.searchClear"
+            >
+              <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </button>
             <span
               class="search__fake-placeholder"
               id="searchScopeBadge"
@@ -860,6 +871,17 @@
                     placeholder="e.g. Avengers, Demon Slayer…"
                     autocomplete="off"
                   />
+                  <button
+                    type="button"
+                    class="search__clear"
+                    id="titleSearchClearBtn"
+                    hidden
+                    data-i18n-aria="search.clearQuery"
+                  >
+                    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                      <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    </svg>
+                  </button>
                 </span>
               </label>
               <div class="title-search__filters">
@@ -1196,20 +1218,21 @@
     <script src="js/i18n.js"></script>
     <script src="js/accessibility.js"></script>
     <script src="js/dialog.js"></script>
-    <script src="js/watch-progress.js"></script>
+    <script src="js/watch-progress.js?v=20250628a"></script>
     <script src="js/metadata.js?v=20250627a"></script>
     <script src="js/tvdb-service.js?v=20250625b"></script>
     <script src="js/tmdb-service.js"></script>
-    <script src="js/series-metadata.js?v=20250628f"></script>
+    <script src="js/anifiller.js?v=20250628b"></script>
+    <script src="js/series-metadata.js?v=20250628h"></script>
     <script src="js/auth.js"></script>
     <script src="js/sync.js"></script>
     <script src="js/genres.js"></script>
     <script src="js/bulk-titles.js"></script>
     <script src="js/data.js"></script>
     <script src="js/mobile.js"></script>
-    <script src="js/title-detail.js?v=20250628e"></script>
-    <script src="js/title-seasons.js?v=20250628i"></script>
-    <script src="js/app.js"></script>
+    <script src="js/title-detail.js?v=20250628j"></script>
+    <script src="js/title-seasons.js?v=20250628p"></script>
+    <script src="js/app.js?v=20250628c"></script>
     <script src="js/pwa.js"></script>
   </body>
 </html>

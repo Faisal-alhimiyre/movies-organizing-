@@ -9,6 +9,7 @@ import 'package:our_movie_nights/core/config/app_config.dart';
 import 'package:our_movie_nights/models/series_metadata.dart';
 import 'package:our_movie_nights/models/watchlist_item.dart';
 import 'package:our_movie_nights/repositories/metadata/series_metadata_service.dart';
+import 'package:our_movie_nights/repositories/metadata/series_movie_filter.dart';
 
 // ─────────────────────────────────────────────────────────────
 // Test fixtures / helpers
@@ -1020,6 +1021,59 @@ void main() {
         expect(season.poster, '');
         expect(season.overview, '');
       }
+    });
+  });
+
+  group('TV special movie filtering', () {
+    test('isMovieLikeTvSpecial detects TVDB flags and long runtime', () {
+      const film = EpisodeDetail(
+        source: 'tvdb',
+        seasonNumber: 0,
+        episodeNumber: 1,
+        title: 'Seven Kings Must Die',
+        isMovie: true,
+      );
+      expect(isMovieLikeTvSpecial(film), isTrue);
+
+      const recap = EpisodeDetail(
+        source: 'tvdb',
+        seasonNumber: 0,
+        episodeNumber: 2,
+        title: 'The Story So Far',
+        runtimeMinutes: 90,
+      );
+      expect(isMovieLikeTvSpecial(recap), isFalse);
+
+      const runtimeFilm = EpisodeDetail(
+        source: 'tvdb',
+        seasonNumber: 0,
+        episodeNumber: 3,
+        title: 'Feature Film',
+        runtimeMinutes: 114,
+      );
+      expect(isMovieLikeTvSpecial(runtimeFilm), isTrue);
+    });
+
+    test('filterSpecialsEpisodes removes films', () {
+      final eps = [
+        const EpisodeDetail(
+          source: 'tvdb',
+          seasonNumber: 0,
+          episodeNumber: 1,
+          title: 'Recap Special',
+          runtimeMinutes: 45,
+        ),
+        const EpisodeDetail(
+          source: 'tvdb',
+          seasonNumber: 0,
+          episodeNumber: 2,
+          title: 'Seven Kings Must Die',
+          runtimeMinutes: 114,
+        ),
+      ];
+      final filtered = filterSpecialsEpisodes(eps);
+      expect(filtered, hasLength(1));
+      expect(filtered.first.title, 'Recap Special');
     });
   });
 }
