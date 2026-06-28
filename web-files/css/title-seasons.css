@@ -604,12 +604,12 @@
 .tds-spoiler-toggle__thumb {
   position: absolute;
   top: 0.12rem;
-  left: 0.12rem;
+  inset-inline-start: 0.12rem;
   width: 0.9rem;
   height: 0.9rem;
   border-radius: 50%;
   background: #fff;
-  transition: transform 0.15s;
+  transition: inset-inline-start 0.15s ease;
 }
 
 .tds-spoiler-toggle--on .tds-spoiler-toggle__track {
@@ -617,11 +617,7 @@
 }
 
 .tds-spoiler-toggle--on .tds-spoiler-toggle__thumb {
-  transform: translateX(0.95rem);
-}
-
-html[dir="rtl"] .tds-spoiler-toggle--on .tds-spoiler-toggle__thumb {
-  transform: translateX(-0.95rem);
+  inset-inline-start: calc(100% - 0.9rem - 0.12rem);
 }
 
 .tds-episode-jump {
