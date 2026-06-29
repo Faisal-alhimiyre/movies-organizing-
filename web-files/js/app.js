@@ -610,15 +610,57 @@
     const revisionStale =
       expectedRevision != null && itemMutationRevision.get(itemId) !== expectedRevision;
 
-    // Always refresh the list card + header stats — even when a newer revision superseded this one.
-    syncListCard(itemId);
+    refreshItemWatchUi(itemId);
 
     if (revisionStale) return;
+  }
+
+  /** Derive unwatched | inProgress | watched from a watch entry object. */
+  function deriveItemProgressState(id, rawEntry) {
+    if (!rawEntry) return "unwatched";
+    const entry = normalizeWatchEntry(rawEntry);
+    if (!entry) return "unwatched";
+
+    const item = state.items.find((i) => i.id === id);
+    const P = window.WatchlistProgress;
+    if (item?.contentType === "movies" && P?.movieWatchState) {
+      const movieState = P.movieWatchState(entry);
+      if (movieState === "inprogress") return "inProgress";
+      if (movieState === "watched") return "watched";
+      return "unwatched";
+    }
+
+    if (!P || P.isLegacyComplete(entry)) return "watched";
+    const prog = P.getProgress(entry);
+    if (!prog || !Array.isArray(prog.episodes)) return "unwatched";
+    if (prog.completed === true) return "watched";
+    const regularEps = prog.episodes.filter((k) => !k.startsWith("0:"));
+    if (regularEps.length > 0) return "inProgress";
+    return "unwatched";
+  }
+
+  function itemProgressStateFromEntry(id, entry) {
+    if (entry == null) return "unwatched";
+    return deriveItemProgressState(id, entry);
+  }
+
+  /**
+   * Refresh list card + open detail watch UI after local state mutation.
+   * Order: derive state from entry → detail UI → outside card/stats/sort.
+   */
+  function refreshItemWatchUi(itemId, { seasonNum = null } = {}) {
+    if (!itemId) return;
+
+    const liveEntry = state.watched[itemId] ?? null;
+    const sn = seasonNum ?? window.WatchlistSeasons?.getSelectedSeason?.() ?? null;
 
     if (window.WatchlistTitleDetail?.activeItemId?.() === itemId) {
-      window.WatchlistTitleDetail.refresh?.();
-      window.WatchlistSeasons?.onTitleWatchedChanged?.();
+      window.WatchlistTitleDetail?.refreshWatchBadge?.(itemId, liveEntry);
+      window.WatchlistTitleDetail?.refreshMenuItems?.();
+      window.WatchlistSeasons?.refreshWatchUiAfterSave?.(sn, liveEntry);
     }
+
+    syncListCard(itemId);
   }
 
   function persistWatchedLocal() {
@@ -668,13 +710,13 @@
     );
   }
 
-  function commitWatchChange(itemId, mutateFn) {
+  function commitWatchChange(itemId, mutateFn, uiOptions = {}) {
     if (!itemId || typeof mutateFn !== "function") return;
     const watchedSnapshot = JSON.parse(JSON.stringify(state.watched));
     const revision = bumpItemMutation(itemId);
     mutateFn();
     persistWatchedLocal();
-    notifyItemStateChanged(itemId, revision);
+    refreshItemWatchUi(itemId, uiOptions);
     queueCloudSyncForItem(itemId, revision, watchedSnapshot);
   }
 
@@ -2175,26 +2217,7 @@
   function itemProgressState(id) {
     const raw = state.watched[id];
     if (!raw) return "unwatched";
-    const entry = normalizeWatchEntry(raw);
-    if (!entry) return "unwatched";
-
-    const item = state.items.find((i) => i.id === id);
-    const P = window.WatchlistProgress;
-    if (item?.contentType === "movies" && P?.movieWatchState) {
-      const movieState = P.movieWatchState(entry);
-      if (movieState === "inprogress") return "inProgress";
-      if (movieState === "watched") return "watched";
-      return "unwatched";
-    }
-
-    if (!P || P.isLegacyComplete(entry)) return "watched";
-    const prog = P.getProgress(entry);
-    if (!prog || !Array.isArray(prog.episodes)) return "unwatched";
-    if (prog.completed === true) return "watched";
-    // Exclude specials (season 0) from the in-progress calculation
-    const regularEps = prog.episodes.filter((k) => !k.startsWith("0:"));
-    if (regularEps.length > 0) return "inProgress";
-    return "unwatched";
+    return deriveItemProgressState(id, raw);
   }
 
   /** Sort key: unwatched (0) → in progress (1) → watched (2). */
@@ -8446,19 +8469,24 @@
     isWatched: isItemWatched,
     getWatchEntry,
     progressState: itemProgressState,
+    progressStateFromEntry: itemProgressStateFromEntry,
     parseRuntimeMinutes,
     closeAllMenus: closeAllCardMenus,
     deleteAndRender,
     // Exposed for title-seasons.js — save watch entry locally without full render
-    saveWatchedEntry: (id, entry) => {
+    saveWatchedEntry: (id, entry, options = {}) => {
       if (!id) return;
-      commitWatchChange(id, () => {
-        if (entry == null || isWatchEntryEmpty(entry)) {
-          delete state.watched[id];
-        } else {
-          state.watched[id] = entry;
-        }
-      });
+      commitWatchChange(
+        id,
+        () => {
+          if (entry == null || isWatchEntryEmpty(entry)) {
+            delete state.watched[id];
+          } else {
+            state.watched[id] = entry;
+          }
+        },
+        { seasonNum: options.seasonNum ?? null }
+      );
     },
     // Re-render a single card in-place (no full list rebuild)
     updateCardInPlace: (id) => {

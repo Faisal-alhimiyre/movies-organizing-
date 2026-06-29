@@ -725,22 +725,29 @@
   }
 
   // ─── My Rating block ──────────────────────────────────────────────────────
-  function myRatingMarkup(itemId) {
+  function myRatingMarkup(itemId, { entry } = {}) {
     const item = findItem(itemId);
-    const state = titleProgressState(itemId);
-    const entry = getWatchEntry(itemId);
-    const rated = entry && hasWatchRating(entry);
-    const hasNote = Boolean(String(entry?.note || "").trim());
+    const progress =
+      entry === undefined
+        ? titleProgressState(itemId)
+        : entry === null
+          ? "unwatched"
+          : window.WatchlistApp?.progressStateFromEntry
+            ? window.WatchlistApp.progressStateFromEntry(itemId, entry)
+            : titleProgressState(itemId);
+    const watchEntry = entry !== undefined ? entry : getWatchEntry(itemId);
+    const rated = watchEntry && hasWatchRating(watchEntry);
+    const hasNote = Boolean(String(watchEntry?.note || "").trim());
     const noteSnippet = hasNote
-      ? `<p class="td-my-rating__note">${esc(entry.note)}</p>` : "";
+      ? `<p class="td-my-rating__note">${esc(watchEntry.note)}</p>` : "";
     const movieBar =
-      isMovie(item) && state !== "watched"
+      isMovie(item) && progress !== "watched"
         ? movieProgressMarkup(item, itemId)
         : "";
     const movieClass = movieBar ? " td-my-rating--movie" : "";
 
     // Unwatched: tap to mark watched
-    if (state === "unwatched") {
+    if (progress === "unwatched") {
       return `<div class="td-my-rating td-my-rating--chip${movieClass}">
         <div class="td-my-rating__chip-row">
           <button type="button"
@@ -756,7 +763,7 @@
     }
 
     // In progress: tap to mark fully watched
-    if (state === "inProgress") {
+    if (progress === "inProgress") {
       return `<div class="td-my-rating td-my-rating--chip td-my-rating--in-progress${movieClass}">
         <div class="td-my-rating__toolbar">
           <button type="button"
@@ -788,7 +795,7 @@
       </div>`;
     }
 
-    const ratingDisplay = formatRating(entry.rating);
+    const ratingDisplay = formatRating(watchEntry.rating);
     const label = `<span class="td-my-rating__label">${esc(t("detail.myRating"))}</span>`;
     return `<div class="td-my-rating td-my-rating--rated">
       ${label}
@@ -1106,42 +1113,17 @@
   }
 
   /** Re-render the detail status badge for a specific item id. */
-  function refreshWatchBadge(itemId) {
+  function refreshWatchBadge(itemId, entry) {
     const id = itemId || _activeItemId;
-    if (!_scroll || !id) {
-      if (window.WATCHLIST_DEBUG_WATCH_UI !== false) {
-        console.info("[watch-ui]", "refreshWatchBadge-skip", {
-          itemId: id,
-          hasScroll: Boolean(_scroll),
-        });
-      }
-      return;
-    }
+    if (!_scroll || !id) return;
     const el = _scroll.querySelector(".td-my-rating");
-    if (!el) {
-      if (window.WATCHLIST_DEBUG_WATCH_UI !== false) {
-        console.info("[watch-ui]", "refreshWatchBadge-skip", {
-          itemId: id,
-          badgeFound: false,
-        });
-      }
-      return;
-    }
-    const oldState = titleProgressState(id);
+    if (!el) return;
     const tmp = document.createElement("div");
-    tmp.innerHTML = myRatingMarkup(id);
+    tmp.innerHTML =
+      entry !== undefined ? myRatingMarkup(id, { entry }) : myRatingMarkup(id);
     const newEl = tmp.firstElementChild;
     if (newEl) el.replaceWith(newEl);
     initMovieProgressSliders(_scroll);
-    const newState = titleProgressState(id);
-    if (window.WATCHLIST_DEBUG_WATCH_UI !== false) {
-      console.info("[watch-ui]", "refreshWatchBadge", {
-        itemId: id,
-        badgeFound: true,
-        oldState,
-        newState,
-      });
-    }
   }
 
   /** Re-render only the action buttons (now: refresh menu items). */
@@ -1268,18 +1250,18 @@
 
     window.WatchlistSeasons?.attach?.(slot, item, {
       getWatchEntry: () => getWatchEntry(_activeItemId),
-      saveWatchedEntry: (entry) => window.WatchlistApp?.saveWatchedEntry?.(_activeItemId, entry),
+      saveWatchedEntry: (entry, options) =>
+        window.WatchlistApp?.saveWatchedEntry?.(_activeItemId, entry, options),
       updateCardInPlace: () => window.WatchlistApp?.updateCardInPlace?.(_activeItemId),
       // Called by title-seasons when a watch state changes — refresh My Rating + menu.
-      updateHeaderWatchState: () => {
-        refreshWatchBadge(_activeItemId);
+      updateHeaderWatchState: (entry) => {
+        refreshWatchBadge(_activeItemId, entry ?? null);
         const fresh = findItem(_activeItemId);
         if (fresh) updateDetailActions(fresh);
       },
       updateDetailActions: () => {
         const fresh = findItem(_activeItemId);
         if (fresh) updateDetailActions(fresh);
-        refreshWatchBadge(_activeItemId);
       },
       onSeasonSelected: (payload) => updateHeaderSeasonPresentation(payload),
       resetHeaderSeasonPresentation: () => resetHeaderSeasonPresentation(),
@@ -1565,9 +1547,6 @@
         event?.preventDefault?.();
         _ignoreMutations = true;
         await window.WatchlistApp?.quickToggleWatched?.(itemId);
-        updateMyRating();
-        refreshMenuItems();
-        window.WatchlistSeasons?.onTitleWatchedChanged?.();
         Promise.resolve().then(() => { _ignoreMutations = false; });
         break;
       }
@@ -1580,9 +1559,6 @@
         } else {
           await window.WatchlistApp?.markItemWatched?.(itemId, { openRating: true });
         }
-        updateMyRating();
-        refreshMenuItems();
-        window.WatchlistSeasons?.onTitleWatchedChanged?.();
         Promise.resolve().then(() => { _ignoreMutations = false; });
         break;
       }
@@ -1790,6 +1766,7 @@
     // Targeted update hooks (used by WatchlistSeasons)
     updateMyRating,
     refreshWatchBadge,
+    refreshMenuItems,
     updateDetailActions: (item) => updateDetailActions(item || findItem(_activeItemId)),
   };
 })();

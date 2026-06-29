@@ -146,7 +146,7 @@
   }
 
   function watchUiDebugEnabled() {
-    return window.WATCHLIST_DEBUG_WATCH_UI !== false;
+    return window.WATCHLIST_DEBUG_WATCH_UI === true;
   }
 
   function logWatchUi(step, data) {
@@ -166,9 +166,7 @@
       seasonNum: sn,
       episodes: annotated?.progress?.episodes?.length ?? 0,
     });
-    // Optimistic detail refresh uses annotated entry directly — do not wait for notify/cloud.
-    refreshWatchUiAfterSave(sn, annotated);
-    _callbacks?.saveWatchedEntry?.(annotated);
+    _callbacks?.saveWatchedEntry?.(annotated, { seasonNum: sn });
     return annotated;
   }
 
@@ -544,10 +542,11 @@
 
     const headerFn = _callbacks?.updateHeaderWatchState;
     logWatchUi("updateHeaderWatchState", { willRun: typeof headerFn === "function", itemId });
-    if (typeof headerFn === "function") headerFn();
+    if (typeof headerFn === "function") headerFn(entry);
 
     _callbacks?.updateDetailActions?.();
-    window.WatchlistApp?.updateStats?.();
+
+    refreshAllEpisodeRows(entry);
 
     logWatchUi("refreshWatchUiAfterSave-done", { episodeUpdates, seasonCardUpdates });
   }
@@ -2636,11 +2635,11 @@
     return updateEpisodeRowStateFromEntry(entry, seasonNum, epNum, ep);
   }
 
-  function refreshAllEpisodeRows() {
+  function refreshAllEpisodeRows(entry = null) {
     if (!_episodesResult?.episodes || !_slot) return;
-    const entry = getEntry();
+    const watchEntry = entry ?? getEntry();
     (_episodesResult.episodes || []).forEach((ep) => {
-      updateEpisodeRowStateFromEntry(entry, ep.seasonNumber, ep.episodeNumber, ep);
+      updateEpisodeRowStateFromEntry(watchEntry, ep.seasonNumber, ep.episodeNumber, ep);
     });
   }
 
@@ -2783,8 +2782,8 @@
 
   // ─── Callback: title-level watched changed (from detail actions bar) ──────
 
-  function onTitleWatchedChanged() {
-    refreshWatchUiAfterSave(_selectedSeason);
+  function onTitleWatchedChanged(entry = null) {
+    refreshWatchUiAfterSave(_selectedSeason, entry);
   }
 
   // ─── Callback: external refresh (edit/move — detail sections were patched) ─
@@ -3061,6 +3060,7 @@
     onLangChange,
     onTitleWatchedChanged,
     onExternalRefresh,
+    refreshWatchUiAfterSave,
     markSeason: handleMarkSeason,
     getSelectedSeason: () => _selectedSeason,
   };
