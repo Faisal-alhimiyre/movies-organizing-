@@ -122,15 +122,53 @@
     return _callbacks?.getWatchEntry?.() ?? null;
   }
 
+  /** Re-bind cached DOM refs when the live detail sheet node was replaced. */
+  function ensureSeasonsDom() {
+    const liveSlot = document.getElementById("tdSeasonsSlot");
+    if (liveSlot && liveSlot !== _slot) {
+      _slot = liveSlot;
+      _carouselEl = _slot.querySelector(".tds-seasons-section .tds-carousel")
+        || _slot.querySelector(".tds-carousel");
+    } else if (_slot && !document.contains(_slot) && liveSlot) {
+      _slot = liveSlot;
+      _carouselEl = _slot.querySelector(".tds-seasons-section .tds-carousel")
+        || _slot.querySelector(".tds-carousel");
+    } else if (_slot && (!_carouselEl || !document.contains(_carouselEl))) {
+      _carouselEl = _slot.querySelector(".tds-seasons-section .tds-carousel")
+        || _slot.querySelector(".tds-carousel");
+    }
+    return _slot;
+  }
+
+  function seasonsCarouselEl() {
+    ensureSeasonsDom();
+    return _slot?.querySelector(".tds-seasons-section .tds-carousel") || _carouselEl;
+  }
+
+  function watchUiDebugEnabled() {
+    return window.WATCHLIST_DEBUG_WATCH_UI !== false;
+  }
+
+  function logWatchUi(step, data) {
+    if (!watchUiDebugEnabled()) return;
+    console.info("[watch-ui]", step, data);
+  }
+
   function saveEntry(newEntry, seasonNum) {
     let entry = newEntry;
     if (_episodesResult?.episodes?.length && _episodesResult?.seasonNum != null) {
       entry = rememberSeasonTotals(entry, _episodesResult.seasonNum, _episodesResult.episodes);
     }
     const annotated = annotateCompletion(entry);
-    _callbacks?.saveWatchedEntry?.(annotated);
     const sn = seasonNum ?? _selectedSeason ?? _episodesResult?.seasonNum ?? null;
+    logWatchUi("saveEntry", {
+      itemId: _item?.id ?? null,
+      seasonNum: sn,
+      episodes: annotated?.progress?.episodes?.length ?? 0,
+    });
+    // Optimistic detail refresh uses annotated entry directly — do not wait for notify/cloud.
     refreshWatchUiAfterSave(sn, annotated);
+    _callbacks?.saveWatchedEntry?.(annotated);
     return annotated;
   }
 
@@ -451,28 +489,67 @@
   }
 
   function refreshWatchUiAfterSave(seasonNum, savedEntry) {
+    const itemId = _item?.id ?? window.WatchlistTitleDetail?.activeItemId?.() ?? null;
     const entry = savedEntry ?? getEntry();
     const sn = seasonNum ?? _selectedSeason ?? _episodesResult?.seasonNum ?? null;
+    const slot = ensureSeasonsDom();
 
-    if (sn != null && _episodesResult?.seasonNum === sn && _episodesResult?.episodes) {
+    logWatchUi("refreshWatchUiAfterSave", {
+      itemId,
+      seasonNum: sn,
+      slotConnected: Boolean(slot && document.contains(slot)),
+      hasCallbacks: Boolean(_callbacks),
+      savedEpisodes: entry?.progress?.episodes?.length ?? 0,
+      getEntryEpisodes: getEntry()?.progress?.episodes?.length ?? 0,
+    });
+
+    if (!slot) {
+      logWatchUi("abort", { reason: "no-slot" });
+      return;
+    }
+
+    let episodeUpdates = 0;
+    if (sn != null && Number(_episodesResult?.seasonNum) === Number(sn) && _episodesResult?.episodes) {
       (_episodesResult.episodes || []).forEach((ep) => {
-        updateEpisodeRowStateFromEntry(entry, ep.seasonNumber, ep.episodeNumber, ep);
+        const watched = P()?.isEpisodeWatched(entry, ep.seasonNumber, ep.episodeNumber) ?? false;
+        const row = updateEpisodeRowStateFromEntry(entry, ep.seasonNumber, ep.episodeNumber, ep);
+        if (row) episodeUpdates += 1;
+        logWatchUi("updateEpisodeRowStateFromEntry", {
+          key: `${ep.seasonNumber}:${ep.episodeNumber}`,
+          watched,
+          rowFound: Boolean(row),
+        });
+      });
+    } else {
+      logWatchUi("skip-episodes", {
+        sn,
+        episodesSeason: _episodesResult?.seasonNum ?? null,
+        episodeCount: _episodesResult?.episodes?.length ?? 0,
       });
     }
 
-    (_seriesResult?.seasons || []).forEach((s) => refreshSeasonCard(s.seasonNumber, entry));
+    let seasonCardUpdates = 0;
+    (_seriesResult?.seasons || []).forEach((s) => {
+      const updated = refreshSeasonCard(s.seasonNumber, entry);
+      if (updated) seasonCardUpdates += 1;
+    });
     renderSpecialsCarousel();
 
     const seasonsToUpdate = new Set([sn, _selectedSeason].filter((n) => n != null));
-    seasonsToUpdate.forEach((n) => updateSeasonActions(n));
+    seasonsToUpdate.forEach((n) => updateSeasonActions(n, entry));
 
     if (_selectedSeason != null) {
-      notifySeasonPresentation(_selectedSeason, { persistPoster: false });
+      notifySeasonPresentation(_selectedSeason, { persistPoster: false, entry });
     }
 
-    _callbacks?.updateHeaderWatchState?.();
+    const headerFn = _callbacks?.updateHeaderWatchState;
+    logWatchUi("updateHeaderWatchState", { willRun: typeof headerFn === "function", itemId });
+    if (typeof headerFn === "function") headerFn();
+
     _callbacks?.updateDetailActions?.();
     window.WatchlistApp?.updateStats?.();
+
+    logWatchUi("refreshWatchUiAfterSave-done", { episodeUpdates, seasonCardUpdates });
   }
 
   function refreshEpisodeWatchUi(seasonNum) {
@@ -1716,10 +1793,10 @@
 
   // ─── Header season summary (via title-detail callback) ───────────────────
 
-  function buildSeasonPresentation(season) {
-    const entry = getEntry();
-    const ws = seasonWatchState(entry, season);
-    const prog = seasonProgressFromEntry(entry, season);
+  function buildSeasonPresentation(season, entry = null) {
+    const watchEntry = entry ?? getEntry();
+    const ws = seasonWatchState(watchEntry, season);
+    const prog = seasonProgressFromEntry(watchEntry, season);
     const name = seasonDisplayName(season);
     const year = season.airDate ? season.airDate.slice(0, 4) : "";
     return {
@@ -1755,49 +1832,62 @@
     }
   }
 
-  function notifySeasonPresentation(seasonNum, { progressOnly = false, persistPoster = true } = {}) {
+  function notifySeasonPresentation(seasonNum, { progressOnly = false, persistPoster = true, entry = null } = {}) {
     const season = getSeasonByNum(seasonNum);
     if (!season) return;
 
     if (seasonNum === 0) {
       if (!progressOnly) renderSpecialsCarousel();
-      updateSeasonActions(seasonNum);
+      updateSeasonActions(seasonNum, entry);
       return;
     }
 
     if (!progressOnly) {
-      _callbacks?.onSeasonSelected?.(buildSeasonPresentation(season));
+      _callbacks?.onSeasonSelected?.(buildSeasonPresentation(season, entry));
       if (persistPoster) {
         queueMicrotask(() => persistSeasonPoster(season));
       }
     }
-    updateSeasonActions(seasonNum);
+    updateSeasonActions(seasonNum, entry);
   }
 
-  function updateSeasonActions(seasonNum) {
+  function updateSeasonActions(seasonNum, entry = null) {
     const isSpecials = seasonNum === 0;
     const actionsEl = getP(isSpecials ? "specials-actions" : "season-actions");
     const otherEl = getP(isSpecials ? "season-actions" : "specials-actions");
     if (otherEl) otherEl.hidden = true;
 
-    if (!actionsEl) return;
+    if (!actionsEl) {
+      logWatchUi("updateSeasonActions", { seasonNum, actionsFound: false });
+      return;
+    }
     const season = getSeasonByNum(seasonNum);
     if (!season) {
       actionsEl.hidden = true;
       return;
     }
 
-    const entry = getEntry();
-    const ws = seasonWatchState(entry, season);
+    const watchEntry = entry ?? getEntry();
+    const ws = seasonWatchState(watchEntry, season);
 
     const avgPart = isSpecials ? "specials-avg" : "season-avg";
     const avgEl = actionsEl.querySelector(`[data-tds-part='${avgPart}']`);
     const markBtn = actionsEl.querySelector("[data-tds-action='mark-season']");
+    const oldMarkText = markBtn?.textContent ?? "";
+    const newMarkText = seasonMarkLabel(ws);
     if (markBtn) {
-      markBtn.textContent = seasonMarkLabel(ws);
+      markBtn.textContent = newMarkText;
       markBtn.dataset.tdsSeason = String(seasonNum);
       markBtn.classList.toggle("tds-season-mark-btn--complete", ws === "watched");
     }
+    logWatchUi("updateSeasonActions", {
+      seasonNum,
+      actionsFound: true,
+      ws,
+      markBtnFound: Boolean(markBtn),
+      oldMarkText,
+      newMarkText,
+    });
     if (avgEl) {
       const seasonEpisodes = (_episodesResult?.seasonNum === seasonNum && Array.isArray(_episodesResult?.episodes))
         ? _episodesResult.episodes
@@ -1957,6 +2047,7 @@
   }
 
   function findEpisodeRowEl(seasonNum, epNum) {
+    ensureSeasonsDom();
     const epKey = `${seasonNum}:${epNum}`;
     return _slot?.querySelector(
       `.tds-episode[data-tds-episode="${CSS.escape(epKey)}"]`
@@ -2478,10 +2569,16 @@
   // ─── Targeted update: individual season card ──────────────────────────────
 
   function refreshSeasonCard(seasonNum, entry = null) {
-    const rootEl = seasonNum === 0 ? getP("specials-carousel") : _carouselEl;
-    if (!rootEl) return;
+    const rootEl = seasonNum === 0 ? getP("specials-carousel") : seasonsCarouselEl();
+    if (!rootEl) {
+      logWatchUi("refreshSeasonCard", { seasonNum, rootFound: false });
+      return false;
+    }
     const card = rootEl.querySelector(`[data-tds-season="${seasonNum}"]`);
-    if (!card) return;
+    if (!card) {
+      logWatchUi("refreshSeasonCard", { seasonNum, rootFound: true, cardFound: false });
+      return false;
+    }
     const seasons = _seriesResult?.seasons || [];
     const season  = seasons.find((s) => s.seasonNumber === seasonNum);
     if (!season) return;
@@ -2519,46 +2616,24 @@
       markBtn.title = markLabel;
       markBtn.innerHTML = checkSvg(ws === "watched");
     }
+    logWatchUi("refreshSeasonCard", {
+      seasonNum,
+      ws,
+      watched: prog.watched,
+      total: prog.total,
+    });
+    return true;
   }
 
   // ─── Targeted update: individual episode row ──────────────────────────────
 
   function updateEpisodeRowState(seasonNum, epNum) {
-    if (!_slot) return;
-    const row = _slot.querySelector(`[data-tds-episode="${seasonNum}:${epNum}"]`);
-    if (!row) return;
-
-    const entry   = getEntry();
-    const watched = P()?.isEpisodeWatched(entry, seasonNum, epNum) ?? false;
-    const ep      = (_episodesResult?.episodes || []).find(
+    if (!_slot) return null;
+    const entry = getEntry();
+    const ep = (_episodesResult?.episodes || []).find(
       (e) => e.seasonNumber === seasonNum && e.episodeNumber === epNum
     );
-    const title = ep?.title || t("seasons.episodeNum", { n: epNum });
-    const yourRating = episodeUserRating(entry, seasonNum, epNum);
-
-    row.classList.toggle("tds-episode--watched", watched);
-
-    const titleEl = row.querySelector(".tds-ep-title");
-    if (titleEl) titleEl.classList.toggle("tds-ep-title--placeholder", !ep?.title);
-
-    const checkBtn = row.querySelector(".tds-ep-check");
-    if (checkBtn) {
-      checkBtn.classList.toggle("tds-ep-check--watched", watched);
-      checkBtn.setAttribute("aria-checked", String(watched));
-      const label = watched
-        ? t("seasons.episodeUnwatch", { title })
-        : t("seasons.episodeWatched", { title });
-      checkBtn.setAttribute("aria-label", label);
-      checkBtn.innerHTML = checkSvg(watched);
-    }
-
-    const ratingsWrap = row.querySelector(".tds-ep-ratings");
-    if (ratingsWrap) {
-      ratingsWrap.innerHTML = yourRating != null
-        ? `<span class="tds-rating-chip tds-rating-chip--user">${esc(t("seasons.episodeRatingYours", { rating: formatRatingValue(yourRating) }))}</span>`
-        : "";
-      ratingsWrap.hidden = yourRating == null;
-    }
+    return updateEpisodeRowStateFromEntry(entry, seasonNum, epNum, ep);
   }
 
   function refreshAllEpisodeRows() {
@@ -2570,9 +2645,11 @@
   }
 
   function updateEpisodeRowStateFromEntry(entry, seasonNum, epNum, ep) {
-    const row = _slot?.querySelector(`[data-tds-episode="${seasonNum}:${epNum}"]`);
-    if (!row) return;
+    ensureSeasonsDom();
+    const row = findEpisodeRowEl(seasonNum, epNum);
+    if (!row) return null;
     const watched = P()?.isEpisodeWatched(entry, seasonNum, epNum) ?? false;
+    const wasWatched = row.classList.contains("tds-episode--watched");
     const title = ep?.title || t("seasons.episodeNum", { n: epNum });
     const yourRating = episodeUserRating(entry, seasonNum, epNum);
     row.classList.toggle("tds-episode--watched", watched);
@@ -2594,6 +2671,16 @@
         : "";
       ratingsWrap.hidden = yourRating == null;
     }
+    row.dataset.tdsWatched = String(watched);
+    if (wasWatched !== watched) {
+      logWatchUi("episode-check-changed", {
+        key: `${seasonNum}:${epNum}`,
+        wasWatched,
+        watched,
+        checkBtnFound: Boolean(checkBtn),
+      });
+    }
+    return row;
   }
 
   // ─── Action: toggle single episode ────────────────────────────────────────

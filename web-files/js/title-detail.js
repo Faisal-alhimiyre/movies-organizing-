@@ -1102,14 +1102,46 @@
 
   /** Re-render only the My Rating block (.td-my-rating). */
   function updateMyRating() {
-    if (!_scroll || !_activeItemId) return;
+    refreshWatchBadge(_activeItemId);
+  }
+
+  /** Re-render the detail status badge for a specific item id. */
+  function refreshWatchBadge(itemId) {
+    const id = itemId || _activeItemId;
+    if (!_scroll || !id) {
+      if (window.WATCHLIST_DEBUG_WATCH_UI !== false) {
+        console.info("[watch-ui]", "refreshWatchBadge-skip", {
+          itemId: id,
+          hasScroll: Boolean(_scroll),
+        });
+      }
+      return;
+    }
     const el = _scroll.querySelector(".td-my-rating");
-    if (!el) return;
+    if (!el) {
+      if (window.WATCHLIST_DEBUG_WATCH_UI !== false) {
+        console.info("[watch-ui]", "refreshWatchBadge-skip", {
+          itemId: id,
+          badgeFound: false,
+        });
+      }
+      return;
+    }
+    const oldState = titleProgressState(id);
     const tmp = document.createElement("div");
-    tmp.innerHTML = myRatingMarkup(_activeItemId);
+    tmp.innerHTML = myRatingMarkup(id);
     const newEl = tmp.firstElementChild;
     if (newEl) el.replaceWith(newEl);
     initMovieProgressSliders(_scroll);
+    const newState = titleProgressState(id);
+    if (window.WATCHLIST_DEBUG_WATCH_UI !== false) {
+      console.info("[watch-ui]", "refreshWatchBadge", {
+        itemId: id,
+        badgeFound: true,
+        oldState,
+        newState,
+      });
+    }
   }
 
   /** Re-render only the action buttons (now: refresh menu items). */
@@ -1235,19 +1267,19 @@
     if (!slot) return;
 
     window.WatchlistSeasons?.attach?.(slot, item, {
-      getWatchEntry: () => getWatchEntry(item.id),
-      saveWatchedEntry: (entry) => window.WatchlistApp?.saveWatchedEntry?.(item.id, entry),
-      updateCardInPlace: () => window.WatchlistApp?.updateCardInPlace?.(item.id),
+      getWatchEntry: () => getWatchEntry(_activeItemId),
+      saveWatchedEntry: (entry) => window.WatchlistApp?.saveWatchedEntry?.(_activeItemId, entry),
+      updateCardInPlace: () => window.WatchlistApp?.updateCardInPlace?.(_activeItemId),
       // Called by title-seasons when a watch state changes — refresh My Rating + menu.
       updateHeaderWatchState: () => {
-        updateMyRating();
+        refreshWatchBadge(_activeItemId);
         const fresh = findItem(_activeItemId);
         if (fresh) updateDetailActions(fresh);
       },
       updateDetailActions: () => {
         const fresh = findItem(_activeItemId);
         if (fresh) updateDetailActions(fresh);
-        updateMyRating();
+        refreshWatchBadge(_activeItemId);
       },
       onSeasonSelected: (payload) => updateHeaderSeasonPresentation(payload),
       resetHeaderSeasonPresentation: () => resetHeaderSeasonPresentation(),
@@ -1757,6 +1789,7 @@
     isPosterLightboxOpen: () => _posterLightboxOpen,
     // Targeted update hooks (used by WatchlistSeasons)
     updateMyRating,
+    refreshWatchBadge,
     updateDetailActions: (item) => updateDetailActions(item || findItem(_activeItemId)),
   };
 })();
