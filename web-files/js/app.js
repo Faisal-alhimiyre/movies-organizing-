@@ -99,6 +99,8 @@
   let ptrRefreshing = false;
   let ptrLastDoneAt = 0;
   const PTR_COOLDOWN_MS = 2000;
+  let mutationRevision = 0;
+  const itemMutationRevision = new Map();
 
   const state = {
     type: "all",
@@ -224,7 +226,6 @@
       renderListSwitcher();
       updateGenreOptions();
       updateStats();
-      render();
       void runMetadataBackfill();
     } catch (error) {
       console.warn("[sync] background sync failed:", error);
@@ -581,6 +582,11 @@
         meta: listSyncMeta(),
       }),
       (result) => {
+        if (result?.skipped) {
+          state.syncStatus = "saved";
+          updateStats();
+          return;
+        }
         if (result?.ok) {
           writeSyncMeta(listId, { syncedAt: Date.now() });
           state.syncStatus = "saved";
@@ -590,6 +596,92 @@
         updateStats();
       }
     );
+  }
+
+  function bumpItemMutation(itemId) {
+    mutationRevision += 1;
+    const revision = mutationRevision;
+    if (itemId) itemMutationRevision.set(itemId, revision);
+    return revision;
+  }
+
+  function notifyItemStateChanged(itemId, expectedRevision) {
+    if (!itemId) return;
+    if (expectedRevision != null && itemMutationRevision.get(itemId) !== expectedRevision) {
+      return;
+    }
+
+    syncListCard(itemId);
+
+    if (window.WatchlistTitleDetail?.activeItemId?.() === itemId) {
+      window.WatchlistTitleDetail.refresh?.();
+      window.WatchlistSeasons?.onTitleWatchedChanged?.();
+      window.WatchlistSeasons?.onExternalRefresh?.();
+    }
+  }
+
+  function persistWatchedLocal() {
+    if (!canPersistActiveList()) return;
+    const { watched } = storageKeys();
+    localStorage.setItem(watched, JSON.stringify(state.watched));
+  }
+
+  function queueCloudSyncForItem(itemId, revision, watchedSnapshot) {
+    const listId = state.activeListId;
+    if (!listId || !canPersistActiveList(listId)) return;
+    if (!window.WatchlistSync?.isConfigured()) return;
+
+    touchLocalUpdated();
+    state.syncStatus = "pending";
+    updateStats();
+
+    window.WatchlistSync.schedulePush(
+      listId,
+      () => ({
+        watchlist: state.data,
+        watched: state.watched,
+        meta: listSyncMeta(),
+      }),
+      (result) => {
+        if (itemId && itemMutationRevision.get(itemId) !== revision) return;
+        if (result?.skipped) {
+          state.syncStatus = "saved";
+          updateStats();
+          return;
+        }
+        if (result?.ok) {
+          writeSyncMeta(listId, { syncedAt: Date.now() });
+          state.syncStatus = "saved";
+        } else if (watchedSnapshot) {
+          state.watched = watchedSnapshot;
+          persistWatchedLocal();
+          bumpItemMutation(itemId);
+          notifyItemStateChanged(itemId);
+          state.syncStatus = resolveSyncFailureStatus();
+        } else {
+          state.syncStatus = resolveSyncFailureStatus();
+        }
+        updateStats();
+      }
+    );
+  }
+
+  function commitWatchChange(itemId, mutateFn) {
+    if (!itemId || typeof mutateFn !== "function") return;
+    const watchedSnapshot = JSON.parse(JSON.stringify(state.watched));
+    const revision = bumpItemMutation(itemId);
+    mutateFn();
+    persistWatchedLocal();
+    notifyItemStateChanged(itemId, revision);
+    queueCloudSyncForItem(itemId, revision, watchedSnapshot);
+  }
+
+  async function awaitCloudPushIdle() {
+    const deadline = Date.now() + 15000;
+    while (window.WatchlistSync?.isSyncing?.()) {
+      if (Date.now() > deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
   }
 
   function resolveSyncFailureStatus() {
@@ -745,37 +837,9 @@
       (!localHasData || remoteUpdated > localStamp)
     ) {
       if (window.WatchlistAuth?.getProfile() !== listId) return;
-      const localAddedById = new Map();
-      if (localHasData) {
-        for (const item of flattenWatchlist(state.data)) {
-          if (item.addedAt) localAddedById.set(item.id, item.addedAt);
-        }
-      }
-
-      state.data = applyBundledGenreCorrections(remote.watchlist, bundled);
-      state.watched = remote.watched || {};
-      state.items = flattenWatchlist(state.data);
-
-      if (localAddedById.size) {
-        for (const item of state.items) {
-          const localAt = localAddedById.get(item.id);
-          if (localAt) item.addedAt = localAt;
-        }
-      }
-      state.data = itemsToNested(state.items);
-
-      if (remote.name) {
-        window.WatchlistAuth.registerList(listId, {
-          accountId: window.WatchlistAuth.getAccountId(),
-          name: remote.name,
-          description: remote.description || "",
-        });
-      }
+      applyRemoteSnapshotQuiet(remote);
       writeSyncMeta(listId, { syncedAt: remoteUpdated, localUpdated: remoteUpdated });
       state.syncStatus = "saved";
-      updateGenreOptions();
-      updateStats();
-      render();
       return;
     }
 
@@ -964,36 +1028,64 @@
 
     const listId = state.activeListId;
     ptrRefreshing = true;
+    let outcome = { ok: false, reason: "error" };
 
     try {
+      await awaitCloudPushIdle();
       window.WatchlistSync?.cancelScheduledPush?.();
       await syncAccountLists();
-      if (state.activeListId !== listId) return { ok: false, reason: "list-changed" };
+      if (state.activeListId !== listId) {
+        outcome = { ok: false, reason: "list-changed" };
+        return outcome;
+      }
 
       const remote = await window.WatchlistSync.fetchSnapshot(listId);
-      if (state.activeListId !== listId) return { ok: false, reason: "list-changed" };
+      if (state.activeListId !== listId) {
+        outcome = { ok: false, reason: "list-changed" };
+        return outcome;
+      }
 
-      if (!remote || window.WatchlistAuth.isWatchlistEmpty(remote.watchlist)) {
-        return { ok: false, reason: "empty" };
+      if (!remote) {
+        outcome = { ok: false, reason: "error" };
+        return outcome;
+      }
+
+      const remoteHasData = !window.WatchlistAuth.isWatchlistEmpty(remote.watchlist);
+      const localHasData = !window.WatchlistAuth.isWatchlistEmpty(state.data);
+
+      if (!remoteHasData && localHasData) {
+        outcome = { ok: true };
+        state.syncStatus = "saved";
+        return outcome;
+      }
+
+      if (!remoteHasData) {
+        outcome = { ok: false, reason: "empty" };
+        return outcome;
       }
 
       applyRemoteSnapshotQuiet(remote);
       state.syncStatus = "saved";
-      return { ok: true };
+      outcome = { ok: true };
+      return outcome;
     } catch (error) {
       console.warn("[ptr] pull refresh failed:", error);
-      return { ok: false, reason: "error" };
+      outcome = { ok: false, reason: "error" };
+      return outcome;
     } finally {
       ptrRefreshing = false;
       ptrLastDoneAt = Date.now();
+      if (outcome.ok) {
+        state.syncStatus = "saved";
+      } else if (state.syncStatus === "pending") {
+        state.syncStatus = "saved";
+      }
       updateStats();
     }
   }
 
   function saveWatched() {
-    if (!canPersistActiveList()) return;
-    const { watched } = storageKeys();
-    localStorage.setItem(watched, JSON.stringify(state.watched));
+    persistWatchedLocal();
     queueCloudSync();
   }
 
@@ -1676,9 +1768,23 @@
       if (!confirmed) return;
     }
 
-    delete state.watched[itemId];
-    saveWatched();
-    refreshCardWatchState(itemId);
+    commitWatchChange(itemId, () => {
+      delete state.watched[itemId];
+    });
+  }
+
+  async function markItemWatched(itemId, { openRating = false } = {}) {
+    if (!itemId) return;
+    if (itemProgressState(itemId) === "watched") return;
+
+    commitWatchChange(itemId, () => {
+      const existing = normalizeWatchEntry(state.watched[itemId]);
+      const entry = existing ? { ...existing } : {};
+      delete entry.progress;
+      state.watched[itemId] = entry;
+    });
+
+    if (openRating) openRatingModal(itemId);
   }
 
   /** Re-render one list card + header/filter chrome after any item or watch mutation. */
@@ -4795,12 +4901,7 @@
       await markItemUnwatched(itemId);
       return;
     }
-    const existing = normalizeWatchEntry(state.watched[itemId]);
-    const entry = existing ? { ...existing } : {};
-    delete entry.progress;
-    state.watched[itemId] = entry;
-    saveWatched();
-    refreshCardWatchState(itemId);
+    await markItemWatched(itemId);
   }
 
   async function refreshSearchConfirmForType() {
@@ -8085,35 +8186,14 @@
         if (progress === "watched") {
           await markItemUnwatched(id);
         } else {
-          // Both "unwatched" and "inProgress" → mark as fully watched.
-          // Preserve any existing rating/note but discard granular episode progress
-          // (the whole title is now considered watched as a unit).
-          const existing = normalizeWatchEntry(state.watched[id]);
-          const entry = existing ? { ...existing } : {};
-          delete entry.progress;
-          state.watched[id] = entry;
-          saveWatched();
-          refreshCardWatchState(id);
-          openRatingModal(id);
+          await markItemWatched(id, { openRating: true });
         }
         return;
       }
 
       if (action === "quick-toggle-watched") {
         closeAllCardMenus();
-        const progress = itemProgressState(id);
-        if (progress === "watched") {
-          await markItemUnwatched(id);
-        } else {
-          // Quick toggle: mark fully watched without opening rating modal.
-          // Preserve rating/note; discard granular episode progress.
-          const existing = normalizeWatchEntry(state.watched[id]);
-          const entry = existing ? { ...existing } : {};
-          delete entry.progress;
-          state.watched[id] = entry;
-          saveWatched();
-          refreshCardWatchState(id);
-        }
+        await quickToggleWatched(id);
         return;
       }
 
@@ -8342,6 +8422,8 @@
     renderExternalRatings,
     updateRatingModalActions,
     quickToggleWatched,
+    markItemUnwatched,
+    markItemWatched,
     // Exposed for title-detail.js
     findItem: (id) => state.items.find((i) => i.id === id) ?? null,
     isWatched: isItemWatched,
@@ -8353,13 +8435,13 @@
     // Exposed for title-seasons.js — save watch entry locally without full render
     saveWatchedEntry: (id, entry) => {
       if (!id) return;
-      if (entry === null || entry === undefined) {
-        delete state.watched[id];
-      } else {
-        state.watched[id] = entry;
-      }
-      saveWatched();
-      syncListCard(id);
+      commitWatchChange(id, () => {
+        if (entry === null || entry === undefined) {
+          delete state.watched[id];
+        } else {
+          state.watched[id] = entry;
+        }
+      });
     },
     // Re-render a single card in-place (no full list rebuild)
     updateCardInPlace: (id) => {

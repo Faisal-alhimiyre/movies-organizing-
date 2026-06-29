@@ -1541,16 +1541,15 @@
       }
 
       case "toggle-watched": {
-        // Suppress MutationObserver so it doesn't trigger a full rebuild.
         _ignoreMutations = true;
-        triggerCardAction(itemId, "toggle-watched");
-        // app.js render() has already fired synchronously.
-        const freshItem = findItem(itemId);
-        // Update My Rating section (watched state changed).
+        const progState = window.WatchlistApp?.progressState?.(itemId);
+        if (progState === "watched") {
+          await window.WatchlistApp?.markItemUnwatched?.(itemId);
+        } else {
+          await window.WatchlistApp?.markItemWatched?.(itemId, { openRating: true });
+        }
         updateMyRating();
-        // Refresh menu items so the watched label flips.
         refreshMenuItems();
-        // Notify seasons module to re-read episode/season watched state.
         window.WatchlistSeasons?.onTitleWatchedChanged?.();
         Promise.resolve().then(() => { _ignoreMutations = false; });
         break;

@@ -491,11 +491,13 @@
     syncTimer = setTimeout(async () => {
       if (window.WatchlistAuth?.getProfile() !== listId) {
         onComplete?.({ ok: false, skipped: true });
+        dispatchStatus("saved");
         return;
       }
       const payload = getPayload();
       if (window.WatchlistAuth?.getProfile() !== listId) {
         onComplete?.({ ok: false, skipped: true });
+        dispatchStatus("saved");
         return;
       }
       const result = await pushSnapshot(
@@ -554,6 +556,10 @@
 
   function cancelScheduledPush() {
     clearTimeout(syncTimer);
+    syncTimer = null;
+    if (!syncing) {
+      dispatchStatus("saved");
+    }
   }
 
   async function deleteList(listId) {

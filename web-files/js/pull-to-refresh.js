@@ -1,8 +1,11 @@
 (function () {
   "use strict";
 
-  const PULL_THRESHOLD = 72;
-  const MAX_PULL = 96;
+  const PULL_ARM_DELTA = 28;
+  const INDICATOR_THRESHOLD = 64;
+  const PULL_THRESHOLD = 108;
+  const MAX_PULL = 128;
+  const PULL_DAMPING = 0.34;
   const MOBILE_QUERY = "(max-width: 640px), (hover: none) and (pointer: coarse)";
 
   let indicator = null;
@@ -10,6 +13,7 @@
   let message = null;
   let touchStartY = 0;
   let pulling = false;
+  let pullArmed = false;
   let pullDistance = 0;
   let bound = false;
   let refreshPromise = null;
@@ -106,6 +110,7 @@
     if (event.touches.length !== 1) return;
     touchStartY = event.touches[0].clientY;
     pulling = false;
+    pullArmed = false;
     pullDistance = 0;
   }
 
@@ -113,6 +118,7 @@
     if (refreshPromise || window.WatchlistApp?.isPullToRefreshActive?.()) return;
     if (!isScrollAtTop()) {
       pulling = false;
+      pullArmed = false;
       pullDistance = 0;
       setIndicatorState({ visible: false });
       return;
@@ -122,22 +128,33 @@
     const delta = y - touchStartY;
     if (delta <= 0) {
       pulling = false;
+      pullArmed = false;
       pullDistance = 0;
       setIndicatorState({ visible: false });
       return;
     }
 
-    if (!canStartPull() && !pulling) return;
+    if (delta < PULL_ARM_DELTA) return;
 
+    if (!canStartPull() && !pullArmed) return;
+
+    pullArmed = true;
     pulling = true;
-    pullDistance = Math.min(delta * 0.45, MAX_PULL);
-    setIndicatorState({ visible: true, distance: pullDistance, refreshing: false });
-    event.preventDefault();
+    pullDistance = Math.min((delta - PULL_ARM_DELTA) * PULL_DAMPING, MAX_PULL);
+
+    if (pullDistance >= INDICATOR_THRESHOLD) {
+      setIndicatorState({ visible: true, distance: pullDistance, refreshing: false });
+      event.preventDefault();
+      return;
+    }
+
+    setIndicatorState({ visible: false });
   }
 
   function onTouchEnd() {
-    if (!pulling || refreshPromise || window.WatchlistApp?.isPullToRefreshActive?.()) {
+    if (!pullArmed || !pulling || refreshPromise || window.WatchlistApp?.isPullToRefreshActive?.()) {
       pulling = false;
+      pullArmed = false;
       pullDistance = 0;
       if (!refreshPromise) setIndicatorState({ visible: false });
       return;
@@ -149,6 +166,7 @@
     }
 
     pulling = false;
+    pullArmed = false;
     pullDistance = 0;
     setIndicatorState({ visible: false });
   }

@@ -1,5 +1,5 @@
 /* Minimal service worker — offline shell for installable PWA. */
-const CACHE = "omn-shell-v134";
+const CACHE = "omn-shell-v136";
 
 const SHELL = [
   "./",
@@ -25,7 +25,6 @@ const SHELL = [
   "./css/rtl.css",
   "./css/mobile.css",
   "./css/pull-to-refresh.css",
-  "./js/pull-to-refresh.js",
   "./js/pwa.js",
   "./js/i18n.js",
   "./js/accessibility.js",
@@ -53,12 +52,11 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-function isAppCodePath(pathname) {
+function isMutableAppAsset(pathname) {
   return (
-    pathname.endsWith(".html") ||
-    pathname.endsWith(".js") ||
-    pathname.endsWith(".css") ||
-    pathname.endsWith("/")
+    pathname.includes("/js/") ||
+    pathname.includes("/css/") ||
+    pathname.endsWith(".html")
   );
 }
 
@@ -72,10 +70,17 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  const bypassHttpCache = isAppCodePath(url.pathname);
+  if (isMutableAppAsset(url.pathname)) {
+    event.respondWith(
+      fetch(event.request, { cache: "no-store" }).catch(() =>
+        caches.match(event.request).then((cached) => cached || caches.match("./index.html"))
+      )
+    );
+    return;
+  }
 
   event.respondWith(
-    fetch(event.request, bypassHttpCache ? { cache: "no-store" } : undefined)
+    fetch(event.request, { cache: "no-store" })
       .then((response) => {
         if (response.ok && response.type === "basic") {
           const copy = response.clone();
