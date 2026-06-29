@@ -61,6 +61,8 @@
   let _episodeModalEditing = false;
   let _episodeModalEl = null;
   let _episodeListRender = null;
+  let _episodeListRenderId = 0;
+  let _episodeLoadSeq = 0;
   let _episodesLoading = false;
   let _pendingSpecialsCheck = false;
   let _dragStartX     = 0;
@@ -637,6 +639,8 @@
     _fillerUiAvailable = false;
     _activeEpisodeKey = null;
     _episodeListRender = null;
+    _episodeListRenderId = 0;
+    _episodeLoadSeq = 0;
     _episodesLoading = false;
     _pendingSpecialsCheck = false;
     _isDragging     = false;
@@ -1258,7 +1262,11 @@
   }
 
   async function loadEpisodes(seasonNum) {
+    const sn = Number(seasonNum);
+    if (!Number.isFinite(sn)) return;
+
     const tok = _token;
+    const loadSeq = ++_episodeLoadSeq;
     const meta = window.WatchlistSeriesMetadata;
     if (!meta || !_item || !_resolution) return;
 
@@ -1267,26 +1275,34 @@
     const locale = getLocale();
     const poster = getItemPoster();
     const seasonSummary = (_seriesResult?.seasons || []).find(
-      (s) => s.seasonNumber === seasonNum
+      (s) => Number(s.seasonNumber) === sn
     ) || null;
 
     try {
       const result = await meta.fetchSeasonEpisodes(
         _resolution,
-        seasonNum,
+        sn,
         locale,
         poster,
         seasonSummary,
         _item
       );
-      if (!isValid(tok) || _selectedSeason !== seasonNum) return;
-      applyEpisodesPayload(seasonNum, result);
+      if (
+        !isValid(tok) ||
+        loadSeq !== _episodeLoadSeq ||
+        Number(_selectedSeason) !== sn
+      ) {
+        return;
+      }
+      applyEpisodesPayload(sn, result);
     } finally {
       runPendingSpecialsCheck();
     }
   }
 
   function applyEpisodesPayload(seasonNum, result) {
+    const sn = Number(seasonNum);
+    if (!Number.isFinite(sn) || Number(_selectedSeason) !== sn) return;
     const meta = window.WatchlistSeriesMetadata;
     if (!meta || !result) return;
 
@@ -1298,17 +1314,17 @@
 
     _episodesResult = {
       ...displayResult,
-      seasonNum,
+      seasonNum: sn,
       episodes: displayEps.map((ep) => ({
         ...ep,
-        seasonNumber: seasonNum,
-        progressKey: `${seasonNum}:${ep.episodeNumber}`,
+        seasonNumber: sn,
+        progressKey: `${sn}:${ep.episodeNumber}`,
       })),
     };
     _fillerUiAvailable = Boolean(displayResult?.fillerUiAvailable);
     const RS = meta.ResultState;
 
-    patchSeasonFromEpisodeResult(seasonNum, displayResult);
+    patchSeasonFromEpisodeResult(sn, displayResult);
 
     switch (displayResult?.state) {
       case RS.AVAILABLE:
@@ -1317,24 +1333,25 @@
       case RS.EPISODE_DETAILS_UNAVAILABLE: {
         const eps = displayEps;
         if (eps.length > 0) {
-          if (seasonNum === 0) {
+          if (sn === 0) {
             const airedCount = eps.filter((ep) => ep.isAired !== false).length;
             if (airedCount === 0) {
               removeSpecialsFromCarousel();
               return;
             }
           }
-          renderEpisodeList(seasonNum, eps);
+          renderEpisodeList(sn, eps);
           if (result.state === RS.OFFLINE_WITH_CACHE) {
             showEpisodesStatus(t("seasons.offline"), null, { keepList: true });
           } else if (displayResult.state === RS.EPISODE_DETAILS_UNAVAILABLE) {
             showEpisodesStatus(t("seasons.episodesUnavailable"), null, { keepList: true });
           }
-          refreshSeasonCard(seasonNum);
+          refreshSeasonCard(sn);
           reannotateExistingEntry();
+          notifySeasonPresentation(sn, { persistPoster: false });
           return;
         }
-        if (seasonNum === 0) { removeSpecialsFromCarousel(); return; }
+        if (sn === 0) { removeSpecialsFromCarousel(); return; }
         if (displayResult.state === RS.EPISODE_DETAILS_UNAVAILABLE) {
           showEpisodesStatus(t("seasons.episodesUnavailable"), null);
           return;
@@ -1344,12 +1361,12 @@
       }
 
       case RS.OFFLINE_NO_CACHE:
-        if (seasonNum === 0) { removeSpecialsFromCarousel(); return; }
+        if (sn === 0) { removeSpecialsFromCarousel(); return; }
         showEpisodesStatus(t("seasons.offlineNoCache"), "retry-episodes");
         return;
 
       case RS.EPISODE_DETAILS_UNAVAILABLE:
-        if (seasonNum === 0) { removeSpecialsFromCarousel(); return; }
+        if (sn === 0) { removeSpecialsFromCarousel(); return; }
         showEpisodesStatus(t("seasons.episodesUnavailable"), null);
         return;
 
@@ -1359,12 +1376,12 @@
 
       case null:
       case undefined:
-        if (seasonNum === 0) { removeSpecialsFromCarousel(); return; }
+        if (sn === 0) { removeSpecialsFromCarousel(); return; }
         showEpisodesStatus(t("seasons.episodesUnavailable"), null);
         return;
 
       default:
-        if (seasonNum === 0) { removeSpecialsFromCarousel(); return; }
+        if (sn === 0) { removeSpecialsFromCarousel(); return; }
         showEpisodesStatus(t("seasons.episodesError"), "retry-episodes");
         return;
     }
@@ -1537,29 +1554,31 @@
   // ─── Season selection ──────────────────────────────────────────────────────
 
   function selectSeason(seasonNum, { animate = true, skipTabSwitch = false } = {}) {
-    if (_selectedSeason === seasonNum && animate) return;
+    const sn = Number(seasonNum);
+    if (!Number.isFinite(sn)) return;
+    if (Number(_selectedSeason) === sn && animate) return;
     closeEpisodeModal();
     resetEpisodeJumpInput();
-    _selectedSeason = seasonNum;
+    _selectedSeason = sn;
 
     if (!skipTabSwitch) {
-      if (seasonNum === 0 && _activeTab !== "specials") {
+      if (sn === 0 && _activeTab !== "specials") {
         switchSeriesTab("specials");
         return;
       }
-      if (seasonNum > 0 && _activeTab !== "seasons") {
+      if (sn > 0 && _activeTab !== "seasons") {
         switchSeriesTab("seasons");
         return;
       }
     }
 
-    if (seasonNum > 0) {
-      updateCarouselSelection(seasonNum);
-      scrollToSeasonCard(seasonNum, animate);
+    if (sn > 0) {
+      updateCarouselSelection(sn);
+      scrollToSeasonCard(sn, animate);
     }
-    notifySeasonPresentation(seasonNum);
+    notifySeasonPresentation(sn);
 
-    loadEpisodes(seasonNum);
+    loadEpisodes(sn);
     updateNavButtons(getRegularSeasons());
   }
 
@@ -1661,8 +1680,10 @@
     }
 
     if (!progressOnly) {
-      if (persistPoster) persistSeasonPoster(season);
       _callbacks?.onSeasonSelected?.(buildSeasonPresentation(season));
+      if (persistPoster) {
+        queueMicrotask(() => persistSeasonPoster(season));
+      }
     }
     updateSeasonActions(seasonNum);
   }
@@ -1726,6 +1747,8 @@
     if (!sec) return;
 
     _episodesLoading = true;
+    _episodeListRender = null;
+    _episodeListRenderId += 1;
     setEpisodesSectionReady(false);
 
     if (statusEl) {
@@ -1769,9 +1792,10 @@
   }
 
   function renderEpisodeList(seasonNum, episodes) {
+    const sn = Number(seasonNum);
     const listEl   = _slot?.querySelector(".tds-episode-list");
     const statusEl = getP("episodes-status");
-    if (!listEl) return;
+    if (!listEl || !Number.isFinite(sn)) return;
 
     _episodesLoading = false;
 
@@ -1779,8 +1803,8 @@
 
     const scopedEps = episodesForDisplay(episodes || []).map((ep) => ({
       ...ep,
-      seasonNumber: seasonNum,
-      progressKey: `${seasonNum}:${ep.episodeNumber}`,
+      seasonNumber: sn,
+      progressKey: `${sn}:${ep.episodeNumber}`,
     }));
 
     if (!scopedEps.length) {
@@ -1794,13 +1818,15 @@
 
     // Paint header, toggles, and jump bar before episode rows (avoids list-first flash).
     updateEpisodesTitle();
-    updateSeasonActions(seasonNum);
+    updateSeasonActions(sn);
 
     const entry = getEntry();
     const BATCH = 40;
+    const renderId = ++_episodeListRenderId;
 
     _episodeListRender = {
-      seasonNum,
+      renderId,
+      seasonNum: sn,
       scopedEps,
       index: 0,
       entry,
@@ -1819,20 +1845,25 @@
 
     listEl.innerHTML = "";
     let index = appendBatchSlice(0);
-    if (_episodeListRender) _episodeListRender.index = index;
+    if (_episodeListRender?.renderId === renderId) {
+      _episodeListRender.index = index;
+    }
     setEpisodesSectionReady(true);
     syncScrollToSeasonsWatcher();
 
     if (index >= scopedEps.length) return;
 
     const appendRemainingBatches = () => {
-      if (!_episodeListRender || index >= scopedEps.length) return;
+      if (!_episodeListRender || _episodeListRender.renderId !== renderId) return;
+      if (index >= scopedEps.length) return;
       index = appendBatchSlice(index);
-      _episodeListRender.index = index;
+      if (_episodeListRender?.renderId === renderId) {
+        _episodeListRender.index = index;
+      }
       if (index < scopedEps.length) {
         requestAnimationFrame(appendRemainingBatches);
       } else {
-        updateSeasonActions(seasonNum);
+        updateSeasonActions(sn);
       }
     };
 
@@ -1852,7 +1883,7 @@
     if (row) return row;
 
     const ctx = _episodeListRender;
-    if (!ctx || ctx.seasonNum !== seasonNum) return null;
+    if (!ctx || Number(ctx.seasonNum) !== Number(seasonNum)) return null;
 
     const targetIdx = ctx.scopedEps.findIndex((ep) => ep.episodeNumber === epNum);
     if (targetIdx < 0) return null;
