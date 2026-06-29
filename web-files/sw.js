@@ -1,10 +1,12 @@
-/* Minimal service worker — offline shell for installable PWA. */
-const CACHE = "omn-shell-v137";
+/* Service worker — installable PWA with automatic update on deploy. */
+importScripts("./js/build-version.js");
 
+const BUILD_VERSION = self.WATCHLIST_BUILD_VERSION || "0";
+const CACHE = `omn-shell-${BUILD_VERSION}`;
+const CACHE_PREFIX = "omn-shell-";
+
+/** Offline-safe static assets only — never precache HTML/JS/CSS (versioned at deploy). */
 const SHELL = [
-  "./",
-  "./index.html",
-  "./gate.html",
   "./manifest.webmanifest",
   "./assets/icons/icon.svg",
   "./assets/icons/icon-maskable.svg",
@@ -12,28 +14,14 @@ const SHELL = [
   "./assets/icons/icon-192.png",
   "./assets/icons/icon-512.png",
   "./assets/og/og-image.svg",
-  "./css/styles.css",
-  "./css/theme.css",
-  "./css/theme-light.css",
-  "./css/theme-purple.css",
-  "./css/theme-brown.css",
-  "./css/theme-pink.css",
-  "./css/theme-consistency.css",
-  "./css/typography.css",
-  "./css/reduced-motion.css",
-  "./css/accessibility.css",
-  "./css/rtl.css",
-  "./css/mobile.css",
-  "./css/pull-to-refresh.css",
-  "./js/pwa.js",
-  "./js/i18n.js",
-  "./js/accessibility.js",
-  "./js/themes.js",
 ];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting())
+    caches
+      .open(CACHE)
+      .then((cache) => cache.addAll(SHELL))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -47,16 +35,28 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+      .then((keys) =>
+        Promise.all(
+          keys
+            .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE)
+            .map((key) => caches.delete(key))
+        )
+      )
       .then(() => self.clients.claim())
   );
 });
+
+function isSupabaseOrConfig(pathname) {
+  return pathname.includes("/rest/v1/") || pathname.endsWith("config.js");
+}
 
 function isMutableAppAsset(pathname) {
   return (
     pathname.includes("/js/") ||
     pathname.includes("/css/") ||
-    pathname.endsWith(".html")
+    pathname.endsWith(".html") ||
+    pathname === "/" ||
+    pathname.endsWith("/")
   );
 }
 
@@ -66,15 +66,18 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
-  if (url.pathname.includes("/rest/v1/") || url.pathname.endsWith("config.js")) {
+  if (isSupabaseOrConfig(url.pathname)) {
     return;
   }
 
   if (isMutableAppAsset(url.pathname)) {
     event.respondWith(
-      fetch(event.request, { cache: "no-store" }).catch(() =>
-        caches.match(event.request).then((cached) => cached || caches.match("./index.html"))
-      )
+      fetch(event.request, { cache: "no-store" }).catch(() => {
+        if (event.request.mode === "navigate") {
+          return caches.match("./index.html");
+        }
+        return Response.error();
+      })
     );
     return;
   }
@@ -88,6 +91,6 @@ self.addEventListener("fetch", (event) => {
         }
         return response;
       })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match("./gate.html")))
+      .catch(() => caches.match(event.request))
   );
 });

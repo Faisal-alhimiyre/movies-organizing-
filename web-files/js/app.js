@@ -8589,6 +8589,8 @@
     quickToggleWatched,
     markItemUnwatched,
     markItemWatched,
+    isCloudSavePending: () =>
+      state.syncStatus === "pending" || Boolean(window.WatchlistSync?.isSyncing?.()),
     // Exposed for title-detail.js
     findItem: (id) => state.items.find((i) => i.id === id) ?? null,
     isWatched: isItemWatched,

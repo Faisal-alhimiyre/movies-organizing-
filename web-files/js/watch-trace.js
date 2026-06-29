@@ -3,7 +3,9 @@
  * Remove after the refresh pipeline bug is confirmed fixed.
  */
 (function () {
-  const VERSION = "20250625-watchtrace";
+  const VERSION = window.WATCHLIST_BUILD_VERSION
+    ? `${window.WATCHLIST_BUILD_VERSION}-watchtrace`
+    : "watchtrace";
 
   window.WATCHLIST_WATCH_TRACE_VERSION = VERSION;
 

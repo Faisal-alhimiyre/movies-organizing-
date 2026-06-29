@@ -2,7 +2,19 @@
   "use strict";
 
   const ICON_NOTE_KEY = "omn-ios-icon-note-v3";
+  const SW_RELOAD_SESSION_KEY = "omn-sw-update-reload";
+  const SW_URL = "./sw.js";
+
   let bannerEl = null;
+  let swRegistration = null;
+  let hadServiceWorkerController = Boolean(navigator.serviceWorker?.controller);
+  let skipControllerReloadOnce = false;
+  let reloadInFlight = false;
+
+  if (sessionStorage.getItem(SW_RELOAD_SESSION_KEY) === "1") {
+    sessionStorage.removeItem(SW_RELOAD_SESSION_KEY);
+    skipControllerReloadOnce = true;
+  }
 
   function isIOS() {
     const ua = navigator.userAgent || "";
@@ -47,41 +59,34 @@
   }
 
   function mountIconNote() {
-    // Extension/icon reinstall reminder has been removed — always no-op.
     return;
-
-    const main = document.getElementById("mainContent");
-    if (!main?.parentElement) return;
-
-    bannerEl = document.createElement("div");
-    bannerEl.className = "app-banner app-banner--pwa-icon";
-    bannerEl.setAttribute("role", "region");
-    bannerEl.setAttribute("aria-labelledby", "iosIconNoteTitle");
-    bannerEl.innerHTML = `
-      <div class="app-banner__body">
-        <h2 class="app-banner__title" id="iosIconNoteTitle"></h2>
-        <p class="app-banner__text"></p>
-        <ol class="app-banner__list"></ol>
-      </div>
-      <div class="app-banner__actions">
-        <button type="button" class="btn btn--primary btn--sm" data-action="dismiss-ios-icon-note"></button>
-      </div>
-    `;
-
-    bannerEl.addEventListener("click", (event) => {
-      if (event.target.closest("[data-action='dismiss-ios-icon-note']")) {
-        dismissIconNote();
-      }
-    });
-
-    main.parentElement.insertBefore(bannerEl, main);
-
-    renderIconNote();
-    window.WatchlistI18n?.onChange?.(() => renderIconNote());
   }
 
-  let swReloading = false;
-  let hadServiceWorkerController = Boolean(navigator.serviceWorker.controller);
+  function isCloudSavePending() {
+    if (window.WatchlistSync?.isSyncing?.()) return true;
+    if (window.WatchlistApp?.isCloudSavePending?.()) return true;
+    return false;
+  }
+
+  async function waitForSafeReload() {
+    const deadline = Date.now() + 60000;
+    while (Date.now() < deadline) {
+      if (!isCloudSavePending()) return;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  }
+
+  async function reloadForServiceWorkerUpdate() {
+    if (reloadInFlight) return;
+    reloadInFlight = true;
+    try {
+      await waitForSafeReload();
+      sessionStorage.setItem(SW_RELOAD_SESSION_KEY, "1");
+      window.location.reload();
+    } catch (_error) {
+      reloadInFlight = false;
+    }
+  }
 
   function bindServiceWorkerUpdates(registration) {
     registration.addEventListener("updatefound", () => {
@@ -100,33 +105,51 @@
   }
 
   function checkForServiceWorkerUpdate() {
-    navigator.serviceWorker.getRegistration().then((registration) => {
-      registration?.update().catch(() => {});
-    });
+    const update = swRegistration
+      ? swRegistration.update()
+      : navigator.serviceWorker.getRegistration().then((registration) => registration?.update());
+    Promise.resolve(update).catch(() => {});
+  }
+
+  function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) return;
+
+    navigator.serviceWorker
+      .register(SW_URL, { updateViaCache: "none" })
+      .then((registration) => {
+        swRegistration = registration;
+        bindServiceWorkerUpdates(registration);
+        return registration.update();
+      })
+      .catch((error) => {
+        console.warn("[pwa] service worker registration failed:", error);
+      });
   }
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (skipControllerReloadOnce) {
+        skipControllerReloadOnce = false;
+        return;
+      }
       if (!hadServiceWorkerController) {
         hadServiceWorkerController = true;
         return;
       }
-      if (swReloading) return;
-      swReloading = true;
-      window.location.reload();
+      void reloadForServiceWorkerUpdate();
     });
 
-    window.addEventListener("load", () => {
-      navigator.serviceWorker
-        .register("./sw.js?v=136", { updateViaCache: "none" })
-        .then((registration) => {
-          bindServiceWorkerUpdates(registration);
-          return registration.update();
-        })
-        .catch((error) => {
-          console.warn("[pwa] service worker registration failed:", error);
-        });
-    });
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", () => {
+        registerServiceWorker();
+        checkForServiceWorkerUpdate();
+      });
+    } else {
+      registerServiceWorker();
+      checkForServiceWorkerUpdate();
+    }
+
+    window.addEventListener("load", checkForServiceWorkerUpdate);
 
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") {
@@ -139,6 +162,8 @@
         checkForServiceWorkerUpdate();
       }
     });
+
+    window.addEventListener("focus", checkForServiceWorkerUpdate);
   }
 
   if (document.readyState === "loading") {
