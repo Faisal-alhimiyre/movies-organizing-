@@ -605,10 +605,19 @@
     return revision;
   }
 
+  const watchTrace = () => window.WatchlistWatchTrace;
+
   function notifyItemStateChanged(itemId, expectedRevision) {
     if (!itemId) return;
     const revisionStale =
       expectedRevision != null && itemMutationRevision.get(itemId) !== expectedRevision;
+
+    watchTrace()?.log("notifyItemStateChanged", {
+      itemId,
+      expectedRevision,
+      revisionStale,
+      entry: watchTrace()?.snapshot(state.watched[itemId] ?? null),
+    });
 
     refreshItemWatchUi(itemId);
 
@@ -653,14 +662,35 @@
 
     const liveEntry = state.watched[itemId] ?? null;
     const sn = seasonNum ?? window.WatchlistSeasons?.getSelectedSeason?.() ?? null;
+    const openDetailItemId = window.WatchlistTitleDetail?.activeItemId?.() ?? null;
+    const detailItemIdMatches = openDetailItemId === itemId;
 
-    if (window.WatchlistTitleDetail?.activeItemId?.() === itemId) {
+    watchTrace()?.log("refreshItemWatchUi", {
+      itemId,
+      liveEntry: watchTrace()?.snapshot(liveEntry),
+      derivedProgress: itemProgressState(itemId),
+      openDetailItemId,
+      detailItemIdMatches,
+      seasonNum: sn,
+      willCallDetailRefresh: detailItemIdMatches,
+    });
+
+    if (detailItemIdMatches) {
+      watchTrace()?.log("detail-refresh-callback", { callback: "refreshWatchBadge", itemId });
       window.WatchlistTitleDetail?.refreshWatchBadge?.(itemId, liveEntry);
+      watchTrace()?.log("detail-refresh-callback", { callback: "refreshMenuItems", itemId });
       window.WatchlistTitleDetail?.refreshMenuItems?.();
+      watchTrace()?.log("detail-refresh-callback", {
+        callback: "refreshWatchUiAfterSave",
+        itemId,
+        seasonNum: sn,
+      });
       window.WatchlistSeasons?.refreshWatchUiAfterSave?.(sn, liveEntry);
     }
 
+    watchTrace()?.log("refreshItemWatchUi:before-syncListCard", { itemId });
     syncListCard(itemId);
+    watchTrace()?.log("refreshItemWatchUi:after-syncListCard", { itemId });
   }
 
   function persistWatchedLocal() {
@@ -712,12 +742,35 @@
 
   function commitWatchChange(itemId, mutateFn, uiOptions = {}) {
     if (!itemId || typeof mutateFn !== "function") return;
+    const entryBefore = watchTrace()?.snapshot(state.watched[itemId] ?? null);
+    const cardBadgeBefore = watchTrace()?.readCardBadge(itemId);
+    const detailBadgeBefore = watchTrace()?.readDetailBadge();
+
+    watchTrace()?.log("commitWatchChange:start", {
+      itemId,
+      entryBefore,
+      cardBadgeBefore: cardBadgeBefore?.text ?? null,
+      detailBadgeBefore: detailBadgeBefore?.text ?? null,
+      uiOptions,
+      notifyItemStateChangedWillRun: false,
+    });
+
     const watchedSnapshot = JSON.parse(JSON.stringify(state.watched));
     const revision = bumpItemMutation(itemId);
     mutateFn();
+    const entryAfter = watchTrace()?.snapshot(state.watched[itemId] ?? null);
+
+    watchTrace()?.log("commitWatchChange:after-mutate", {
+      itemId,
+      entryAfter,
+      derivedProgress: itemProgressState(itemId),
+    });
+
     persistWatchedLocal();
     refreshItemWatchUi(itemId, uiOptions);
     queueCloudSyncForItem(itemId, revision, watchedSnapshot);
+
+    watchTrace()?.schedulePostCheck?.(itemId, "commitWatchChange");
   }
 
   async function awaitCloudPushIdle() {
@@ -1815,7 +1868,15 @@
 
   async function markItemUnwatched(itemId) {
     const entry = state.watched[itemId];
-    if (!entry) return;
+    watchTrace()?.log("markItemUnwatched:called", {
+      itemId,
+      entryBefore: watchTrace()?.snapshot(entry ?? null),
+      hasEntry: Boolean(entry),
+    });
+    if (!entry) {
+      watchTrace()?.log("markItemUnwatched:abort", { itemId, reason: "no-entry" });
+      return;
+    }
 
     if (watchEntryHasUserData(entry)) {
       const confirmed = await window.WatchlistDialog.confirm(t("alert.markUnwatchedConfirm"), {
@@ -1824,7 +1885,10 @@
         cancelLabel: t("btn.cancel"),
         danger: true,
       });
-      if (!confirmed) return;
+      if (!confirmed) {
+        watchTrace()?.log("markItemUnwatched:abort", { itemId, reason: "user-cancelled" });
+        return;
+      }
     }
 
     commitWatchChange(itemId, () => {
@@ -1833,8 +1897,17 @@
   }
 
   async function markItemWatched(itemId, { openRating = false } = {}) {
+    watchTrace()?.log("markItemWatched:called", {
+      itemId,
+      entryBefore: watchTrace()?.snapshot(state.watched[itemId] ?? null),
+      openRating,
+      currentProgress: itemProgressState(itemId),
+    });
     if (!itemId) return;
-    if (itemProgressState(itemId) === "watched") return;
+    if (itemProgressState(itemId) === "watched") {
+      watchTrace()?.log("markItemWatched:abort", { itemId, reason: "already-watched" });
+      return;
+    }
 
     commitWatchChange(itemId, () => {
       const existing = normalizeWatchEntry(state.watched[itemId]);
@@ -1848,25 +1921,68 @@
 
   /** Re-render one list card + header/filter chrome after any item or watch mutation. */
   function syncListCard(itemId) {
-    if (!itemId) return;
+    if (!itemId) {
+      watchTrace()?.log("syncListCard:abort", { reason: "no-itemId" });
+      return;
+    }
     closeAllCardMenus();
 
     const item = state.items.find((entry) => entry.id === itemId);
     const filtered = getFilteredItems();
     const stillVisible = Boolean(item && filtered.some((entry) => entry.id === itemId));
     const card = els.main?.querySelector(`.card[data-id="${CSS.escape(itemId)}"]`);
+    const cardBadgeBefore = watchTrace()?.readCardBadge(itemId);
+    const expectedProgress = itemProgressState(itemId);
 
+    watchTrace()?.log("syncListCard:start", {
+      itemId,
+      cardFound: Boolean(card),
+      cardBadgeBefore: cardBadgeBefore?.text ?? null,
+      stillVisible,
+      expectedProgress,
+      hasMainEl: Boolean(els.main),
+    });
+
+    let action = "none";
     if (stillVisible && item && card) {
       const tmp = document.createElement("div");
       tmp.innerHTML = renderCard(item);
       const newCard = tmp.firstElementChild;
-      if (newCard) card.replaceWith(newCard);
+      if (newCard) {
+        card.replaceWith(newCard);
+        action = "replaced";
+      } else {
+        action = "replace-failed-no-newCard";
+      }
     } else if (!stillVisible && card) {
       card.remove();
+      action = "removed";
     } else if (stillVisible && item && !card) {
       render();
+      watchTrace()?.log("syncListCard:done", {
+        itemId,
+        action: "full-render",
+        cardFound: false,
+        expectedProgress,
+      });
       return;
     }
+
+    const cardBadgeAfter = watchTrace()?.readCardBadge(itemId);
+    watchTrace()?.log("syncListCard:done", {
+      itemId,
+      action,
+      cardFoundAfter: cardBadgeAfter?.cardFound ?? false,
+      cardBadgeAfter: cardBadgeAfter?.text ?? null,
+      expectedProgress,
+    });
+    watchTrace()?.logBadgeUpdate?.(
+      "card",
+      itemId,
+      cardBadgeBefore?.text ?? null,
+      cardBadgeAfter?.text ?? null,
+      "syncListCard"
+    );
 
     if (!els.main?.querySelector(".card")) {
       if (state.items.length === 0) {
@@ -8222,12 +8338,15 @@
 
       if (action === "toggle-watched") {
         closeAllCardMenus();
+        watchTrace()?.setSource?.("outside-card-menu");
         const progress = itemProgressState(id);
+        watchTrace()?.log("outside-toggle-watched", { itemId: id, progressBefore: progress });
         if (progress === "watched") {
           await markItemUnwatched(id);
         } else {
           await markItemWatched(id, { openRating: true });
         }
+        watchTrace()?.clearSource?.();
         return;
       }
 
@@ -8406,6 +8525,12 @@
     updateStats();
     updateAppBanners();
     render();
+    watchTrace()?.log("app-init-ready", {
+      scriptVersions: {
+        watchTrace: window.WATCHLIST_WATCH_TRACE_VERSION ?? null,
+        appQuery: document.querySelector('script[src*="app.js"]')?.getAttribute("src") ?? null,
+      },
+    });
     if (cloudConfigured && hasLocal) {
       void runBackgroundCloudSync();
     } else {

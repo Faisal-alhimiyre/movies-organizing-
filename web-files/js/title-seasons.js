@@ -491,6 +491,19 @@
     const entry = savedEntry ?? getEntry();
     const sn = seasonNum ?? _selectedSeason ?? _episodesResult?.seasonNum ?? null;
     const slot = ensureSeasonsDom();
+    const openDetailItemId = window.WatchlistTitleDetail?.activeItemId?.() ?? null;
+    const trace = window.WatchlistWatchTrace;
+
+    trace?.log("refreshWatchUiAfterSave:start", {
+      itemId,
+      seasonNum: sn,
+      openDetailItemId,
+      detailItemIdMatches: openDetailItemId === itemId,
+      slotConnected: Boolean(slot && document.contains(slot)),
+      savedEntry: trace?.snapshot(savedEntry),
+      resolvedEntry: trace?.snapshot(entry),
+      getEntryFallback: savedEntry == null,
+    });
 
     logWatchUi("refreshWatchUiAfterSave", {
       itemId,
@@ -502,6 +515,7 @@
     });
 
     if (!slot) {
+      trace?.log("refreshWatchUiAfterSave:abort", { itemId, reason: "no-slot" });
       logWatchUi("abort", { reason: "no-slot" });
       return;
     }
@@ -547,6 +561,14 @@
     _callbacks?.updateDetailActions?.();
 
     refreshAllEpisodeRows(entry);
+
+    trace?.log("refreshWatchUiAfterSave:done", {
+      itemId,
+      seasonNum: sn,
+      episodeUpdates,
+      seasonCardUpdates,
+      detailBadge: trace?.readDetailBadge?.(),
+    });
 
     logWatchUi("refreshWatchUiAfterSave-done", { episodeUpdates, seasonCardUpdates });
   }

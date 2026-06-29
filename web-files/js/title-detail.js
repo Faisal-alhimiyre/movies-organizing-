@@ -1109,21 +1109,57 @@
 
   /** Re-render only the My Rating block (.td-my-rating). */
   function updateMyRating() {
+    window.WatchlistWatchTrace?.log("updateMyRating:called", {
+      itemId: _activeItemId,
+      detailBadgeBefore: window.WatchlistWatchTrace?.readDetailBadge?.()?.text ?? null,
+    });
     refreshWatchBadge(_activeItemId);
   }
 
   /** Re-render the detail status badge for a specific item id. */
   function refreshWatchBadge(itemId, entry) {
     const id = itemId || _activeItemId;
-    if (!_scroll || !id) return;
+    const trace = window.WatchlistWatchTrace;
+    const detailBefore = trace?.readDetailBadge?.();
+    trace?.log("refreshWatchBadge:start", {
+      itemId: id,
+      entryPassed: entry !== undefined,
+      entrySnapshot: trace?.snapshot(entry),
+      hasScroll: Boolean(_scroll),
+      activeItemId: _activeItemId,
+      detailBadgeBefore: detailBefore?.text ?? null,
+    });
+    if (!_scroll || !id) {
+      trace?.log("refreshWatchBadge:abort", {
+        itemId: id,
+        reason: !_scroll ? "no-scroll" : "no-id",
+      });
+      return;
+    }
     const el = _scroll.querySelector(".td-my-rating");
-    if (!el) return;
+    if (!el) {
+      trace?.log("refreshWatchBadge:abort", { itemId: id, reason: "no-badge-el" });
+      return;
+    }
     const tmp = document.createElement("div");
     tmp.innerHTML =
       entry !== undefined ? myRatingMarkup(id, { entry }) : myRatingMarkup(id);
     const newEl = tmp.firstElementChild;
     if (newEl) el.replaceWith(newEl);
     initMovieProgressSliders(_scroll);
+    const detailAfter = trace?.readDetailBadge?.();
+    trace?.log("refreshWatchBadge:done", {
+      itemId: id,
+      detailBadgeAfter: detailAfter?.text ?? null,
+      replaced: Boolean(newEl),
+    });
+    trace?.logBadgeUpdate?.(
+      "detail",
+      id,
+      detailBefore?.text ?? null,
+      detailAfter?.text ?? null,
+      "refreshWatchBadge"
+    );
   }
 
   /** Re-render only the action buttons (now: refresh menu items). */
@@ -1255,11 +1291,18 @@
       updateCardInPlace: () => window.WatchlistApp?.updateCardInPlace?.(_activeItemId),
       // Called by title-seasons when a watch state changes — refresh My Rating + menu.
       updateHeaderWatchState: (entry) => {
+        window.WatchlistWatchTrace?.log("detail-callback:updateHeaderWatchState", {
+          itemId: _activeItemId,
+          entrySnapshot: window.WatchlistWatchTrace?.snapshot(entry ?? null),
+        });
         refreshWatchBadge(_activeItemId, entry ?? null);
         const fresh = findItem(_activeItemId);
         if (fresh) updateDetailActions(fresh);
       },
       updateDetailActions: () => {
+        window.WatchlistWatchTrace?.log("detail-callback:updateDetailActions", {
+          itemId: _activeItemId,
+        });
         const fresh = findItem(_activeItemId);
         if (fresh) updateDetailActions(fresh);
       },
@@ -1481,17 +1524,31 @@
 
     _staleObserver = new MutationObserver(() => {
       if (!_isOpen || !_activeItemId) return;
-      if (_ignoreMutations) return;
+      if (_ignoreMutations) {
+        window.WatchlistWatchTrace?.log("mutation-observer:skipped", {
+          reason: "ignoreMutations",
+          activeItemId: _activeItemId,
+        });
+        return;
+      }
 
       const cardStillExists = main.querySelector(
         `.card[data-id="${CSS.escape(_activeItemId)}"]`
       );
+      window.WatchlistWatchTrace?.log("mutation-observer:main-childList", {
+        activeItemId: _activeItemId,
+        cardStillExists: Boolean(cardStillExists),
+        detailBadgeBefore: window.WatchlistWatchTrace?.readDetailBadge?.()?.text ?? null,
+      });
       if (!cardStillExists) {
         close();
         return;
       }
       const freshItem = findItem(_activeItemId);
       if (freshItem) {
+        window.WatchlistWatchTrace?.log("mutation-observer:refreshAllSections", {
+          activeItemId: _activeItemId,
+        });
         refreshAllSections(freshItem);
         window.WatchlistSeasons?.onExternalRefresh?.();
       }
@@ -1553,12 +1610,20 @@
 
       case "toggle-watched": {
         _ignoreMutations = true;
+        window.WatchlistWatchTrace?.setSource?.("inside-detail-menu");
         const progState = window.WatchlistApp?.progressState?.(itemId);
+        window.WatchlistWatchTrace?.log("inside-toggle-watched", {
+          itemId,
+          progressBefore: progState,
+          activeItemId: _activeItemId,
+          detailItemIdMatches: _activeItemId === itemId,
+        });
         if (progState === "watched") {
           await window.WatchlistApp?.markItemUnwatched?.(itemId);
         } else {
           await window.WatchlistApp?.markItemWatched?.(itemId, { openRating: true });
         }
+        window.WatchlistWatchTrace?.clearSource?.();
         Promise.resolve().then(() => { _ignoreMutations = false; });
         break;
       }
