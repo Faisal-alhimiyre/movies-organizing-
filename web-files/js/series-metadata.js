@@ -507,14 +507,7 @@
    * Season 1 = your item's AniList link. Season 2+ = each cour's own ID on the season card.
    */
   function pickSeasonAnilistId(seasonSummary, resolution, seasonNumber) {
-    const fromSummary = Number(seasonSummary?.anilistId);
-    if (Number.isFinite(fromSummary) && fromSummary > 0) return fromSummary;
-    const sn = Number(seasonNumber);
-    if (!Number.isFinite(sn) || sn <= 1) {
-      const root = Number(resolution?.anilistId);
-      return Number.isFinite(root) && root > 0 ? root : null;
-    }
-    return null;
+    return resolveSeasonAnilistIdSync(seasonSummary, resolution, seasonNumber);
   }
 
   async function resolveAnimeSeriesId(item) {
@@ -927,12 +920,26 @@
     const onPartial = options?.onPartial;
     if (resolution?.isNegative) return { state: ResultState.INVALID_ID };
     const effectivePoster = seasonSummary?.poster || fallbackPoster;
+    const rootAnilistId = Number(resolution?.anilistId);
+    const sn = Number(seasonNumber) || 0;
 
-    const seasonAnilistId = pickSeasonAnilistId(
-      seasonSummary,
-      resolution,
-      seasonNumber
-    );
+    let seasonAnilistId = null;
+    if (rootAnilistId || seasonSummary?.anilistId || item?.contentType === "anime") {
+      seasonAnilistId = await resolveSeasonAnilistId(
+        seasonSummary,
+        resolution,
+        seasonNumber
+      );
+      if (seasonAnilistId) {
+        repairSeasonSummaryAnilistId(seasonSummary, seasonAnilistId);
+      } else if (
+        sn > 1 &&
+        Number.isFinite(rootAnilistId) &&
+        (item?.contentType === "anime" || resolution?.source === "anilist")
+      ) {
+        return { state: ResultState.UNAVAILABLE };
+      }
+    }
 
     const emitPartial = (partial) => {
       if (typeof onPartial !== "function") return;
@@ -1005,7 +1012,8 @@
         const anilistRaw = await fetchAnilistEpisodes(
           seasonAnilistId,
           seasonNumber,
-          effectivePoster
+          effectivePoster,
+          { rootAnilistId }
         );
         let result = normalizeEpisodesToAppSeason(anilistRaw, seasonNumber);
         emitPartial(result);
@@ -1098,8 +1106,13 @@
           item
         );
       case "anilist":
+        if (Number(seasonNumber) > 1) {
+          return { state: ResultState.UNAVAILABLE };
+        }
         return await enrichEpisodeRatings(
-          await fetchAnilistEpisodes(resolution.anilistId, seasonNumber, effectivePoster),
+          await fetchAnilistEpisodes(resolution.anilistId, seasonNumber, effectivePoster, {
+            rootAnilistId: resolution.anilistId,
+          }),
           resolution,
           seasonNumber,
           locale,
@@ -2673,16 +2686,30 @@
     };
   }
 
-  async function fetchAnilistEpisodes(anilistId, seasonNumber, fallbackPoster = "") {
+  async function fetchAnilistEpisodes(
+    anilistId,
+    seasonNumber,
+    fallbackPoster = "",
+    options = null
+  ) {
     const appSeasonNumber = Number(seasonNumber) || 1;
+    const aid = Number(anilistId);
+    const rootAnilistId = Number(options?.rootAnilistId);
     void fallbackPoster;
 
-    const cacheKey = `metadata:v14:episodes:anilist:${anilistId}:${appSeasonNumber}`;
-    const cached = readCached(cacheKey, TTL_EPISODES);
-    if (cached?.payload) {
-      return parseCachedEpisodesResult(cached, {
-        isStale: isStale(cacheKey, TTL_EPISODES),
-      });
+    const cachePoisoned =
+      appSeasonNumber > 1 &&
+      Number.isFinite(rootAnilistId) &&
+      aid === rootAnilistId;
+
+    const cacheKey = `metadata:v15:episodes:anilist:${aid}:${appSeasonNumber}`;
+    if (!cachePoisoned) {
+      const cached = readCached(cacheKey, TTL_EPISODES);
+      if (cached?.payload) {
+        return parseCachedEpisodesResult(cached, {
+          isStale: isStale(cacheKey, TTL_EPISODES),
+        });
+      }
     }
 
     const data = await anilistQuery(
@@ -2729,7 +2756,13 @@
     }
 
     const result = { state, episodes };
-    writeSeriesCacheEntry(cacheKey, { payload: episodesResultPayload(result), state }, TTL_EPISODES);
+    if (!cachePoisoned) {
+      writeSeriesCacheEntry(
+        cacheKey,
+        { payload: episodesResultPayload(result), state },
+        TTL_EPISODES
+      );
+    }
     return result;
   }
 
@@ -3824,6 +3857,9 @@
     regularEpisodeTotalFromSeasons,
     clearItemResolutionCache,
     cleanEpisodeOverview: cleanEpisodeOverviewText,
+    pickSeasonAnilistId,
+    _resolveSeasonAnilistIdSync: resolveSeasonAnilistIdSync,
+    _resolveSeasonAnilistId: resolveSeasonAnilistId,
     isTvSpecialLinkedMovie: isMovieLikeTvSpecial,
     // Normalization functions exposed for testing
     _normalizeTmdbSeries: normalizeTmdbSeries,

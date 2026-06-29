@@ -737,3 +737,157 @@ describe("Normalized shape equivalence across sources", () => {
     expect(omdbEps[0].progressKey).toBe("2:5");
   });
 });
+
+// ─── 9. AniList season ID resolution (fetchSeasonEpisodes) ───────────────────
+
+describe("AniList season ID resolution", () => {
+  const ROOT_ID = 9253;
+  const S2_ID = 97668;
+  const resolution = { source: "anilist", anilistId: ROOT_ID };
+
+  function mockAnilistGraphql(responders) {
+    return jest.fn().mockImplementation((url, opts) => {
+      if (!String(url).includes("graphql.anilist.co")) {
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: () => Promise.resolve(null),
+        });
+      }
+      const body = JSON.parse(opts.body);
+      const id = body.variables?.id;
+      const query = body.query || "";
+      let media = null;
+      if (query.includes("streamingEpisodes") && responders.episodes?.[id]) {
+        media = responders.episodes[id];
+      } else if (responders.media?.[id]) {
+        media = responders.media[id];
+      } else if (typeof responders.default === "function") {
+        media = responders.default(body);
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ data: media ? { Media: media } : { Media: null } }),
+      });
+    });
+  }
+
+  function episodeFetchIds(fetchMock) {
+    return fetchMock.mock.calls
+      .filter(([, opts]) => {
+        const body = JSON.parse(opts.body);
+        return body.query?.includes("streamingEpisodes");
+      })
+      .map(([, opts]) => JSON.parse(opts.body).variables.id);
+  }
+
+  afterEach(() => {
+    delete global.fetch;
+  });
+
+  test("Season 1 uses root ID only when correct", () => {
+    const SM = loadModule();
+    expect(SM.pickSeasonAnilistId(null, resolution, 1)).toBe(ROOT_ID);
+    expect(SM._resolveSeasonAnilistIdSync(null, resolution, 1)).toBe(ROOT_ID);
+  });
+
+  test("Season 2 uses its own resolved cour ID (sync pick)", () => {
+    const SM = loadModule();
+    const seasonSummary = { anilistId: S2_ID };
+    expect(SM.pickSeasonAnilistId(seasonSummary, resolution, 2)).toBe(S2_ID);
+    expect(SM._resolveSeasonAnilistIdSync(seasonSummary, resolution, 2)).toBe(S2_ID);
+  });
+
+  test("Season 2 sync pick rejects root ID on season summary", () => {
+    const SM = loadModule();
+    expect(SM.pickSeasonAnilistId({ anilistId: ROOT_ID }, resolution, 2)).toBeNull();
+    expect(SM._resolveSeasonAnilistIdSync({ anilistId: ROOT_ID }, resolution, 2)).toBeNull();
+  });
+
+  test("Season 2 does not fetch or cache using root ID", async () => {
+    const poisonKey = `metadata:v15:episodes:anilist:${ROOT_ID}:2`;
+    localStorage.setItem(
+      "watchlist-series-cache-v5",
+      JSON.stringify({
+        [poisonKey]: {
+          cachedAt: Date.now(),
+          ttlMs: 7 * 24 * 3600 * 1000,
+          state: "available",
+          payload: {
+            episodes: [
+              {
+                episodeNumber: 1,
+                title: "POISONED ROOT S1 EP",
+                seasonNumber: 2,
+                progressKey: "2:1",
+              },
+            ],
+          },
+        },
+      })
+    );
+    const SM = loadModule();
+
+    global.fetch = mockAnilistGraphql({
+      episodes: {
+        [S2_ID]: {
+          id: S2_ID,
+          episodes: 12,
+          coverImage: { large: "" },
+          streamingEpisodes: [{ title: "Cour 2 Ep 1", thumbnail: "" }],
+        },
+      },
+    });
+
+    const seasonSummary = { anilistId: S2_ID };
+    const result = await SM.fetchSeasonEpisodes(
+      resolution,
+      2,
+      "en",
+      "",
+      seasonSummary,
+      null
+    );
+
+    const ids = episodeFetchIds(global.fetch);
+    expect(ids).toContain(S2_ID);
+    expect(ids).not.toContain(ROOT_ID);
+    expect(result.episodes?.[0]?.title).toBe("Cour 2 Ep 1");
+    expect(result.episodes?.[0]?.title).not.toBe("POISONED ROOT S1 EP");
+
+    const cache = JSON.parse(localStorage.getItem("watchlist-series-cache-v5"));
+    expect(cache[`metadata:v15:episodes:anilist:${S2_ID}:2`]).toBeDefined();
+    expect(cache[poisonKey]?.payload?.episodes?.[0]?.title).toBe("POISONED ROOT S1 EP");
+  });
+
+  test("unresolved Season 2 returns unavailable instead of wrong episodes", async () => {
+    const SM = loadModule();
+    const seasonSummary = { anilistId: ROOT_ID };
+
+    global.fetch = mockAnilistGraphql({
+      media: {
+        [ROOT_ID]: {
+          id: ROOT_ID,
+          episodes: 12,
+          format: "TV",
+          title: { english: "Season 1 only" },
+          coverImage: { large: "" },
+          relations: { edges: [] },
+        },
+      },
+    });
+
+    const result = await SM.fetchSeasonEpisodes(
+      resolution,
+      2,
+      "en",
+      "",
+      seasonSummary,
+      { contentType: "anime" }
+    );
+
+    expect(result.state).toBe("unavailable");
+    expect(episodeFetchIds(global.fetch)).toEqual([]);
+  });
+});
