@@ -398,6 +398,24 @@
     });
   }
 
+  function previewMovieProgressUi(slider) {
+    if (!slider) return;
+    const runtime = Number(slider.max);
+    const watchedMin = Number(slider.value);
+    if (!Number.isFinite(runtime) || runtime <= 0) return;
+
+    const elapsed = slider
+      .closest(".td-movie-progress")
+      ?.querySelector("[data-td-part='movie-elapsed']");
+    if (elapsed) elapsed.textContent = formatMovieClock(watchedMin);
+    slider.setAttribute("aria-valuenow", String(watchedMin));
+    updateMovieProgressFill(slider);
+
+    const itemId = slider.dataset.tdId || _activeItemId;
+    const progressState = movieProgressStateFromSlider(slider);
+    patchMovieProgressBadges(itemId, progressState);
+  }
+
   function seekMovieProgressSlider(slider, clientX) {
     const rect = slider.getBoundingClientRect();
     if (rect.width <= 0) return;
@@ -409,7 +427,7 @@
     if (Number(slider.value) !== value) {
       slider.value = String(value);
     }
-    syncMovieProgressUi(slider);
+    previewMovieProgressUi(slider);
   }
 
   function saveMovieProgressFromSlider(slider) {
@@ -440,34 +458,30 @@
   }
 
   function syncMovieProgressUi(slider) {
-    if (!slider) return;
-    const runtime = Number(slider.max);
-    const watchedMin = Number(slider.value);
-    if (!Number.isFinite(runtime) || runtime <= 0) return;
-
-    const elapsed = slider
-      .closest(".td-movie-progress")
-      ?.querySelector("[data-td-part='movie-elapsed']");
-    if (elapsed) elapsed.textContent = formatMovieClock(watchedMin);
-    slider.setAttribute("aria-valuenow", String(watchedMin));
-    updateMovieProgressFill(slider);
-
-    const itemId = slider.dataset.tdId || _activeItemId;
-    const progressState = movieProgressStateFromSlider(slider);
+    previewMovieProgressUi(slider);
     saveMovieProgressFromSlider(slider);
-    patchMovieProgressBadges(itemId, progressState);
   }
 
-  let _movieProgressDragging = false;
+  let _movieProgressActivePointer = null;
 
   function bindMovieProgressSlider(slider) {
     if (!slider || slider.dataset.tdMovieProgressBound === "1") return;
     slider.dataset.tdMovieProgressBound = "1";
     updateMovieProgressFill(slider);
 
+    // Native range input (iOS/Android thumb drag and track tap) — single source of truth.
+    slider.addEventListener("input", () => {
+      previewMovieProgressUi(slider);
+    });
+
+    slider.addEventListener("change", () => {
+      if (_movieProgressActivePointer !== null) return;
+      void finalizeMovieProgress(slider);
+    });
+
     slider.addEventListener("pointerdown", (event) => {
-      if (event.pointerType === "mouse" && event.button !== 0) return;
-      _movieProgressDragging = true;
+      if (event.pointerType !== "mouse" || event.button !== 0) return;
+      _movieProgressActivePointer = event.pointerId;
       slider.setPointerCapture(event.pointerId);
       seekMovieProgressSlider(slider, event.clientX);
 
@@ -485,7 +499,7 @@
         } catch {
           /* released */
         }
-        _movieProgressDragging = false;
+        _movieProgressActivePointer = null;
         void finalizeMovieProgress(slider);
       };
 
@@ -496,7 +510,7 @@
     });
 
     slider.addEventListener("keydown", () => {
-      syncMovieProgressUi(slider);
+      previewMovieProgressUi(slider);
       void finalizeMovieProgress(slider);
     });
   }
@@ -1210,8 +1224,6 @@
     });
     // Close menu when clicking anywhere in overlay that is not the menu itself
     _overlay.addEventListener("click", onOverlayClick);
-    _overlay.addEventListener("input", onOverlayInput);
-    _overlay.addEventListener("change", onOverlayChange);
     _overlay.addEventListener("keydown", onOverlayKeydown);
     _titleObserver = null;
     setupSwipeToDismiss();
@@ -1483,18 +1495,6 @@
   }
 
   // ─── Action handler ───────────────────────────────────────────────────────
-  function onOverlayInput(event) {
-    const slider = event.target.closest("[data-td-action='movie-progress']");
-    if (!slider || _movieProgressDragging) return;
-    syncMovieProgressUi(slider);
-  }
-
-  function onOverlayChange(event) {
-    const slider = event.target.closest("[data-td-action='movie-progress']");
-    if (!slider || _movieProgressDragging) return;
-    void finalizeMovieProgress(slider);
-  }
-
   function onOverlayClick(event) {
     // Close menu when clicking outside the menu root
     if (_menuOpen) {

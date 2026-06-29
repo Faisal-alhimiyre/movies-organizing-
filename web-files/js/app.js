@@ -81,7 +81,7 @@
   const CARD_LAYOUT_KEY = "watchlist-card-layout-v2";
   const CARD_LAYOUTS = ["hover", "poster"];
   const SYNC_META_PREFIX = "watchlist-sync-meta-";
-  const UI_PREFS_PREFIX = "watchlist-ui-prefs-";
+  const LEGACY_UI_PREFS_PREFIX = "watchlist-ui-prefs-";
 
   let pendingImportPayload = null;
   const PENDING_SHARE_KEY = "watchlist-pending-share";
@@ -183,7 +183,7 @@
 
     updateHeaderTitle();
     renderListSwitcher();
-    applyUiPrefs(readUiPrefs(nextListId) || {}, { renderNow: false });
+    resetSessionFilters({ renderNow: false });
     if (els.ratingFilter?.value === "rt-best" || els.ratingFilter?.value === "rt-worst") {
       els.ratingFilter.value = "all";
       applyRatingFilter("all");
@@ -514,95 +514,36 @@
     );
   }
 
-  function uiPrefsKey(listId) {
-    return `${UI_PREFS_PREFIX}${listId}`;
+  function purgeLegacyFilterPrefsStorage() {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(LEGACY_UI_PREFS_PREFIX)) {
+        localStorage.removeItem(key);
+      }
+    }
   }
 
-  function normalizeUiPrefs(raw) {
-    if (!raw || typeof raw !== "object") return null;
-    const type =
-      raw.type === "all" || raw.type === "movies" || raw.type === "tvSeries" || raw.type === "anime"
-        ? raw.type
-        : "all";
-    const watchedFilter =
-      raw.watchedFilter === "all" ||
-      raw.watchedFilter === "watched" ||
-      raw.watchedFilter === "inProgress" ||
-      raw.watchedFilter === "unwatched"
-        ? raw.watchedFilter
-        : "all";
-    const ratingFilterSource = String(raw.ratingFilterSource || "all");
-    const ratingFilterSort = raw.ratingFilterSort === "oldest" || raw.ratingFilterSort === "worst"
-      ? raw.ratingFilterSort
-      : (raw.ratingFilterSort === "newest" || raw.ratingFilterSort === "best" ? raw.ratingFilterSort : "default");
-    const selectedGenres = Array.isArray(raw.selectedGenres)
-      ? [...new Set(raw.selectedGenres.map((g) => normalizeGenre(String(g || "").trim())).filter(Boolean))]
-      : [];
-    return {
-      type,
-      watchedFilter,
-      ratingFilterSource,
-      ratingFilterSort,
-      selectedGenres: selectedGenres.filter((g) => STANDARD_GENRES.includes(g)),
-    };
-  }
-
-  function readUiPrefs(listId) {
-    return normalizeUiPrefs(loadJson(uiPrefsKey(listId), null));
-  }
-
-  function writeUiPrefs(listId, prefs) {
-    const normalized = normalizeUiPrefs(prefs);
-    if (!listId || !normalized) return;
-    localStorage.setItem(uiPrefsKey(listId), JSON.stringify(normalized));
-  }
-
-  function collectUiPrefs() {
-    return normalizeUiPrefs({
-      type: state.type,
-      watchedFilter: state.watchedFilter,
-      ratingFilterSource: state.ratingFilterSource,
-      ratingFilterSort: state.ratingFilterSort,
-      selectedGenres: state.selectedGenres,
-    }) || {
-      type: "all",
-      watchedFilter: "all",
-      ratingFilterSource: "all",
-      ratingFilterSort: "default",
-      selectedGenres: [],
-    };
-  }
-
-  function applyUiPrefs(prefs, { renderNow = false } = {}) {
-    const normalized = normalizeUiPrefs(prefs);
-    if (!normalized) return;
-    state.type = normalized.type;
-    state.watchedFilter = normalized.watchedFilter;
-    state.selectedGenres = normalized.selectedGenres;
-    state.ratingFilterSource = normalized.ratingFilterSource;
-    state.ratingFilterSort = normalized.ratingFilterSort;
-
+  function resetSessionFilters({ renderNow = false } = {}) {
+    state.type = "all";
+    state.search = "";
+    clearGenreFilters();
+    state.watchedFilter = "all";
+    applyRatingFilter("all");
+    if (els.search) els.search.value = "";
+    if (els.searchClear) els.searchClear.hidden = true;
+    if (els.watchedFilter) els.watchedFilter.value = "all";
+    if (els.ratingFilter) els.ratingFilter.value = "all";
     els.typeTabs.forEach((tab) => {
-      const active = tab.dataset.type === state.type;
+      const active = tab.dataset.type === "all";
       tab.classList.toggle("type-tab--active", active);
       tab.setAttribute("aria-selected", String(active));
       tab.tabIndex = active ? 0 : -1;
     });
-    if (els.watchedFilter) {
-      els.watchedFilter.value = state.watchedFilter;
-    }
     updateGenreOptions();
     updateRatingFilterOptions();
     updateFilterFieldHighlights();
     updateClearFiltersButton();
     if (renderNow) render();
-  }
-
-  function saveUiPrefs() {
-    const listId = state.activeListId;
-    if (!listId || !canPersistActiveList(listId)) return;
-    // Filters are local-only — persist to localStorage but do NOT push to cloud.
-    writeUiPrefs(listId, collectUiPrefs());
   }
 
   function listSyncMeta(listId) {
@@ -611,7 +552,6 @@
       accountId: window.WatchlistAuth?.getAccountId(),
       name: window.WatchlistAuth?.getListLabel(id),
       description: window.WatchlistAuth?.getListDescription(id),
-      // uiPrefs intentionally excluded — filters stay device-local.
     };
   }
 
@@ -796,8 +736,6 @@
     // Re-read — a local delete/edit may have bumped localUpdated after this reconcile started.
     const freshMeta = readSyncMeta(listId);
     const localStamp = Math.max(freshMeta.localUpdated, freshMeta.syncedAt);
-
-    // uiPrefs are device-local — never overwritten from cloud.
 
     if (
       remoteHasData &&
@@ -2502,26 +2440,7 @@
   }
 
   function clearAllFilters() {
-    state.type = "all";
-    state.search = "";
-    clearGenreFilters();
-    state.watchedFilter = "all";
-    applyRatingFilter("all");
-    if (els.search) els.search.value = "";
-    if (els.searchClear) els.searchClear.hidden = true;
-    if (els.watchedFilter) els.watchedFilter.value = "all";
-    if (els.ratingFilter) els.ratingFilter.value = "all";
-    els.typeTabs.forEach((tab) => {
-      const active = tab.dataset.type === "all";
-      tab.classList.toggle("type-tab--active", active);
-      tab.setAttribute("aria-selected", String(active));
-    });
-    updateGenreOptions();
-    updateRatingFilterOptions();
-    updateFilterFieldHighlights();
-    updateClearFiltersButton();
-    saveUiPrefs();
-    render();
+    resetSessionFilters({ renderNow: true });
   }
 
   function dismissShareArrival() {
@@ -2827,7 +2746,6 @@
     if (els.watchedFilter) els.watchedFilter.value = next;
     updateFilterFieldHighlights();
     updateClearFiltersButton();
-    saveUiPrefs();
     render();
   }
 
@@ -6532,7 +6450,6 @@
     });
     updateGenreOptions();
     updateRatingFilterOptions();
-    saveUiPrefs();
     render();
   }
 
@@ -7233,7 +7150,6 @@
       } else {
         addGenreFilter(genre);
       }
-      saveUiPrefs();
       render();
     });
 
@@ -7241,7 +7157,6 @@
       const btn = event.target.closest("[data-action='remove-filter-genre']");
       if (!btn) return;
       removeGenreFilter(btn.dataset.genre);
-      saveUiPrefs();
       render();
     });
 
@@ -7257,7 +7172,6 @@
 
     els.ratingFilter?.addEventListener("change", () => {
       applyRatingFilter(els.ratingFilter.value || "all");
-      saveUiPrefs();
       if (isReleaseSortActive()) {
         void backfillMissingYears();
       }
@@ -7266,7 +7180,6 @@
 
     els.sortDirectionBtn?.addEventListener("click", () => {
       toggleSortDirection();
-      saveUiPrefs();
     });
 
     els.clearFiltersBtn?.addEventListener("click", () => {
@@ -8076,13 +7989,14 @@
     }
 
     hideLoadingSkeleton();
+    purgeLegacyFilterPrefsStorage();
     updateHeaderTitle();
     window.WatchlistAuth?.registerList(window.WatchlistAuth.getProfile(), {
       accountId: window.WatchlistAuth.getAccountId(),
       name: window.WatchlistAuth.getListLabel(),
       description: window.WatchlistAuth.getListDescription(),
     });
-    applyUiPrefs(readUiPrefs(state.activeListId || window.WatchlistAuth?.getProfile()) || {}, { renderNow: false });
+    resetSessionFilters({ renderNow: false });
     bindEvents();
     bindOfflineSyncListeners();
     syncContentTypePicker(els.formTypePicker, els.formType, els.formType?.value || "movies");

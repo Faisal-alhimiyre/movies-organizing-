@@ -551,6 +551,7 @@ html.td-scroll-lock body {
   width: 100%;
   padding: 0.35rem 0 0.15rem;
   box-sizing: border-box;
+  touch-action: none;
 }
 
 .td-movie-progress__label {

@@ -61,7 +61,6 @@ class RemoteListSnapshot {
     required this.watched,
     required this.name,
     this.description = '',
-    this.uiPrefs,
     this.updatedAt,
   });
 
@@ -69,10 +68,6 @@ class RemoteListSnapshot {
   final Map<String, dynamic> watched;
   final String name;
   final String description;
-
-  /// Persisted filter/tab/sort preferences for this list (mirrors
-  /// `lists.ui_prefs` JSONB column). Used to restore state when switching lists.
-  final Map<String, dynamic>? uiPrefs;
 
   final DateTime? updatedAt;
 }
@@ -148,7 +143,7 @@ class SupabaseSyncRepository {
     try {
       final listRow = await client
           .from(listsTable)
-          .select('account_id, name, description, ui_prefs, updated_at')
+          .select('account_id, name, description, updated_at')
           .eq('list_id', listId)
           .maybeSingle();
 
@@ -177,18 +172,11 @@ class SupabaseSyncRepository {
         updatedAt = DateTime.tryParse(updatedRaw);
       }
 
-      Map<String, dynamic>? uiPrefs;
-      final uiPrefsRaw = listMap['ui_prefs'];
-      if (uiPrefsRaw is Map) {
-        uiPrefs = Map<String, dynamic>.from(uiPrefsRaw);
-      }
-
       return RemoteListSnapshot(
         watchlist: converted.watchlist,
         watched: converted.watched,
         name: listMap['name']?.toString() ?? 'My list',
         description: listMap['description']?.toString() ?? '',
-        uiPrefs: uiPrefs,
         updatedAt: updatedAt,
       );
     } catch (_) {
@@ -398,25 +386,6 @@ class SupabaseSyncRepository {
       return true;
     } catch (error, stackTrace) {
       debugPrint('[sync] createListRow failed: $error\n$stackTrace');
-      return false;
-    }
-  }
-
-  Future<bool> updateListUiPrefs({
-    required String listId,
-    required Map<String, dynamic> uiPrefs,
-  }) async {
-    final client = _client;
-    if (client == null || listId.isEmpty) return false;
-
-    try {
-      await client
-          .from(listsTable)
-          .update({'ui_prefs': uiPrefs})
-          .eq('list_id', listId);
-      return true;
-    } catch (error, stackTrace) {
-      debugPrint('[sync] updateListUiPrefs failed: $error\n$stackTrace');
       return false;
     }
   }

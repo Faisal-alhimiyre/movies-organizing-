@@ -182,6 +182,8 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
   }
 
   void _activateList(String listId) {
+    ref.read(watchlistFilterProvider.notifier).clearAll();
+    ref.read(watchlistTypeFilterProvider.notifier).setFilter(WatchlistTypeFilter.all);
     state = AsyncData(_instantSnapshot(listId));
     _scheduleCloudReconcile(listId);
   }

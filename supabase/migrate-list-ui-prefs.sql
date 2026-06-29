@@ -1,5 +1,5 @@
--- Persist per-list UI preferences across devices
--- Stores tab/filter/sort preferences in lists.ui_prefs
+-- Per-list UI preferences (permanent settings only; filters are session-local).
+-- Transient filter/sort keys are stripped by migrate-ui-prefs-remove-filters.sql.
 -- Safe to run multiple times.
 
 ALTER TABLE public.lists

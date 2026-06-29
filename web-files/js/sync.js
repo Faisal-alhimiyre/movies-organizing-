@@ -282,7 +282,7 @@
 
     const { data, error } = await sb
       .from(LISTS_TABLE)
-      .select("list_id, name, description, title_count, watched_count, updated_at, ui_prefs")
+      .select("list_id, name, description, title_count, watched_count, updated_at")
       .eq("account_id", accountId)
       .order("updated_at", { ascending: true });
 
@@ -302,7 +302,7 @@
       await Promise.all([
         sb
           .from(LISTS_TABLE)
-          .select("account_id, name, description, updated_at, ui_prefs")
+          .select("account_id, name, description, updated_at")
           .eq("list_id", listId)
           .maybeSingle(),
         sb.from(ITEMS_TABLE).select("*").eq("list_id", listId),
@@ -343,7 +343,6 @@
       watched: converted.watched,
       name: listRow?.name || "My list",
       description: listRow?.description || "",
-      uiPrefs: listRow?.ui_prefs && typeof listRow.ui_prefs === "object" ? listRow.ui_prefs : null,
       account_id: listRow?.account_id || null,
       updated_at: listRow?.updated_at || null,
     };
@@ -386,7 +385,6 @@
         account_id: accountId,
         name: meta.name || "My list",
         description: meta.description || "",
-        ...(meta.uiPrefs && typeof meta.uiPrefs === "object" ? { ui_prefs: meta.uiPrefs } : {}),
         updated_at: now,
       },
       { onConflict: "list_id" }
