@@ -116,6 +116,7 @@
   const _anilistInflight = new Map();
   let _anilistCooldownUntil = 0;
   const ANILIST_COOLDOWN_MS = 90_000;
+  const ANILIST_FETCH_TIMEOUT_MS = 28_000;
 
   function isAnilistRateLimited() {
     return Date.now() < _anilistCooldownUntil;
@@ -2915,6 +2916,15 @@
     return null;
   }
 
+  function anilistFetchAbort() {
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+      return { signal: AbortSignal.timeout(ANILIST_FETCH_TIMEOUT_MS) };
+    }
+    const controller = new AbortController();
+    const timerId = setTimeout(() => controller.abort(), ANILIST_FETCH_TIMEOUT_MS);
+    return { signal: controller.signal, clearTimer: () => clearTimeout(timerId) };
+  }
+
   async function anilistQuery(query, variables) {
     if (isAnilistRateLimited()) return null;
 
@@ -2924,11 +2934,13 @@
     }
 
     const run = (async () => {
+      const { signal, clearTimer } = anilistFetchAbort();
       try {
         const res = await fetch(ANILIST_API, {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({ query, variables }),
+          signal,
         });
         if (res.status === 429) {
           markAnilistRateLimited();
@@ -2941,6 +2953,7 @@
       } catch {
         return null;
       } finally {
+        clearTimer?.();
         _anilistInflight.delete(key);
       }
     })();

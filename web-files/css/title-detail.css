@@ -570,6 +570,7 @@ html.td-scroll-lock body {
   background: transparent;
   border-radius: 999px;
   cursor: pointer;
+  touch-action: none;
   direction: ltr;
   --track-bg: var(--border, #363636);
   --track-fill: var(--accent, #0095f6);

@@ -80,11 +80,64 @@
     window.WatchlistI18n?.onChange?.(() => renderIconNote());
   }
 
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./sw.js").catch((error) => {
-        console.warn("[pwa] service worker registration failed:", error);
+  let swReloading = false;
+  let hadServiceWorkerController = Boolean(navigator.serviceWorker.controller);
+
+  function bindServiceWorkerUpdates(registration) {
+    registration.addEventListener("updatefound", () => {
+      const worker = registration.installing;
+      if (!worker) return;
+      worker.addEventListener("statechange", () => {
+        if (worker.state === "installed" && navigator.serviceWorker.controller) {
+          worker.postMessage({ type: "SKIP_WAITING" });
+        }
       });
+    });
+
+    if (registration.waiting && navigator.serviceWorker.controller) {
+      registration.waiting.postMessage({ type: "SKIP_WAITING" });
+    }
+  }
+
+  function checkForServiceWorkerUpdate() {
+    navigator.serviceWorker.getRegistration().then((registration) => {
+      registration?.update().catch(() => {});
+    });
+  }
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadServiceWorkerController) {
+        hadServiceWorkerController = true;
+        return;
+      }
+      if (swReloading) return;
+      swReloading = true;
+      window.location.reload();
+    });
+
+    window.addEventListener("load", () => {
+      navigator.serviceWorker
+        .register("./sw.js", { updateViaCache: "none" })
+        .then((registration) => {
+          bindServiceWorkerUpdates(registration);
+          return registration.update();
+        })
+        .catch((error) => {
+          console.warn("[pwa] service worker registration failed:", error);
+        });
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        checkForServiceWorkerUpdate();
+      }
+    });
+
+    window.addEventListener("pageshow", (event) => {
+      if (event.persisted) {
+        checkForServiceWorkerUpdate();
+      }
     });
   }
 

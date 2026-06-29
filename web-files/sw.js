@@ -1,5 +1,5 @@
 /* Minimal service worker — offline shell for installable PWA. */
-const CACHE = "omn-shell-v127";
+const CACHE = "omn-shell-v128";
 
 const SHELL = [
   "./",
@@ -36,6 +36,12 @@ self.addEventListener("install", (event) => {
   );
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
@@ -44,6 +50,15 @@ self.addEventListener("activate", (event) => {
       .then(() => self.clients.claim())
   );
 });
+
+function isAppCodePath(pathname) {
+  return (
+    pathname.endsWith(".html") ||
+    pathname.endsWith(".js") ||
+    pathname.endsWith(".css") ||
+    pathname.endsWith("/")
+  );
+}
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
@@ -55,8 +70,10 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  const bypassHttpCache = isAppCodePath(url.pathname);
+
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, bypassHttpCache ? { cache: "no-store" } : undefined)
       .then((response) => {
         if (response.ok && response.type === "basic") {
           const copy = response.clone();

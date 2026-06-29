@@ -342,70 +342,192 @@
     slider.style.setProperty("--progress", `${pct}%`);
   }
 
-  function initMovieProgressSliders(root = _scroll) {
-    root?.querySelectorAll("[data-td-action='movie-progress']").forEach((slider) => {
-      updateMovieProgressFill(slider);
+  function movieProgressStateFromSlider(slider) {
+    const runtime = Number(slider?.max) || 0;
+    const watchedMin = Number(slider?.value) || 0;
+    if (runtime <= 0) return "unwatched";
+    const fraction = watchedMin / runtime;
+    if (fraction >= 0.97) return "watched";
+    if (fraction > 0) return "inProgress";
+    return "unwatched";
+  }
+
+  function patchWatchStatusButton(btn, progressState) {
+    if (!btn) return;
+    if (progressState === "inProgress") {
+      btn.className = "card__watch-status card__watch-status--in-progress";
+      btn.textContent = t("card.inProgress");
+      btn.setAttribute("aria-label", t("card.markWatched"));
+      return;
+    }
+    if (progressState === "watched") {
+      btn.className = "card__watch-status card__watch-status--watched";
+      btn.textContent = t("card.watched");
+      btn.setAttribute("aria-label", t("card.markUnwatched"));
+      return;
+    }
+    btn.className = "card__footer-badge card__footer-badge--unwatched";
+    btn.textContent = t("card.notWatchedShort");
+    btn.setAttribute("aria-label", t("card.markWatched"));
+  }
+
+  function patchMovieProgressBadges(itemId, progressState) {
+    const detailRoot = _scroll?.querySelector(".td-my-rating");
+    if (detailRoot) {
+      detailRoot.classList.toggle("td-my-rating--in-progress", progressState === "inProgress");
+      const row = detailRoot.querySelector(".td-my-rating__chip-row, .td-my-rating__toolbar");
+      if (row && progressState === "inProgress") {
+        row.classList.remove("td-my-rating__chip-row");
+        row.classList.add("td-my-rating__toolbar");
+      } else if (row && progressState === "unwatched") {
+        row.classList.remove("td-my-rating__toolbar");
+        row.classList.add("td-my-rating__chip-row");
+      }
+      patchWatchStatusButton(
+        detailRoot.querySelector("[data-td-action='quick-toggle-watched']"),
+        progressState
+      );
+    }
+
+    const card = document.querySelector(`.card[data-id="${CSS.escape(itemId)}"]`);
+    if (!card) return;
+    card.classList.toggle("card--in-progress", progressState === "inProgress");
+    card.classList.toggle("card--watched", progressState === "watched");
+    card.querySelectorAll("[data-action='quick-toggle-watched']").forEach((btn) => {
+      patchWatchStatusButton(btn, progressState);
     });
   }
 
-  let movieProgressPersistTimer = null;
-
-  function clearMovieProgressPersistTimer() {
-    if (movieProgressPersistTimer) {
-      clearTimeout(movieProgressPersistTimer);
-      movieProgressPersistTimer = null;
+  function seekMovieProgressSlider(slider, clientX) {
+    const rect = slider.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const min = Number(slider.min) || 0;
+    const max = Number(slider.max) || 0;
+    if (max <= min) return;
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const value = Math.round(min + ratio * (max - min));
+    if (Number(slider.value) !== value) {
+      slider.value = String(value);
     }
+    syncMovieProgressUi(slider);
   }
 
-  function scheduleMovieProgressPersist(slider) {
-    clearMovieProgressPersistTimer();
-    movieProgressPersistTimer = setTimeout(() => {
-      movieProgressPersistTimer = null;
-      void persistMovieProgress(slider);
-    }, 280);
-  }
-
-  function updateMovieProgressLabels(slider) {
-    if (!slider) return;
-    const runtime = Number(slider.max);
-    const watchedMin = Number(slider.value);
-    if (!Number.isFinite(runtime) || runtime <= 0) return;
-    const elapsed = slider
-      .closest(".td-movie-progress")
-      ?.querySelector("[data-td-part='movie-elapsed']");
-    if (elapsed) elapsed.textContent = formatMovieClock(watchedMin);
-    slider.setAttribute("aria-valuenow", String(watchedMin));
-    updateMovieProgressFill(slider);
-  }
-
-  async function persistMovieProgress(slider) {
+  function saveMovieProgressFromSlider(slider) {
     const itemId = slider?.dataset?.tdsId || slider?.dataset?.tdId || _activeItemId;
     const item = findItem(itemId);
     const runtime = movieRuntimeMinutes(item);
-    if (!itemId || !runtime) return;
+    if (!itemId || !runtime) return null;
 
     const watchedMin = Number(slider.value);
     const fraction = watchedMin / runtime;
     const P = window.WatchlistProgress;
 
-    _ignoreMutations = true;
-
     if (fraction >= 0.97) {
-      await window.WatchlistApp?.quickToggleWatched?.(itemId);
-    } else if (fraction <= 0) {
+      return "watched";
+    }
+    if (fraction <= 0) {
       window.WatchlistApp?.saveWatchedEntry?.(itemId, null);
-    } else if (P?.setMoviePosition) {
+      return "unwatched";
+    }
+    if (P?.setMoviePosition) {
       const existing = window.WatchlistApp?.isWatched?.(itemId)
         ? window.WatchlistApp?.getWatchEntry?.(itemId)
         : null;
       const next = P.setMoviePosition(existing, fraction);
       window.WatchlistApp?.saveWatchedEntry?.(itemId, next);
     }
+    return "inProgress";
+  }
+
+  function syncMovieProgressUi(slider) {
+    if (!slider) return;
+    const runtime = Number(slider.max);
+    const watchedMin = Number(slider.value);
+    if (!Number.isFinite(runtime) || runtime <= 0) return;
+
+    const elapsed = slider
+      .closest(".td-movie-progress")
+      ?.querySelector("[data-td-part='movie-elapsed']");
+    if (elapsed) elapsed.textContent = formatMovieClock(watchedMin);
+    slider.setAttribute("aria-valuenow", String(watchedMin));
+    updateMovieProgressFill(slider);
+
+    const itemId = slider.dataset.tdId || _activeItemId;
+    const progressState = movieProgressStateFromSlider(slider);
+    saveMovieProgressFromSlider(slider);
+    patchMovieProgressBadges(itemId, progressState);
+  }
+
+  let _movieProgressDragging = false;
+
+  function bindMovieProgressSlider(slider) {
+    if (!slider || slider.dataset.tdMovieProgressBound === "1") return;
+    slider.dataset.tdMovieProgressBound = "1";
+    updateMovieProgressFill(slider);
+
+    slider.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      _movieProgressDragging = true;
+      slider.setPointerCapture(event.pointerId);
+      seekMovieProgressSlider(slider, event.clientX);
+
+      const onMove = (e) => {
+        if (e.pointerId !== event.pointerId) return;
+        seekMovieProgressSlider(slider, e.clientX);
+      };
+      const finish = (e) => {
+        if (e.pointerId !== event.pointerId) return;
+        slider.removeEventListener("pointermove", onMove);
+        slider.removeEventListener("pointerup", finish);
+        slider.removeEventListener("pointercancel", finish);
+        try {
+          slider.releasePointerCapture(event.pointerId);
+        } catch {
+          /* released */
+        }
+        _movieProgressDragging = false;
+        void finalizeMovieProgress(slider);
+      };
+
+      slider.addEventListener("pointermove", onMove);
+      slider.addEventListener("pointerup", finish);
+      slider.addEventListener("pointercancel", finish);
+      event.preventDefault();
+    });
+
+    slider.addEventListener("keydown", () => {
+      syncMovieProgressUi(slider);
+      void finalizeMovieProgress(slider);
+    });
+  }
+
+  function initMovieProgressSliders(root = _scroll) {
+    root?.querySelectorAll("[data-td-action='movie-progress']").forEach(bindMovieProgressSlider);
+  }
+
+  async function finalizeMovieProgress(slider) {
+    const itemId = slider?.dataset?.tdsId || slider?.dataset?.tdId || _activeItemId;
+    const item = findItem(itemId);
+    const runtime = movieRuntimeMinutes(item);
+    if (!itemId || !runtime) return;
+
+    const progressState = movieProgressStateFromSlider(slider);
+    _ignoreMutations = true;
+
+    if (progressState === "watched") {
+      await window.WatchlistApp?.quickToggleWatched?.(itemId);
+    } else {
+      saveMovieProgressFromSlider(slider);
+    }
 
     updateMyRating();
     refreshMenuItems();
     window.WatchlistApp?.updateCardInPlace?.(itemId);
     Promise.resolve().then(() => { _ignoreMutations = false; });
+  }
+
+  async function persistMovieProgress(slider) {
+    await finalizeMovieProgress(slider);
   }
 
   // ─── Type badge ───────────────────────────────────────────────────────────
@@ -1090,8 +1212,6 @@
     _overlay.addEventListener("click", onOverlayClick);
     _overlay.addEventListener("input", onOverlayInput);
     _overlay.addEventListener("change", onOverlayChange);
-    _overlay.addEventListener("pointerup", onOverlayPointerUp);
-    _overlay.addEventListener("touchend", onOverlayPointerUp);
     _overlay.addEventListener("keydown", onOverlayKeydown);
     _titleObserver = null;
     setupSwipeToDismiss();
@@ -1365,23 +1485,14 @@
   // ─── Action handler ───────────────────────────────────────────────────────
   function onOverlayInput(event) {
     const slider = event.target.closest("[data-td-action='movie-progress']");
-    if (!slider) return;
-    updateMovieProgressLabels(slider);
-    scheduleMovieProgressPersist(slider);
-  }
-
-  function onOverlayPointerUp(event) {
-    const slider = event.target.closest("[data-td-action='movie-progress']");
-    if (!slider) return;
-    clearMovieProgressPersistTimer();
-    void persistMovieProgress(slider);
+    if (!slider || _movieProgressDragging) return;
+    syncMovieProgressUi(slider);
   }
 
   function onOverlayChange(event) {
     const slider = event.target.closest("[data-td-action='movie-progress']");
-    if (!slider) return;
-    clearMovieProgressPersistTimer();
-    void persistMovieProgress(slider);
+    if (!slider || _movieProgressDragging) return;
+    void finalizeMovieProgress(slider);
   }
 
   function onOverlayClick(event) {

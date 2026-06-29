@@ -793,7 +793,9 @@
     const remoteUpdated = new Date(remote.updated_at || 0).getTime();
     const localHasData = !window.WatchlistAuth.isWatchlistEmpty(state.data);
     const remoteHasData = !window.WatchlistAuth.isWatchlistEmpty(remote.watchlist);
-    const localStamp = Math.max(meta.localUpdated, meta.syncedAt);
+    // Re-read — a local delete/edit may have bumped localUpdated after this reconcile started.
+    const freshMeta = readSyncMeta(listId);
+    const localStamp = Math.max(freshMeta.localUpdated, freshMeta.syncedAt);
 
     // uiPrefs are device-local — never overwritten from cloud.
 
@@ -830,6 +832,9 @@
       }
       writeSyncMeta(listId, { syncedAt: remoteUpdated, localUpdated: remoteUpdated });
       state.syncStatus = "saved";
+      updateGenreOptions();
+      updateStats();
+      render();
       return;
     }
 
@@ -2889,10 +2894,17 @@
   }
 
   function getImdbId(item) {
+    if (item?.imdbId) {
+      const id = String(item.imdbId).trim().toLowerCase();
+      return id.startsWith("tt") ? id : `tt${id.replace(/^tt/i, "")}`;
+    }
     return window.WatchlistMetadata?.extractImdbId(item.imdbLink || item.link) || null;
   }
 
   function getAnilistId(item) {
+    if (item?.anilistId != null && item.anilistId !== "") {
+      return String(item.anilistId);
+    }
     return window.WatchlistMetadata?.extractAnilistId?.(item.link) || null;
   }
 
@@ -3977,8 +3989,6 @@
         ${posterBlock}
         ${bodyStart}
         ${bodyHeader}
-        <p class="card__lead">${escapeHtml((item.leads || parseLeads(item)).join(", "))}</p>
-        <p class="card__summary">${escapeHtml(item.summary || parseSummary(item))}</p>
         ${externalScores}
         <div class="card__footer">
           <div class="card__footer-mobile">${mobileFooter}</div>
@@ -4419,7 +4429,7 @@
         const meta = [result.year, formatSearchResultType(result.type)]
           .filter(Boolean)
           .join(" · ");
-        const pickLabel = onList
+        const pickLabel = isAdded
           ? `${result.title} — ${t("search.alreadyOnList")}`
           : t("search.pickResult", { title: result.title, meta });
         const tabIndex = index === state.searchResultFocusIndex ? "0" : "-1";
@@ -4450,7 +4460,7 @@
             ${poster}
             <span class="title-search__info">
               <span class="title-search__title text-ltr">${escapeHtml(ltr(result.title))}</span>
-              <span class="title-search__meta">${escapeHtml(meta)}</span>
+              <span class="title-search__meta">${escapeHtml(meta)}${isAdded ? ` · ${escapeHtml(t("search.alreadyOnList"))}` : ""}</span>
             </span>
             <button
               type="button"
@@ -4682,6 +4692,27 @@
     syncItemModalViewport();
   }
 
+  function markSearchResultAdded(resultKey) {
+    if (resultKey) state.searchAddedKeys.add(resultKey);
+  }
+
+  function returnToSearchAfterAdd(title, { alreadyOnList = false, resultKey = null } = {}) {
+    if (resultKey) markSearchResultAdded(resultKey);
+    hideSearchConfirmStep();
+    renderTitleSearchResults();
+    setModalSearchMode(state.searchResults.length > 0);
+    if (alreadyOnList) {
+      setTitleSearchStatus(
+        title
+          ? `${title} — ${t("search.alreadyOnList")}`
+          : t("search.alreadyOnList")
+      );
+    } else if (title) {
+      setTitleSearchStatus(t("search.addedStatus", { title }));
+    }
+    els.titleSearchInput?.focus();
+  }
+
   async function runTitleSearch({ append = false } = {}) {
     const query = state.searchQuery.trim();
     if (query.length < 2) {
@@ -4765,10 +4796,18 @@
     if (!hasLookupId(pick) || searchPickLoading) return;
 
     const result = searchResultFromPick(pick);
+    const resultKey =
+      pickButton.dataset.resultKey ||
+      result?.resultKey ||
+      `${result?.title || ""}::${result?.year || ""}`;
+
+    if (state.searchAddedKeys.has(resultKey)) {
+      returnToSearchAfterAdd(result?.title || "", { alreadyOnList: true, resultKey });
+      return;
+    }
+
     if (result && isSearchResultOnList(result)) {
-      await window.WatchlistDialog.alert(t("alert.duplicateOnList"), {
-        title: t("alert.duplicateTitle"),
-      });
+      returnToSearchAfterAdd(result.title, { alreadyOnList: true, resultKey });
       return;
     }
 
@@ -4804,10 +4843,6 @@
         };
       }
 
-      const resultKey =
-        pickButton.dataset.resultKey ||
-        searchResult?.resultKey ||
-        `${searchResult?.title || details.title}::${searchResult?.year || details.year || ""}`;
       state.searchPickResultKey = resultKey;
       setTitleSearchStatus("");
       showSearchConfirmStep(details);
@@ -4908,9 +4943,9 @@
 
     const duplicate = findDuplicate(item, null);
     if (duplicate) {
-      // Already on list from a previous session/sync — mark as added
-      state.searchAddedKeys.add(resultKey);
+      markSearchResultAdded(resultKey);
       renderTitleSearchResults();
+      setTitleSearchStatus(`${item.title} — ${t("search.alreadyOnList")}`);
       return;
     }
 
@@ -4921,7 +4956,7 @@
     render();
     queueItemBadgeEnrichment(item.id);
 
-    state.searchAddedKeys.add(resultKey);
+    markSearchResultAdded(resultKey);
     renderTitleSearchResults();
     setTitleSearchStatus(t("search.addedStatus", { title: item.title }));
   }
@@ -5033,9 +5068,10 @@
 
     const duplicate = findDuplicate(item, null);
     if (duplicate) {
-      await window.WatchlistDialog.alert(t("alert.duplicateOnList"), {
-        title: t("alert.nameExistsTitle"),
-      });
+      const resultKey =
+        state.searchPickResultKey ||
+        `${details.title || item.title}::${resolvedDetails.year || details.year || ""}`;
+      returnToSearchAfterAdd(item.title, { alreadyOnList: true, resultKey });
       return;
     }
 
@@ -5054,11 +5090,8 @@
 
       const resultKey =
         state.searchPickResultKey ||
-        `${item.title}::${resolvedDetails.year || details.year || ""}`;
-      hideSearchConfirmStep();
-      if (resultKey) state.searchAddedKeys.add(resultKey);
-      renderTitleSearchResults();
-      setTitleSearchStatus(t("search.addedStatus", { title: item.title }));
+        `${details.title || item.title}::${resolvedDetails.year || details.year || ""}`;
+      returnToSearchAfterAdd(item.title, { resultKey });
     } finally {
       addSaveInFlight = false;
       setButtonLoading(els.searchConfirmAdd, false);
@@ -6296,6 +6329,29 @@
     saveData();
   }
 
+  function removeCardFromDom(id) {
+    if (!id || !els.main) return;
+    const card = els.main.querySelector(`.card[data-id="${CSS.escape(id)}"]`);
+    if (!card) return;
+    const section = card.closest(".genre-section");
+    card.remove();
+    if (section && !section.querySelector(".card")) {
+      section.remove();
+    }
+  }
+
+  function deleteAndRender(id) {
+    if (!id) return;
+    deleteItem(id);
+    if (window.WatchlistTitleDetail?.activeItemId?.() === id) {
+      window.WatchlistTitleDetail.close();
+    }
+    removeCardFromDom(id);
+    updateGenreOptions();
+    updateStats();
+    render();
+  }
+
   async function copyBulkTemplate() {
     const template = window.WatchlistBulkTitles?.buildTemplate(STANDARD_GENRES);
     if (!template) return;
@@ -6461,10 +6517,9 @@
     );
     if (!confirmed) return;
 
-    deleteItem(state.editingId);
-    updateGenreOptions();
+    const deletedId = state.editingId;
     closeModal();
-    render();
+    deleteAndRender(deletedId);
   }
 
   function setType(type) {
@@ -7897,9 +7952,7 @@
           }
         );
         if (!confirmed) return;
-        deleteItem(id);
-        updateGenreOptions();
-        render();
+        deleteAndRender(id);
         return;
       }
 
@@ -8104,7 +8157,7 @@
     progressState: itemProgressState,
     parseRuntimeMinutes,
     closeAllMenus: closeAllCardMenus,
-    deleteAndRender: (id) => { deleteItem(id); updateGenreOptions(); render(); },
+    deleteAndRender,
     // Exposed for title-seasons.js — save watch entry locally without full render
     saveWatchedEntry: (id, entry) => {
       if (!id) return;

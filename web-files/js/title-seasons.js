@@ -1163,101 +1163,120 @@
     if (_item.id) window.WatchlistApp?.patchItem?.(_item.id, patches);
   }
 
+  function seasonsLoadingStillVisible() {
+    const loadingEl = getP("seasons-loading");
+    const sectionEl = getP("seasons-section");
+    return Boolean(
+      loadingEl &&
+      !loadingEl.hasAttribute("hidden") &&
+      sectionEl?.hasAttribute("hidden")
+    );
+  }
+
   async function loadSeriesMetadata() {
     const tok = _token;
     const meta = window.WatchlistSeriesMetadata;
     if (!meta || !_item) return;
 
-    // Log configuration status for debugging (never logs key values)
-    if (!window.__tdsConfigLogged) {
-      window.__tdsConfigLogged = true;
-      const WM = window.WatchlistMetadata;
-      console.info(
-        "[title-seasons] API config —",
-        "TMDb:", WM?.hasTmdbKey?.() ? "yes" : "no",
-        "| OMDb:", WM?.hasOmdbKey?.() ? "yes" : "no",
-        "| AniList: yes (public)",
-        "| TVDB:", (window.WATCHLIST_CONFIG?.supabaseUrl && window.WatchlistTvdb) ? "yes" : "no",
-      );
-    }
-
-    // Resolve the series identity (IMDb → TMDb/OMDb, AniList, MAL → AniList)
-    await ensureAnimeItemLink();
-    const resolution = await meta.resolveSeriesId(_item);
-    if (!isValid(tok)) return;
-
-    _resolution = resolution;
-    const WM = window.WatchlistMetadata;
-    const linkImdb =
-      WM?.extractImdbId?.(_item?.imdbLink) ||
-      WM?.extractImdbId?.(_item?.link);
-    if (linkImdb && !_resolution.imdbId) {
-      _resolution = { ..._resolution, imdbId: linkImdb };
-    }
-
-    void loadRelatedMovies(tok);
-
-    const locale = getLocale();
-    const poster = getItemPoster();
-    const result = await meta.fetchSeriesMetadata(_resolution, locale, poster);
-    if (!isValid(tok)) return;
-
-    const seriesImdb = result?.series?.imdbId;
-    if (seriesImdb && !_resolution.imdbId) {
-      _resolution = { ..._resolution, imdbId: seriesImdb };
-    }
-
-    if (result?.seasons?.length) {
-      const cleanOverview = meta.cleanEpisodeOverview;
-      if (cleanOverview) {
-        result.seasons = result.seasons.map((season) => ({
-          ...season,
-          overview: cleanOverview(season.overview) || "",
-        }));
+    try {
+      // Log configuration status for debugging (never logs key values)
+      if (!window.__tdsConfigLogged) {
+        window.__tdsConfigLogged = true;
+        const WM = window.WatchlistMetadata;
+        console.info(
+          "[title-seasons] API config —",
+          "TMDb:", WM?.hasTmdbKey?.() ? "yes" : "no",
+          "| OMDb:", WM?.hasOmdbKey?.() ? "yes" : "no",
+          "| AniList: yes (public)",
+          "| TVDB:", (window.WATCHLIST_CONFIG?.supabaseUrl && window.WatchlistTvdb) ? "yes" : "no",
+        );
       }
-    }
 
-    _seriesResult = result;
-    persistRegularEpisodeTotal();
-    const RS = meta.ResultState;
+      // Resolve the series identity (IMDb → TMDb/OMDb, AniList, MAL → AniList)
+      await ensureAnimeItemLink();
+      const resolution = await meta.resolveSeriesId(_item);
+      if (!isValid(tok)) return;
 
-    switch (result?.state) {
-      case RS.AVAILABLE:
-      case RS.PARTIALLY_AVAILABLE:
-        renderSeasonsSection(result);
-        // Only surface the stale banner when the data is genuinely stale (TTL
-        // expired and network refresh failed). PARTIALLY_AVAILABLE on its own
-        // means "AniList could only provide partial series data" which is normal
-        // and should not alarm the user on every cache hit.
-        if (result.isStale) showStale(t("seasons.staleWarning"));
-        break;
+      _resolution = resolution;
+      const WM = window.WatchlistMetadata;
+      const linkImdb =
+        WM?.extractImdbId?.(_item?.imdbLink) ||
+        WM?.extractImdbId?.(_item?.link);
+      if (linkImdb && !_resolution.imdbId) {
+        _resolution = { ..._resolution, imdbId: linkImdb };
+      }
 
-      case RS.OFFLINE_WITH_CACHE:
-        renderSeasonsSection(result);
-        showStale(t("seasons.offline"));
-        break;
+      void loadRelatedMovies(tok);
 
-      case RS.OFFLINE_NO_CACHE:
-        showError(t("seasons.offlineNoCache"), "retry-series");
-        break;
+      const locale = getLocale();
+      const poster = getItemPoster();
+      const result = await meta.fetchSeriesMetadata(_resolution, locale, poster);
+      if (!isValid(tok)) return;
 
-      case RS.RATE_LIMITED:
-        showError(t("seasons.rateLimited"), "retry-series");
-        break;
+      const seriesImdb = result?.series?.imdbId;
+      if (seriesImdb && !_resolution.imdbId) {
+        _resolution = { ..._resolution, imdbId: seriesImdb };
+      }
 
-      case RS.INVALID_ID:
-        showError(t("seasons.invalidId"), null);
-        break;
+      if (result?.seasons?.length) {
+        const cleanOverview = meta.cleanEpisodeOverview;
+        if (cleanOverview) {
+          result.seasons = result.seasons.map((season) => ({
+            ...season,
+            overview: cleanOverview(season.overview) || "",
+          }));
+        }
+      }
 
-      case RS.NO_SEASONS:
-        showError(t("seasons.noSeasons"), null);
-        break;
+      _seriesResult = result;
+      persistRegularEpisodeTotal();
+      const RS = meta.ResultState;
 
-      case RS.UNAVAILABLE:
-      case RS.API_FAILURE:
-      default:
+      switch (result?.state) {
+        case RS.AVAILABLE:
+        case RS.PARTIALLY_AVAILABLE:
+          renderSeasonsSection(result);
+          // Only surface the stale banner when the data is genuinely stale (TTL
+          // expired and network refresh failed). PARTIALLY_AVAILABLE on its own
+          // means "AniList could only provide partial series data" which is normal
+          // and should not alarm the user on every cache hit.
+          if (result.isStale) showStale(t("seasons.staleWarning"));
+          break;
+
+        case RS.OFFLINE_WITH_CACHE:
+          renderSeasonsSection(result);
+          showStale(t("seasons.offline"));
+          break;
+
+        case RS.OFFLINE_NO_CACHE:
+          showError(t("seasons.offlineNoCache"), "retry-series");
+          break;
+
+        case RS.RATE_LIMITED:
+          showError(t("seasons.rateLimited"), "retry-series");
+          break;
+
+        case RS.INVALID_ID:
+          showError(t("seasons.invalidId"), null);
+          break;
+
+        case RS.NO_SEASONS:
+          showError(t("seasons.noSeasons"), null);
+          break;
+
+        case RS.UNAVAILABLE:
+        case RS.API_FAILURE:
+        default:
+          showError(t("seasons.error"), "retry-series");
+          break;
+      }
+    } catch {
+      if (isValid(tok)) showError(t("seasons.error"), "retry-series");
+    } finally {
+      if (!isValid(tok)) return;
+      if (seasonsLoadingStillVisible()) {
         showError(t("seasons.error"), "retry-series");
-        break;
+      }
     }
   }
 

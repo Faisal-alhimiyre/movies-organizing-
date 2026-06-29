@@ -1106,3 +1106,33 @@ html[lang="ar"] {
 .layout-toggle:focus-visible {
   box-shadow: 0 0 0 3px rgba(196, 168, 130, 0.1);
 }
+
+/* Desktop list density — 5 cards across the 1200px app column; mobile unchanged */
+@media (min-width: 641px) {
+  .cards {
+    grid-template-columns: repeat(auto-fill, minmax(212px, 1fr));
+    gap: 0.85rem;
+    align-items: stretch;
+  }
+
+  .app[data-layout="poster"] .cards {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.9rem;
+  }
+
+  .cards .card {
+    height: 100%;
+  }
+
+  .card {
+    padding: 1rem;
+  }
+
+  .app[data-layout="poster"] .card__body {
+    padding: 0.75rem 0.85rem 0.85rem;
+  }
+
+  .card__rating-badges {
+    margin-bottom: 0.55rem;
+  }
+}

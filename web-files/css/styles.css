@@ -1277,6 +1277,7 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 1rem;
+  align-items: stretch;
 }
 
 .card {
@@ -1641,19 +1642,10 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   align-self: stretch;
 }
 
-.card__lead {
-  margin: 0 0 0.5rem;
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: #d9b96a;
-}
-
+/* List cards: lead/summary are detail-sheet only (removed from renderCard). */
+.card__lead,
 .card__summary {
-  flex: 1;
-  margin: 0 0 0.35rem;
-  font-size: 0.875rem;
-  color: var(--text-muted);
-  line-height: 1.45;
+  display: none;
 }
 
 .card__footer-mobile {
@@ -3345,6 +3337,10 @@ html[data-theme] .header__toolbar .btn--primary:hover {
 
 .title-search__item--on-list .title-search__title {
   color: var(--text-muted);
+}
+
+.title-search__item--on-list .title-search__meta {
+  color: #22c55e;
 }
 
 .title-search__more {

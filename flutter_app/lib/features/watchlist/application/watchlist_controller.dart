@@ -448,7 +448,16 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
     final watched = Map<String, WatchEntry>.from(snapshot.watched)
       ..remove(itemId);
 
-    return _persist(session, items, watched);
+    state = AsyncData(
+      WatchlistSnapshot(
+        items: items,
+        watched: watched,
+        isEmptyList: items.isEmpty,
+        syncStatus: snapshot.syncStatus,
+      ),
+    );
+
+    return _persist(session, items, watched, refresh: false);
   }
 
   void _schedulePersist(
