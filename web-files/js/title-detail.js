@@ -1235,9 +1235,9 @@
     if (!slot) return;
 
     window.WatchlistSeasons?.attach?.(slot, item, {
-      getWatchEntry: () => getWatchEntry(_activeItemId),
-      saveWatchedEntry: (entry) => window.WatchlistApp?.saveWatchedEntry?.(_activeItemId, entry),
-      updateCardInPlace: () => window.WatchlistApp?.updateCardInPlace?.(_activeItemId),
+      getWatchEntry: () => getWatchEntry(item.id),
+      saveWatchedEntry: (entry) => window.WatchlistApp?.saveWatchedEntry?.(item.id, entry),
+      updateCardInPlace: () => window.WatchlistApp?.updateCardInPlace?.(item.id),
       // Called by title-seasons when a watch state changes — refresh My Rating + menu.
       updateHeaderWatchState: () => {
         updateMyRating();

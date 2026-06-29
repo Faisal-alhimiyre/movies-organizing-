@@ -111,16 +111,27 @@
   const P = () => window.WatchlistProgress;
 
   function getEntry() {
+    const id = _item?.id;
+    if (id && window.WatchlistApp?.isWatched?.(id)) {
+      const live = window.WatchlistApp.getWatchEntry(id);
+      if (live && typeof live === "object") {
+        const P = window.WatchlistProgress;
+        if (P?.getProgress(live) || P?.isLegacyComplete(live)) return live;
+      }
+    }
     return _callbacks?.getWatchEntry?.() ?? null;
   }
 
-  function saveEntry(newEntry) {
+  function saveEntry(newEntry, seasonNum) {
     let entry = newEntry;
     if (_episodesResult?.episodes?.length && _episodesResult?.seasonNum != null) {
       entry = rememberSeasonTotals(entry, _episodesResult.seasonNum, _episodesResult.episodes);
     }
     const annotated = annotateCompletion(entry);
     _callbacks?.saveWatchedEntry?.(annotated);
+    const sn = seasonNum ?? _selectedSeason ?? _episodesResult?.seasonNum ?? null;
+    refreshWatchUiAfterSave(sn, annotated);
+    return annotated;
   }
 
   /** Persist per-season aired episode totals so reopening can derive watched state. */
@@ -441,8 +452,9 @@
 
   function refreshWatchUiAfterSave(seasonNum, savedEntry) {
     const entry = savedEntry ?? getEntry();
+    const sn = seasonNum ?? _selectedSeason ?? _episodesResult?.seasonNum ?? null;
 
-    if (_episodesResult?.seasonNum === seasonNum && _episodesResult?.episodes) {
+    if (sn != null && _episodesResult?.seasonNum === sn && _episodesResult?.episodes) {
       (_episodesResult.episodes || []).forEach((ep) => {
         updateEpisodeRowStateFromEntry(entry, ep.seasonNumber, ep.episodeNumber, ep);
       });
@@ -451,8 +463,12 @@
     (_seriesResult?.seasons || []).forEach((s) => refreshSeasonCard(s.seasonNumber, entry));
     renderSpecialsCarousel();
 
-    const seasonsToUpdate = new Set([seasonNum, _selectedSeason].filter((n) => n != null));
+    const seasonsToUpdate = new Set([sn, _selectedSeason].filter((n) => n != null));
     seasonsToUpdate.forEach((n) => updateSeasonActions(n));
+
+    if (_selectedSeason != null) {
+      notifySeasonPresentation(_selectedSeason, { persistPoster: false });
+    }
 
     _callbacks?.updateHeaderWatchState?.();
     _callbacks?.updateDetailActions?.();
@@ -2411,7 +2427,6 @@
       : P()?.setEpisodeRating?.(entry, seasonNum, epNum, normalized);
 
     saveEntry(entry);
-    refreshWatchUiAfterSave(seasonNum, entry);
     _episodeModalEditing = false;
     openEpisodeModal(_activeEpisodeKey);
   }
@@ -2607,8 +2622,7 @@
       newEntry = P()?.markEpisodeWatched(entry, seasonNum, epNum, allAired);
     }
 
-    saveEntry(newEntry);
-    refreshWatchUiAfterSave(seasonNum, newEntry);
+    saveEntry(newEntry, seasonNum);
   }
 
   // ─── Action: mark / unmark whole season ───────────────────────────────────
@@ -2666,18 +2680,14 @@
     const airedKeys = airedEpisodeKeysForSeason(seasonNum);
 
     if (!markingWatched) {
-      const newEntry = P()?.unmarkSeasonWatched(entry, seasonNum, airedKeys);
-      saveEntry(newEntry);
-      refreshWatchUiAfterSave(seasonNum, newEntry);
+      saveEntry(P()?.unmarkSeasonWatched(entry, seasonNum, airedKeys), seasonNum);
       return;
     }
 
     if (!airedKeys.length) return;
 
     const keysToMark = await promptSeasonWatchGapFill(entry, seasonNum, airedKeys);
-    const newEntry = P()?.markSeasonWatched(entry, keysToMark);
-    saveEntry(newEntry);
-    refreshWatchUiAfterSave(seasonNum, newEntry);
+    saveEntry(P()?.markSeasonWatched(entry, keysToMark), seasonNum);
 
     const regularSeasons = getRegularSeasons();
     const next = regularSeasons.find((s) => s.seasonNumber > seasonNum);
@@ -2687,29 +2697,13 @@
   // ─── Callback: title-level watched changed (from detail actions bar) ──────
 
   function onTitleWatchedChanged() {
-    // Title was binary-watched or unwatched from the detail header action.
-    // Re-read all episode/season states from the (now updated) entry.
-    refreshAllEpisodeRows();
-    const seasons = _seriesResult?.seasons || [];
-    seasons.forEach((s) => refreshSeasonCard(s.seasonNumber));
-    renderSpecialsCarousel();
-    if (_selectedSeason != null) {
-      notifySeasonPresentation(_selectedSeason, { persistPoster: false });
-    }
-    // Don't call updateHeaderWatchState here — title-detail.js already did it.
+    refreshWatchUiAfterSave(_selectedSeason);
   }
 
   // ─── Callback: external refresh (edit/move — detail sections were patched) ─
 
   function onExternalRefresh() {
-    // Re-read watch entry in case it was modified externally; update display
-    refreshAllEpisodeRows();
-    const seasons = _seriesResult?.seasons || [];
-    seasons.forEach((s) => refreshSeasonCard(s.seasonNumber));
-    renderSpecialsCarousel();
-    if (_selectedSeason != null) {
-      notifySeasonPresentation(_selectedSeason, { persistPoster: false });
-    }
+    refreshWatchUiAfterSave(_selectedSeason);
   }
 
   // ─── Language change ──────────────────────────────────────────────────────

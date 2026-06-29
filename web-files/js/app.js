@@ -607,16 +607,17 @@
 
   function notifyItemStateChanged(itemId, expectedRevision) {
     if (!itemId) return;
-    if (expectedRevision != null && itemMutationRevision.get(itemId) !== expectedRevision) {
-      return;
-    }
+    const revisionStale =
+      expectedRevision != null && itemMutationRevision.get(itemId) !== expectedRevision;
 
+    // Always refresh the list card + header stats — even when a newer revision superseded this one.
     syncListCard(itemId);
+
+    if (revisionStale) return;
 
     if (window.WatchlistTitleDetail?.activeItemId?.() === itemId) {
       window.WatchlistTitleDetail.refresh?.();
       window.WatchlistSeasons?.onTitleWatchedChanged?.();
-      window.WatchlistSeasons?.onExternalRefresh?.();
     }
   }
 
@@ -658,6 +659,7 @@
           bumpItemMutation(itemId);
           notifyItemStateChanged(itemId);
           state.syncStatus = resolveSyncFailureStatus();
+          void notifyCloudSyncFailed();
         } else {
           state.syncStatus = resolveSyncFailureStatus();
         }
@@ -1635,6 +1637,21 @@
 
   function isItemWatched(id) {
     return Boolean(state.watched[id]);
+  }
+
+  function isWatchEntryEmpty(entry) {
+    if (!entry) return true;
+    const P = window.WatchlistProgress;
+    if (P?.isLegacyComplete(entry)) return false;
+    const prog = P?.getProgress(entry);
+    if (prog?.completed === true) return false;
+    if (Array.isArray(prog?.episodes) && prog.episodes.length > 0) return false;
+    if (prog?.seasonTotals && Object.keys(prog.seasonTotals).length > 0) return false;
+    if (prog?.episodeRatings && Object.keys(prog.episodeRatings).length > 0) return false;
+    if (typeof prog?.moviePosition === "number" && prog.moviePosition > 0) return false;
+    if (hasWatchRating(entry)) return false;
+    if (String(entry.note || "").trim()) return false;
+    return true;
   }
 
   function getWatchEntry(id) {
@@ -8436,7 +8453,7 @@
     saveWatchedEntry: (id, entry) => {
       if (!id) return;
       commitWatchChange(id, () => {
-        if (entry === null || entry === undefined) {
+        if (entry == null || isWatchEntryEmpty(entry)) {
           delete state.watched[id];
         } else {
           state.watched[id] = entry;
