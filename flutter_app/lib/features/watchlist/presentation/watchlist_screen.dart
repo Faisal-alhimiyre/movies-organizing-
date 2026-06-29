@@ -978,8 +978,22 @@ class _WatchlistBody extends ConsumerWidget {
             ref.read(linkPreviewControllerProvider.notifier).hide();
             return false;
           },
-          child: ListView(
-            children: [
+          child: RefreshIndicator(
+            onRefresh: () async {
+              final errorKey = await ref
+                  .read(watchlistControllerProvider.notifier)
+                  .pullToRefresh();
+              if (!context.mounted || errorKey == null) return;
+              final message = errorKey == 'ptr.failed'
+                  ? l10n.ptrFailed
+                  : l10n.syncOffline;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(message)),
+              );
+            },
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [
               const RatingsBackfillOrchestrator(),
               const TitleMetaBackfillOrchestrator(),
               const PosterBackfillOrchestrator(),
@@ -1046,6 +1060,7 @@ class _WatchlistBody extends ConsumerWidget {
               const SizedBox(height: 80),
             ],
           ),
+        ),
         ),
         const LinkPreviewLayer(),
       ],

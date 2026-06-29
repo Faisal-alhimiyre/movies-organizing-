@@ -118,7 +118,7 @@
 
     window.addEventListener("load", () => {
       navigator.serviceWorker
-        .register("./sw.js", { updateViaCache: "none" })
+        .register("./sw.js?v=134", { updateViaCache: "none" })
         .then((registration) => {
           bindServiceWorkerUpdates(registration);
           return registration.update();

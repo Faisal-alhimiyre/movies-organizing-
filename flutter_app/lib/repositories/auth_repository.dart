@@ -148,6 +148,21 @@ class AuthRepository {
   List<ListLibraryEntry> getLibrary(String accountId) =>
       _local.getLibrary(accountId);
 
+  Future<void> syncRemoteListLibrary(String accountId) async {
+    if (!_supabaseConfigured || _supabase == null) return;
+    final remoteLists = await _supabase!.fetchListsForAccount(accountId);
+    for (final row in remoteLists) {
+      await _local.registerList(
+        ListLibraryEntry(
+          listId: row.listId,
+          accountId: accountId,
+          name: row.name,
+          description: row.description,
+        ),
+      );
+    }
+  }
+
   String? getDefaultListId(String accountId) =>
       _local.getDefaultListId(accountId);
 

@@ -134,6 +134,43 @@ class WatchlistRepository {
     );
   }
 
+  /// Manual pull-to-refresh: fetch cloud backup and merge into local storage.
+  Future<bool> pullRefreshFromCloud(
+    String listId, {
+    String? accountId,
+  }) async {
+    final supabase = _supabase;
+    if (supabase == null) return false;
+
+    while (_cloudPushInFlight[listId] == true) {
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+    }
+    _cloudPushTimers.remove(listId)?.cancel();
+    _pendingCloudPush.remove(listId);
+
+    final remote = await supabase.fetchSnapshot(listId);
+    if (remote == null || remote.watchlist.isEmpty) return false;
+
+    final localWatched = _readWatched(listId);
+    final remoteWatched = parseWatchedMap(remote.watched);
+    final mergedWatched = mergeWatchedPreferRicher(remoteWatched, localWatched);
+
+    await _local.writeWatchlist(
+      listId,
+      remote.watchlist,
+      watched: watchedMapToJson(mergedWatched),
+    );
+
+    final remoteUpdated = remote.updatedAt?.millisecondsSinceEpoch ??
+        DateTime.now().millisecondsSinceEpoch;
+    await _writeSyncMeta(
+      listId,
+      syncedAt: remoteUpdated,
+      localUpdated: remoteUpdated,
+    );
+    return true;
+  }
+
   /// Writes local storage immediately; cloud push is debounced (web parity).
   Future<WatchlistSaveResult> saveItems({
     required String listId,

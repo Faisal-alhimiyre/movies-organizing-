@@ -119,6 +119,8 @@ final watchlistFilterProvider =
 class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
   /// Serializes local/cloud writes so rapid taps don't race or block the UI.
   Future<void> _persistChain = Future.value();
+  bool _pullRefreshInFlight = false;
+  DateTime? _pullRefreshLastDone;
 
   @override
   Future<WatchlistSnapshot> build() async {
@@ -578,6 +580,49 @@ class WatchlistController extends AsyncNotifier<WatchlistSnapshot> {
 
   Future<void> reload() async {
     ref.invalidateSelf();
+  }
+
+  /// Manual pull-to-refresh from Supabase (backup fetch). Keeps filters/scroll/detail intact.
+  Future<String?> pullToRefresh() async {
+    if (_pullRefreshInFlight) return null;
+    if (_pullRefreshLastDone != null &&
+        DateTime.now().difference(_pullRefreshLastDone!) <
+            const Duration(seconds: 2)) {
+      return null;
+    }
+
+    final session = ref.read(sessionProvider);
+    if (session == null) return null;
+    if (!ref.read(appConfigProvider).isSupabaseConfigured) return null;
+    if (!_isOnline) return 'watchlist.syncOffline';
+
+    _pullRefreshInFlight = true;
+    try {
+      await ref.read(authRepositoryProvider).syncRemoteListLibrary(session.accountId);
+      if (ref.read(sessionProvider)?.listId != session.listId) return null;
+
+      final ok = await ref.read(watchlistRepositoryProvider).pullRefreshFromCloud(
+            session.listId,
+            accountId: session.accountId,
+          );
+      if (ref.read(sessionProvider)?.listId != session.listId) return null;
+      if (!ok) return 'ptr.failed';
+
+      final cloud = ref.read(appConfigProvider).isSupabaseConfigured;
+      final fresh = ref.read(watchlistRepositoryProvider).readSnapshot(
+            session.listId,
+            cloudConfigured: cloud,
+          );
+      state = AsyncData(
+        fresh.copyWith(syncStatus: SyncDisplayStatus.saved),
+      );
+      return null;
+    } catch (_) {
+      return 'ptr.failed';
+    } finally {
+      _pullRefreshInFlight = false;
+      _pullRefreshLastDone = DateTime.now();
+    }
   }
 
   Future<void> replaceItems(

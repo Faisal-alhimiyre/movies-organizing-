@@ -96,6 +96,9 @@
   let titleMetaBackfillRunning = false;
   let episodeTotalsBackfillRunning = false;
   let yearsBackfillRunning = false;
+  let ptrRefreshing = false;
+  let ptrLastDoneAt = 0;
+  const PTR_COOLDOWN_MS = 2000;
 
   const state = {
     type: "all",
@@ -793,6 +796,200 @@
     }
   }
 
+  function watchEntryRichness(entry) {
+    const normalized = normalizeWatchEntry(entry);
+    if (!normalized) return 0;
+    const P = window.WatchlistProgress;
+    if (P?.isLegacyComplete?.(normalized)) {
+      let score = 1000;
+      if (hasWatchRating(normalized)) score += 1;
+      if (String(normalized.note || "").trim()) score += 1;
+      return score;
+    }
+    const prog = P?.getProgress?.(normalized);
+    if (prog && Array.isArray(prog.episodes)) {
+      const regularEps = prog.episodes.filter((key) => !String(key).startsWith("0:"));
+      return (
+        100 +
+        regularEps.length +
+        (prog.completed === true ? 500 : 0) +
+        (prog.episodeRatings ? Object.keys(prog.episodeRatings).length : 0)
+      );
+    }
+    if (hasWatchRating(normalized) || String(normalized.note || "").trim()) return 10;
+    return 5;
+  }
+
+  function richerWatchEntry(a, b) {
+    return watchEntryRichness(a) >= watchEntryRichness(b) ? a : b;
+  }
+
+  function mergeWatchedPreferRicher(remote, local) {
+    const merged = { ...(remote || {}) };
+    for (const [id, entry] of Object.entries(local || {})) {
+      if (!merged[id]) {
+        merged[id] = entry;
+      } else {
+        merged[id] = richerWatchEntry(merged[id], entry);
+      }
+    }
+    return merged;
+  }
+
+  function itemPtrSignature(item) {
+    return JSON.stringify({
+      title: item.title,
+      genre: item.genre,
+      contentType: item.contentType,
+      year: item.year,
+      link: item.link,
+      imdbLink: item.imdbLink,
+      cardPoster: item.cardPoster,
+      lastSelectedSeason: item.lastSelectedSeason,
+      cardSeasonName: item.cardSeasonName,
+      noSpecials: item.noSpecials,
+      seasonCount: item.seasonCount,
+      episodeCount: item.episodeCount,
+      imdbRating: item.imdbRating,
+      anilistRating: item.anilistRating,
+      watched: state.watched[item.id] ?? null,
+    });
+  }
+
+  function isPullRefreshBlocked() {
+    if (window.WatchlistTitleDetail?.isOpen?.()) return true;
+    if (isAppDialogOpen()) return true;
+    if (isSearchConfirmVisible()) return true;
+    if (els.ratingModal && !els.ratingModal.hidden) return true;
+    if (els.modal && !els.modal.hidden) return true;
+    if (els.manageListsModal && !els.manageListsModal.hidden) return true;
+    if (els.createListModal && !els.createListModal.hidden) return true;
+    if (els.moveListModal && !els.moveListModal.hidden) return true;
+    if (state.syncRetrying) return true;
+    return false;
+  }
+
+  function canPullToRefresh() {
+    if (ptrRefreshing) return false;
+    if (Date.now() - ptrLastDoneAt < PTR_COOLDOWN_MS) return false;
+    if (!window.WatchlistSync?.isConfigured?.()) return false;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+    if (!state.activeListId) return false;
+    if (isPullRefreshBlocked()) return false;
+    return true;
+  }
+
+  function isPullToRefreshActive() {
+    return ptrRefreshing;
+  }
+
+  function applyRemoteSnapshotQuiet(remote) {
+    const bundled = window.WATCHLIST ? structuredClone(window.WATCHLIST) : null;
+    const scrollY = window.scrollY;
+    const listId = state.activeListId;
+    const oldSignatures = new Map(state.items.map((item) => [item.id, itemPtrSignature(item)]));
+    const oldIds = new Set(state.items.map((item) => item.id));
+
+    const localAddedById = new Map();
+    for (const item of state.items) {
+      if (item.addedAt) localAddedById.set(item.id, item.addedAt);
+    }
+
+    state.data = applyBundledGenreCorrections(remote.watchlist, bundled);
+    state.watched = mergeWatchedPreferRicher(remote.watched || {}, state.watched);
+    state.items = flattenWatchlist(state.data);
+
+    if (localAddedById.size) {
+      for (const item of state.items) {
+        const localAt = localAddedById.get(item.id);
+        if (localAt) item.addedAt = localAt;
+      }
+    }
+    state.data = itemsToNested(state.items);
+
+    if (remote.name) {
+      window.WatchlistAuth.registerList(listId, {
+        accountId: window.WatchlistAuth.getAccountId(),
+        name: remote.name,
+        description: remote.description || "",
+      });
+    }
+
+    saveData();
+    saveWatched();
+
+    const remoteUpdated = new Date(remote.updated_at || 0).getTime() || Date.now();
+    writeSyncMeta(listId, { syncedAt: remoteUpdated, localUpdated: remoteUpdated });
+
+    let needsFullRender = false;
+    const newIds = new Set(state.items.map((item) => item.id));
+
+    for (const id of oldIds) {
+      if (!newIds.has(id)) {
+        removeCardFromDom(id);
+        needsFullRender = true;
+      }
+    }
+
+    for (const item of state.items) {
+      if (!oldIds.has(item.id)) {
+        needsFullRender = true;
+        break;
+      }
+      if (itemPtrSignature(item) !== oldSignatures.get(item.id)) {
+        syncListCard(item.id);
+      }
+    }
+
+    if (needsFullRender) {
+      render();
+      window.scrollTo(0, scrollY);
+    }
+
+    updateHeaderTitle();
+    renderListSwitcher();
+    updateGenreOptions();
+    updateStats();
+    updateClearFiltersButton();
+    updateFilterFieldHighlights();
+
+    if (window.WatchlistTitleDetail?.isOpen?.()) {
+      window.WatchlistTitleDetail.refresh?.();
+      window.WatchlistSeasons?.onExternalRefresh?.();
+    }
+  }
+
+  async function pullToRefreshFromCloud() {
+    if (!canPullToRefresh()) return { ok: false, reason: "blocked" };
+
+    const listId = state.activeListId;
+    ptrRefreshing = true;
+
+    try {
+      window.WatchlistSync?.cancelScheduledPush?.();
+      await syncAccountLists();
+      if (state.activeListId !== listId) return { ok: false, reason: "list-changed" };
+
+      const remote = await window.WatchlistSync.fetchSnapshot(listId);
+      if (state.activeListId !== listId) return { ok: false, reason: "list-changed" };
+
+      if (!remote || window.WatchlistAuth.isWatchlistEmpty(remote.watchlist)) {
+        return { ok: false, reason: "empty" };
+      }
+
+      applyRemoteSnapshotQuiet(remote);
+      state.syncStatus = "saved";
+      return { ok: true };
+    } catch (error) {
+      console.warn("[ptr] pull refresh failed:", error);
+      return { ok: false, reason: "error" };
+    } finally {
+      ptrRefreshing = false;
+      ptrLastDoneAt = Date.now();
+      updateStats();
+    }
+  }
+
   function saveWatched() {
     if (!canPersistActiveList()) return;
     const { watched } = storageKeys();
@@ -1481,7 +1678,70 @@
 
     delete state.watched[itemId];
     saveWatched();
-    render();
+    refreshCardWatchState(itemId);
+  }
+
+  /** Re-render one list card + header/filter chrome after any item or watch mutation. */
+  function syncListCard(itemId) {
+    if (!itemId) return;
+    closeAllCardMenus();
+
+    const item = state.items.find((entry) => entry.id === itemId);
+    const filtered = getFilteredItems();
+    const stillVisible = Boolean(item && filtered.some((entry) => entry.id === itemId));
+    const card = els.main?.querySelector(`.card[data-id="${CSS.escape(itemId)}"]`);
+
+    if (stillVisible && item && card) {
+      const tmp = document.createElement("div");
+      tmp.innerHTML = renderCard(item);
+      const newCard = tmp.firstElementChild;
+      if (newCard) card.replaceWith(newCard);
+    } else if (!stillVisible && card) {
+      card.remove();
+    } else if (stillVisible && item && !card) {
+      render();
+      return;
+    }
+
+    if (!els.main?.querySelector(".card")) {
+      if (state.items.length === 0) {
+        els.main.innerHTML = renderEmptyListState();
+      } else if (filtered.length === 0) {
+        els.main.innerHTML = renderEmptyFilterState();
+      }
+    }
+
+    updateStats();
+    updateClearFiltersButton();
+    updateFilterFieldHighlights();
+    if (stillVisible && item) reorderListCardInGroup(itemId);
+  }
+
+  function reorderListCardInGroup(itemId) {
+    const card = els.main?.querySelector(`.card[data-id="${CSS.escape(itemId)}"]`);
+    if (!card) return;
+    const container = card.closest(".cards, .cards--rating-sorted");
+    if (!container) return;
+
+    const filtered = getFilteredItems();
+    const groups = groupItems(filtered);
+    const group = groups.find((g) => g.items.some((i) => i.id === itemId));
+    if (!group) return;
+
+    const idsInContainer = new Set(
+      [...container.querySelectorAll(":scope > .card")].map((el) => el.dataset.id)
+    );
+    const sorted = group.items.filter((i) => idsInContainer.has(i.id));
+    const order = new Map(sorted.map((entry, index) => [entry.id, index]));
+    const cards = [...container.querySelectorAll(":scope > .card")];
+    cards.sort(
+      (a, b) => (order.get(a.dataset.id) ?? 9999) - (order.get(b.dataset.id) ?? 9999)
+    );
+    for (const el of cards) container.appendChild(el);
+  }
+
+  function refreshCardWatchState(itemId) {
+    syncListCard(itemId);
   }
 
   function openRatingModal(itemId) {
@@ -1814,6 +2074,20 @@
     return "unwatched";
   }
 
+  /** Sort key: unwatched (0) → in progress (1) → watched (2). */
+  function progressSortRank(id) {
+    const progress = itemProgressState(id);
+    if (progress === "inProgress") return 1;
+    if (progress === "watched") return 2;
+    // Entry exists but granular state is empty — still sort with watched (matches footer).
+    if (isItemWatched(id)) return 2;
+    return 0;
+  }
+
+  function compareItemsByProgress(a, b) {
+    return progressSortRank(a.id) - progressSortRank(b.id);
+  }
+
   function itemMatchesWatchedFilter(item) {
     if (state.watchedFilter === "watched") return itemProgressState(item.id) === "watched";
     if (state.watchedFilter === "inProgress") return itemProgressState(item.id) === "inProgress";
@@ -1996,6 +2270,9 @@
   function sortItemsByRelease(items) {
     const newest = isSortNewestFirst();
     return [...items].sort((a, b) => {
+      const progressDiff = compareItemsByProgress(a, b);
+      if (progressDiff !== 0) return progressDiff;
+
       const aYear = parseReleaseYear(a.year);
       const bYear = parseReleaseYear(b.year);
       if (aYear == null && bYear == null) {
@@ -2050,6 +2327,9 @@
   function sortItemsByRating(items) {
     const bestFirst = isSortBestFirst();
     return [...items].sort((a, b) => {
+      const progressDiff = compareItemsByProgress(a, b);
+      if (progressDiff !== 0) return progressDiff;
+
       const aScore = getRatingSortScore(a);
       const bScore = getRatingSortScore(b);
       if (aScore == null && bScore == null) {
@@ -2066,6 +2346,9 @@
   function sortItemsByAdded(items) {
     const newest = isSortNewestFirst();
     return [...items].sort((a, b) => {
+      const progressDiff = compareItemsByProgress(a, b);
+      if (progressDiff !== 0) return progressDiff;
+
       const aTime = a.addedAt || 0;
       const bTime = b.addedAt || 0;
       if (aTime !== bTime) return newest ? bTime - aTime : aTime - bTime;
@@ -2214,9 +2497,8 @@
     const typeOrder = ["movies", "tvSeries", "anime"];
 
     return [...items].sort((a, b) => {
-      const aWatched = isItemWatched(a.id);
-      const bWatched = isItemWatched(b.id);
-      if (aWatched !== bWatched) return aWatched ? 1 : -1;
+      const progressDiff = compareItemsByProgress(a, b);
+      if (progressDiff !== 0) return progressDiff;
 
       const typeDiff =
         typeOrder.indexOf(a.contentType) - typeOrder.indexOf(b.contentType);
@@ -3709,6 +3991,10 @@
     return `<span class="card__watched-check" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>`;
   }
 
+  function renderInProgressCheck() {
+    return `<span class="card__progress-check" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><circle cx="12" cy="12" r="9" opacity="0.35"/><path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" stroke="none"/></svg></span>`;
+  }
+
   function renderTitleMetaBadges(item) {
     const badges =
       window.WatchlistMetadata?.buildTitleMetaBadges(item, item.contentType) || [];
@@ -3770,7 +4056,7 @@
     const displayTitle = cardDisplayTitle(item);
     const titleBlock = `
       <div class="card__top">
-        ${progressState === "watched" ? renderWatchedCheck() : ""}
+        ${progressState === "watched" ? renderWatchedCheck() : progressState === "inProgress" ? renderInProgressCheck() : ""}
         <h3 class="card__title">
           <span class="text-ltr">${escapeHtml(ltr(displayTitle))}</span>
           ${altTitle}
@@ -3849,21 +4135,9 @@
           }
         </button>`
       : progressState === "inProgress"
-        ? `<button type="button" class="card__watch-status card__watch-status--in-progress" data-action="quick-toggle-watched" data-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(t("card.markWatched"))}">${escapeHtml(t("card.inProgress"))}</button>`
-      : isWatched
-        ? `<div class="card__rating card__rating--pending">
-            <div class="card__rating-top">
-              <span class="card__rating-label">${escapeHtml(t("card.yourRating"))}</span>
-              <button
-                type="button"
-                class="btn btn--ghost btn--sm card__rate-btn"
-                data-action="rate"
-                data-id="${escapeHtml(item.id)}"
-              >
-                ${escapeHtml(t("card.rate"))}
-              </button>
-            </div>
-          </div>`
+        ? `<button type="button" class="card__footer-badge card__footer-badge--in-progress" data-action="quick-toggle-watched" data-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(t("card.markWatched"))}">${escapeHtml(t("card.inProgress"))}</button>`
+      : progressState === "watched" || (isWatched && !rated)
+        ? `<button type="button" class="card__footer-badge card__footer-badge--watched" data-action="quick-toggle-watched" data-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(t("card.markUnwatched"))}">${escapeHtml(t("card.watched"))}</button>`
         : `<button type="button" class="card__footer-badge card__footer-badge--unwatched" data-action="quick-toggle-watched" data-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(t("card.markWatched"))}">${escapeHtml(t("card.notWatchedShort"))}</button>`;
 
     const mobileFooter = !isWatched
@@ -4526,7 +4800,7 @@
     delete entry.progress;
     state.watched[itemId] = entry;
     saveWatched();
-    render();
+    refreshCardWatchState(itemId);
   }
 
   async function refreshSearchConfirmForType() {
@@ -7806,6 +8080,7 @@
       }
 
       if (action === "toggle-watched") {
+        closeAllCardMenus();
         const progress = itemProgressState(id);
         if (progress === "watched") {
           await markItemUnwatched(id);
@@ -7818,13 +8093,14 @@
           delete entry.progress;
           state.watched[id] = entry;
           saveWatched();
-          render();
+          refreshCardWatchState(id);
           openRatingModal(id);
         }
         return;
       }
 
       if (action === "quick-toggle-watched") {
+        closeAllCardMenus();
         const progress = itemProgressState(id);
         if (progress === "watched") {
           await markItemUnwatched(id);
@@ -7836,7 +8112,7 @@
           delete entry.progress;
           state.watched[id] = entry;
           saveWatched();
-          render();
+          refreshCardWatchState(id);
         }
         return;
       }
@@ -7999,6 +8275,8 @@
     resetSessionFilters({ renderNow: false });
     bindEvents();
     bindOfflineSyncListeners();
+    document.documentElement.classList.add("app-ready");
+    window.WatchlistPullRefresh?.init?.();
     syncContentTypePicker(els.formTypePicker, els.formType, els.formType?.value || "movies");
     renderListSwitcher();
     if (els.ratingFilter?.value === "rt-best" || els.ratingFilter?.value === "rt-worst") {
@@ -8081,18 +8359,11 @@
         state.watched[id] = entry;
       }
       saveWatched();
+      syncListCard(id);
     },
     // Re-render a single card in-place (no full list rebuild)
     updateCardInPlace: (id) => {
-      if (!id) return;
-      const item = state.items.find((i) => i.id === id);
-      if (!item) return;
-      const card = document.querySelector(`.card[data-id="${CSS.escape(id)}"]`);
-      if (!card) return;
-      const tmp = document.createElement("div");
-      tmp.innerHTML = renderCard(item);
-      const newCard = tmp.firstElementChild;
-      if (newCard) card.replaceWith(newCard);
+      syncListCard(id);
     },
     patchItem: (id, fields) => {
       if (!id || !fields || typeof fields !== "object") return;
@@ -8106,13 +8377,20 @@
         if (stored) Object.assign(stored, fields);
       }
       saveData();
+      syncListCard(id);
     },
+    syncListCard,
     queueItemBadgeEnrichment,
     cardDisplayPoster,
     cardDisplayTitle,
     normalizeGenre,
     openAddTitleConfirm,
     isTitleOnList,
+    updateStats,
+    refreshCardWatchState,
+    canPullToRefresh,
+    isPullToRefreshActive,
+    pullToRefreshFromCloud,
   };
 
   if (document.getElementById("mainContent")) {

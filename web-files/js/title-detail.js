@@ -536,7 +536,6 @@
 
     updateMyRating();
     refreshMenuItems();
-    window.WatchlistApp?.updateCardInPlace?.(itemId);
     Promise.resolve().then(() => { _ignoreMutations = false; });
   }
 

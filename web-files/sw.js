@@ -1,5 +1,5 @@
 /* Minimal service worker — offline shell for installable PWA. */
-const CACHE = "omn-shell-v128";
+const CACHE = "omn-shell-v134";
 
 const SHELL = [
   "./",
@@ -24,6 +24,8 @@ const SHELL = [
   "./css/accessibility.css",
   "./css/rtl.css",
   "./css/mobile.css",
+  "./css/pull-to-refresh.css",
+  "./js/pull-to-refresh.js",
   "./js/pwa.js",
   "./js/i18n.js",
   "./js/accessibility.js",

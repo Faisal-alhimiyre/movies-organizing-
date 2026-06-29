@@ -286,6 +286,9 @@ class L10n {
   String get syncSaving => _ar ? 'جاري الحفظ…' : 'Saving…';
   String get syncFailed => _ar ? 'فشل المزامنة' : 'Sync failed';
   String get syncOffline => _ar ? 'غير متصل' : 'Offline';
+  String get ptrFailed => _ar
+      ? 'تعذّر التحديث. تُعرض قائمتك المحفوظة.'
+      : 'Could not refresh. Showing your saved list.';
 
   /// Display label for a stored genre value (internal value stays English).
   String genreLabel(String genre) {

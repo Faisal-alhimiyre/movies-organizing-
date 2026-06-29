@@ -135,6 +135,8 @@
       "sync.saving": " · saving…",
       "sync.failed": " · save failed",
       "sync.saved": " · saved",
+      "ptr.refreshing": "Refreshing…",
+      "ptr.failed": "Could not refresh. Showing your saved list.",
       "empty.noTitles": "Your watchlist is empty",
       "empty.noTitlesHint":
         "Search for a title, add many at once with Multiple titles, or enter details manually.",
@@ -799,6 +801,8 @@
       "sync.saving": " · جاري الحفظ…",
       "sync.failed": " · فشل الحفظ",
       "sync.saved": " · تم الحفظ",
+      "ptr.refreshing": "جاري التحديث…",
+      "ptr.failed": "تعذّر التحديث. تُعرض قائمتك المحفوظة.",
       "empty.noTitles": "قائمتك فارغة",
       "empty.noTitlesHint":
         "ابحث عن عنوان، أو أضف عدة عناوين دفعة واحدة، أو أدخل التفاصيل يدوياً.",

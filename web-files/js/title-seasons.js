@@ -121,7 +121,6 @@
     }
     const annotated = annotateCompletion(entry);
     _callbacks?.saveWatchedEntry?.(annotated);
-    _callbacks?.updateCardInPlace?.();
   }
 
   /** Persist per-season aired episode totals so reopening can derive watched state. */
@@ -246,7 +245,6 @@
     if (before !== after) {
       // Completion flag changed — persist and update card badge
       _callbacks?.saveWatchedEntry?.(annotated);
-      _callbacks?.updateCardInPlace?.();
     }
   }
 
@@ -358,20 +356,38 @@
     });
   }
 
-  /** True when any earlier regular season is not fully watched. */
+  /** True when any earlier regular season has at least one unwatched aired episode. */
   function hasUnwatchedPriorSeasons(entry, seasonNum) {
+    if (!Number.isFinite(seasonNum) || seasonNum <= 1) return false;
     return (_seriesResult?.seasons || []).some((season) => {
+      if (!isMainSeason(season)) return false;
       const num = season.seasonNumber;
-      if (num <= 0 || num >= seasonNum) return false;
-      return seasonWatchState(entry, season) !== "watched";
+      if (num >= seasonNum) return false;
+      return seasonHasUnwatchedAiredEpisodes(entry, season);
     });
   }
 
-  function shouldPromptGapFill(entry, seasonNum, epNum) {
+  function seasonHasUnwatchedAiredEpisodes(entry, season) {
+    const num = season.seasonNumber;
+    const airedEps = airedEpsForSeason(num);
+    if (airedEps !== null && airedEps.length > 0) {
+      return airedEps.some(
+        (ep) => !(P()?.isEpisodeWatched(entry, num, ep.episodeNumber) ?? false)
+      );
+    }
+    return seasonWatchState(entry, season) !== "watched";
+  }
+
+  function shouldPromptGapFillForEpisode(entry, seasonNum, epNum) {
+    if (!Number.isFinite(seasonNum) || seasonNum < 1) return false;
     return (
       hasUnwatchedPriorEpisodes(entry, seasonNum, epNum) ||
       hasUnwatchedPriorSeasons(entry, seasonNum)
     );
+  }
+
+  function shouldPromptGapFillForSeason(entry, seasonNum) {
+    return hasUnwatchedPriorSeasons(entry, seasonNum);
   }
 
   function maxEpisodeNumberFromKeys(keys) {
@@ -384,7 +400,7 @@
   }
 
   async function promptGapFillKeys(entry, seasonNum, epNum) {
-    if (!shouldPromptGapFill(entry, seasonNum, epNum) || !window.WatchlistDialog?.confirm) {
+    if (!shouldPromptGapFillForEpisode(entry, seasonNum, epNum) || !window.WatchlistDialog?.confirm) {
       return null;
     }
     const markAll = await window.WatchlistDialog.confirm(
@@ -396,7 +412,55 @@
       }
     );
     if (!markAll) return null;
-    return gapFillWatchKeys(entry, seasonNum, epNum);
+    const filled = gapFillWatchKeys(entry, seasonNum, epNum);
+    if (filled.length) return filled;
+    const single = airedEpisodeKeysUpTo(seasonNum, epNum);
+    return single.length ? single : null;
+  }
+
+  /** Season-level gap prompt: confirm = prior seasons + selected; cancel = selected only. */
+  async function promptSeasonWatchGapFill(entry, seasonNum, airedKeys) {
+    const maxEp = maxEpisodeNumberFromKeys(airedKeys);
+    if (!shouldPromptGapFillForSeason(entry, seasonNum) || !window.WatchlistDialog?.confirm) {
+      return airedKeys;
+    }
+    const markAll = await window.WatchlistDialog.confirm(
+      t("seasons.gapPromptMessage"),
+      {
+        title: t("seasons.gapPromptTitle"),
+        confirmLabel: t("seasons.gapMarkAll"),
+        cancelLabel: t("seasons.gapNo") || "No",
+      }
+    );
+    if (markAll) {
+      const filled = gapFillWatchKeys(entry, seasonNum, maxEp);
+      return filled.length ? filled : airedKeys;
+    }
+    return airedKeys;
+  }
+
+  function refreshWatchUiAfterSave(seasonNum, savedEntry) {
+    const entry = savedEntry ?? getEntry();
+
+    if (_episodesResult?.seasonNum === seasonNum && _episodesResult?.episodes) {
+      (_episodesResult.episodes || []).forEach((ep) => {
+        updateEpisodeRowStateFromEntry(entry, ep.seasonNumber, ep.episodeNumber, ep);
+      });
+    }
+
+    (_seriesResult?.seasons || []).forEach((s) => refreshSeasonCard(s.seasonNumber, entry));
+    renderSpecialsCarousel();
+
+    const seasonsToUpdate = new Set([seasonNum, _selectedSeason].filter((n) => n != null));
+    seasonsToUpdate.forEach((n) => updateSeasonActions(n));
+
+    _callbacks?.updateHeaderWatchState?.();
+    _callbacks?.updateDetailActions?.();
+    window.WatchlistApp?.updateStats?.();
+  }
+
+  function refreshEpisodeWatchUi(seasonNum) {
+    refreshWatchUiAfterSave(seasonNum);
   }
 
   /** Episode keys for prior seasons (full) plus current season through epNum. */
@@ -417,19 +481,6 @@
       }
     }
     return [...new Set(keys)];
-  }
-
-  function refreshEpisodeWatchUi(seasonNum) {
-    if (_episodesResult?.seasonNum === seasonNum && _episodesResult?.episodes) {
-      const freshEntry = getEntry();
-      (_episodesResult.episodes || []).forEach((ep) => {
-        updateEpisodeRowStateFromEntry(freshEntry, ep.seasonNumber, ep.episodeNumber, ep);
-      });
-    }
-    (_seriesResult?.seasons || []).forEach((s) => refreshSeasonCard(s.seasonNumber));
-    updateSeasonInfoProgress(seasonNum);
-    _callbacks?.updateHeaderWatchState?.();
-    _callbacks?.updateDetailActions?.();
   }
 
   /** Collect aired episode objects for a season (for watched-count purposes). */
@@ -1667,8 +1718,9 @@
 
   function persistSeasonPoster(season) {
     if (!_item || !season || season.seasonNumber === 0) return;
-    const poster = season.poster || getItemPoster() || "";
     const seasonNum = season.seasonNumber;
+    if (_selectedSeason !== seasonNum) return;
+    const poster = season.poster || getItemPoster() || "";
     const seasonName = seasonDisplayName(season);
     const changed =
       (poster && _item.cardPoster !== poster) ||
@@ -1684,7 +1736,6 @@
       };
       if (poster) patch.cardPoster = poster;
       window.WatchlistApp?.patchItem?.(_item.id, patch);
-      _callbacks?.updateCardInPlace?.();
     }
   }
 
@@ -2360,11 +2411,7 @@
       : P()?.setEpisodeRating?.(entry, seasonNum, epNum, normalized);
 
     saveEntry(entry);
-    updateEpisodeRowState(seasonNum, epNum);
-    refreshSeasonCard(seasonNum);
-    updateSeasonInfoProgress(seasonNum);
-    _callbacks?.updateHeaderWatchState?.();
-    _callbacks?.updateDetailActions?.();
+    refreshWatchUiAfterSave(seasonNum, entry);
     _episodeModalEditing = false;
     openEpisodeModal(_activeEpisodeKey);
   }
@@ -2415,7 +2462,7 @@
 
   // ─── Targeted update: individual season card ──────────────────────────────
 
-  function refreshSeasonCard(seasonNum) {
+  function refreshSeasonCard(seasonNum, entry = null) {
     const rootEl = seasonNum === 0 ? getP("specials-carousel") : _carouselEl;
     if (!rootEl) return;
     const card = rootEl.querySelector(`[data-tds-season="${seasonNum}"]`);
@@ -2424,9 +2471,9 @@
     const season  = seasons.find((s) => s.seasonNumber === seasonNum);
     if (!season) return;
 
-    const entry = getEntry();
-    const ws    = seasonWatchState(entry, season);
-    const prog  = seasonProgressFromEntry(entry, season);
+    const watchEntry = entry ?? getEntry();
+    const ws    = seasonWatchState(watchEntry, season);
+    const prog  = seasonProgressFromEntry(watchEntry, season);
     const name  = seasonDisplayName(season);
 
     // Update watched-state classes
@@ -2549,7 +2596,7 @@
     let newEntry;
     if (watched) {
       newEntry = P()?.unmarkEpisodeWatched(entry, seasonNum, epNum, allAired);
-    } else if (shouldPromptGapFill(entry, seasonNum, epNum)) {
+    } else if (shouldPromptGapFillForEpisode(entry, seasonNum, epNum)) {
       const keys = await promptGapFillKeys(entry, seasonNum, epNum);
       if (keys) {
         newEntry = P()?.markSeasonWatched(entry, keys);
@@ -2561,7 +2608,7 @@
     }
 
     saveEntry(newEntry);
-    refreshEpisodeWatchUi(seasonNum);
+    refreshWatchUiAfterSave(seasonNum, newEntry);
   }
 
   // ─── Action: mark / unmark whole season ───────────────────────────────────
@@ -2609,37 +2656,32 @@
     }
 
     let entry = getEntry();
+    // Decide mark vs unmark before legacy expansion changes granular state.
+    const markingWatched = seasonWatchState(entry, season) !== "watched";
 
-    // If the entry is legacy-complete, expand it to granular BEFORE any season
-    // operation. Without this, marking specials or unmarking a season on a
-    // legacy-complete entry would replace the entire episodes list with only
-    // the current season's keys, losing all other seasons' watched state.
     if (P()?.isLegacyComplete(entry)) {
       entry = expandLegacyToGranular(entry);
     }
 
-    const ws       = seasonWatchState(entry, season);
     const airedKeys = airedEpisodeKeysForSeason(seasonNum);
-    const wasWatched = ws === "watched";
 
-    let newEntry;
-    if (wasWatched) {
-      newEntry = P()?.unmarkSeasonWatched(entry, seasonNum, airedKeys);
-    } else {
-      if (!airedKeys.length) return;
-      const maxEp = maxEpisodeNumberFromKeys(airedKeys);
-      const gapKeys = await promptGapFillKeys(entry, seasonNum, maxEp);
-      newEntry = P()?.markSeasonWatched(entry, gapKeys || airedKeys);
+    if (!markingWatched) {
+      const newEntry = P()?.unmarkSeasonWatched(entry, seasonNum, airedKeys);
+      saveEntry(newEntry);
+      refreshWatchUiAfterSave(seasonNum, newEntry);
+      return;
     }
 
+    if (!airedKeys.length) return;
+
+    const keysToMark = await promptSeasonWatchGapFill(entry, seasonNum, airedKeys);
+    const newEntry = P()?.markSeasonWatched(entry, keysToMark);
     saveEntry(newEntry);
-    refreshEpisodeWatchUi(seasonNum);
+    refreshWatchUiAfterSave(seasonNum, newEntry);
 
-    if (!wasWatched) {
-      const seasons = getRegularSeasons();
-      const next = seasons.find((s) => s.seasonNumber > seasonNum);
-      if (next) selectSeason(next.seasonNumber);
-    }
+    const regularSeasons = getRegularSeasons();
+    const next = regularSeasons.find((s) => s.seasonNumber > seasonNum);
+    if (next) selectSeason(next.seasonNumber);
   }
 
   // ─── Callback: title-level watched changed (from detail actions bar) ──────
