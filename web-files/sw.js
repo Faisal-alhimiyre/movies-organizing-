@@ -1,11 +1,13 @@
-/* Service worker — installable PWA with automatic update on deploy. */
+/* Service worker — PWA shell + legacy rescue navigate (build 139+). */
 importScripts("./js/build-version.js");
 
 const BUILD_VERSION = self.WATCHLIST_BUILD_VERSION || "0";
 const CACHE = `omn-shell-${BUILD_VERSION}`;
 const CACHE_PREFIX = "omn-shell-";
+const RESCUE_PARAM = "pwa_rescue";
+const RESCUE_VALUE = "139";
 
-/** Offline-safe static assets only — never precache HTML/JS/CSS (versioned at deploy). */
+/** Offline-safe static assets only — never precache HTML/JS/CSS. */
 const SHELL = [
   "./manifest.webmanifest",
   "./assets/icons/icon.svg",
@@ -17,12 +19,8 @@ const SHELL = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((cache) => cache.addAll(SHELL))
-      .then(() => self.skipWaiting())
-  );
+  self.skipWaiting();
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
 });
 
 self.addEventListener("message", (event) => {
@@ -31,18 +29,68 @@ self.addEventListener("message", (event) => {
   }
 });
 
+function deleteObsoleteShellCaches() {
+  return caches.keys().then((keys) =>
+    Promise.all(
+      keys
+        .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE)
+        .map((key) => caches.delete(key))
+    )
+  );
+}
+
+function isRescuableAppUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    if (url.origin !== self.location.origin) return false;
+    const path = url.pathname;
+    if (path.endsWith("index.html") || path.endsWith("gate.html")) return true;
+    if (path === "/" || /\/$/.test(path)) return true;
+    return false;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function alreadyRescuedForBuild(rawUrl) {
+  try {
+    return new URL(rawUrl).searchParams.get(RESCUE_PARAM) === RESCUE_VALUE;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function rescueNavigateUrl(rawUrl) {
+  const url = new URL(rawUrl);
+  url.searchParams.set(RESCUE_PARAM, RESCUE_VALUE);
+  return url.href;
+}
+
+async function rescueOpenClients() {
+  const clients = await self.clients.matchAll({
+    type: "window",
+    includeUncontrolled: true,
+  });
+
+  await Promise.all(
+    clients.map(async (client) => {
+      if (!isRescuableAppUrl(client.url)) return;
+      if (alreadyRescuedForBuild(client.url)) return;
+      if (typeof client.navigate !== "function") return;
+      try {
+        await client.navigate(rescueNavigateUrl(client.url));
+      } catch (_error) {
+        /* navigate unsupported or blocked — no page JS fallback */
+      }
+    })
+  );
+}
+
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(
-          keys
-            .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE)
-            .map((key) => caches.delete(key))
-        )
-      )
+    deleteObsoleteShellCaches()
       .then(() => self.clients.claim())
+      .then(() => rescueOpenClients())
   );
 });
 
@@ -60,6 +108,14 @@ function isMutableAppAsset(pathname) {
   );
 }
 
+function isNavigationRequest(request, url) {
+  return (
+    request.mode === "navigate" ||
+    request.destination === "document" ||
+    isMutableAppAsset(url.pathname)
+  );
+}
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
@@ -70,14 +126,9 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (isMutableAppAsset(url.pathname)) {
+  if (isNavigationRequest(event.request, url)) {
     event.respondWith(
-      fetch(event.request, { cache: "no-store" }).catch(() => {
-        if (event.request.mode === "navigate") {
-          return caches.match("./index.html");
-        }
-        return Response.error();
-      })
+      fetch(event.request, { cache: "no-store" }).catch(() => Response.error())
     );
     return;
   }

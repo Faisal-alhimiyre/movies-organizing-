@@ -16,6 +16,20 @@
     skipControllerReloadOnce = true;
   }
 
+  try {
+    const rescueUrl = new URL(window.location.href);
+    if (rescueUrl.searchParams.has("pwa_rescue")) {
+      rescueUrl.searchParams.delete("pwa_rescue");
+      const next =
+        rescueUrl.pathname +
+        (rescueUrl.searchParams.toString() ? `?${rescueUrl.searchParams}` : "") +
+        rescueUrl.hash;
+      window.history.replaceState(null, "", next);
+    }
+  } catch (_error) {
+    /* ignore */
+  }
+
   function isIOS() {
     const ua = navigator.userAgent || "";
     if (/iPad|iPhone|iPod/.test(ua)) return true;
