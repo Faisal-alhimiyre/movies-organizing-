@@ -14,6 +14,14 @@
   let lastCardBadge = null;
   let lastDetailBadge = null;
 
+  function isEnabled() {
+    try {
+      return localStorage.getItem("watchlist-debug-watch-trace") === "1";
+    } catch {
+      return false;
+    }
+  }
+
   function snapshot(entry) {
     if (entry === undefined) return undefined;
     if (entry == null) return entry;
@@ -49,6 +57,7 @@
   }
 
   function log(step, data = {}) {
+    if (!isEnabled()) return;
     seq += 1;
     console.info(`[watch-trace:${VERSION}] #${seq} ${step}`, {
       scriptVersion: VERSION,
@@ -58,6 +67,7 @@
   }
 
   function setSource(source) {
+    if (!isEnabled()) return;
     activeSource = source;
     log("action-source", { source });
   }
@@ -67,6 +77,7 @@
   }
 
   function logBadgeUpdate(surface, itemId, before, after, caller) {
+    if (!isEnabled()) return;
     const prev = surface === "card" ? lastCardBadge : lastDetailBadge;
     const record = { seq, itemId, before, after, caller, at: Date.now() };
     const overwrittenByLater = Boolean(
@@ -90,6 +101,7 @@
   }
 
   function schedulePostCheck(itemId, label) {
+    if (!isEnabled()) return;
     const runCheck = (phase) => {
       const card = readCardBadge(itemId);
       const detail = readDetailBadge();
@@ -129,6 +141,4 @@
     logBadgeUpdate,
     schedulePostCheck,
   };
-
-  log("trace-module-loaded", { href: location.href });
 })();

@@ -16,6 +16,55 @@
     }
   }
 
+  const LEGACY_DATA_SOURCES = [
+    "watchlist-data-v2-me",
+    "watchlist-data-v2",
+    "watchlist-data-v1-me",
+    "watchlist-data-v1",
+  ];
+  const LEGACY_WATCHED_SOURCES = ["watchlist-watched-v1-me", "watchlist-watched-v1"];
+
+  function safeSetItem(key, value) {
+    try {
+      localStorage.setItem(key, value);
+      return true;
+    } catch (err) {
+      if (err?.name === "QuotaExceededError") return false;
+      throw err;
+    }
+  }
+
+  function removeLegacyGlobalKeys() {
+    for (const key of [...LEGACY_DATA_SOURCES, ...LEGACY_WATCHED_SOURCES]) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  function tryFreeLocalStorage() {
+    const disposableKeys = [
+      "watchlist-metadata-cache-v5",
+      "watchlist-series-cache-v5",
+      "bulk-import-draft-v1",
+      "import_jobs",
+      "import_items",
+    ];
+    for (const key of disposableKeys) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        /* ignore */
+      }
+    }
+    window.WatchlistImportJobStore?.purgeLegacyLocalStorage?.();
+  }
+
+  const STORAGE_FULL_ERROR =
+    "Device storage is full. Clear this site's browser data or remove old import drafts, then try again.";
+
   function libraryKey(accountId) {
     return `${LIBRARY_PREFIX}${accountId}`;
   }
@@ -32,7 +81,9 @@
 
   function saveLibrary(accountId, entries) {
     if (!accountId) return;
-    localStorage.setItem(libraryKey(accountId), JSON.stringify(entries));
+    if (!safeSetItem(libraryKey(accountId), JSON.stringify(entries))) {
+      console.warn("[auth] could not save library — storage full");
+    }
   }
 
   function migrateLegacyLibrary(accountId) {
@@ -243,10 +294,13 @@
   }
 
   function setSession(accountId, listId, extras = {}) {
-    localStorage.setItem(
-      SESSION_KEY,
-      JSON.stringify({ accountId, listId, ...extras })
-    );
+    const payload = JSON.stringify({ accountId, listId, ...extras });
+    if (!safeSetItem(SESSION_KEY, payload)) {
+      tryFreeLocalStorage();
+      if (!safeSetItem(SESSION_KEY, payload)) {
+        throw new Error(STORAGE_FULL_ERROR);
+      }
+    }
   }
 
   function clearSession() {
@@ -323,26 +377,35 @@
   function migrateLegacyData(accountId) {
     const primaryListId = accountId;
     const keys = storageKeys(primaryListId);
-    if (listHasData(primaryListId)) return;
-
     const migratedFlag = `watchlist-legacy-migrated-v2-${accountId}`;
-    if (localStorage.getItem(migratedFlag)) return;
 
-    const dataSources = [
-      "watchlist-data-v2-me",
-      "watchlist-data-v2",
-      "watchlist-data-v1-me",
-      "watchlist-data-v1",
-    ];
+    if (listHasData(primaryListId)) {
+      removeLegacyGlobalKeys();
+      safeSetItem(migratedFlag, "1");
+      return;
+    }
+
+    if (localStorage.getItem(migratedFlag)) return;
 
     let migrated = false;
 
-    for (const source of dataSources) {
+    for (const source of LEGACY_DATA_SOURCES) {
       const value = localStorage.getItem(source);
       if (!value) continue;
-      localStorage.setItem(keys.data, value);
-      if (source.startsWith("watchlist-data-v1")) {
-        localStorage.setItem(keys.legacy, value);
+
+      if (!safeSetItem(keys.data, value)) {
+        tryFreeLocalStorage();
+        if (!safeSetItem(keys.data, value)) {
+          console.warn("[auth] legacy data migration skipped — storage full; use cloud sync");
+          safeSetItem(migratedFlag, "skipped-quota");
+          return;
+        }
+      }
+
+      try {
+        localStorage.removeItem(source);
+      } catch {
+        /* ignore */
       }
       migrated = true;
       break;
@@ -350,16 +413,21 @@
 
     if (!migrated) return;
 
-    const watchedSources = ["watchlist-watched-v1-me", "watchlist-watched-v1"];
-
-    for (const source of watchedSources) {
+    for (const source of LEGACY_WATCHED_SOURCES) {
       const value = localStorage.getItem(source);
       if (!value) continue;
-      localStorage.setItem(keys.watched, value);
+      if (safeSetItem(keys.watched, value)) {
+        try {
+          localStorage.removeItem(source);
+        } catch {
+          /* ignore */
+        }
+      }
       break;
     }
 
-    localStorage.setItem(migratedFlag, "1");
+    removeLegacyGlobalKeys();
+    safeSetItem(migratedFlag, "1");
   }
 
   function emptyListKey(listId) {
@@ -389,37 +457,56 @@
 
     const normalized = normalizeCode(code);
     const accountId = accountIdFromCode(normalized);
-    migrateLegacyData(accountId);
-    migrateLegacyLibrary(accountId);
 
-    if (options.create) {
-      const listId = accountId;
-      registerList(listId, {
-        accountId,
-        name: options.listName || "My list",
-        description: options.description || "",
-      });
-      localStorage.setItem(emptyListKey(listId), "1");
-      localStorage.setItem(defaultListKey(accountId), listId);
-      setSession(accountId, listId);
-      return { ok: true, accountId, listId };
+    try {
+      migrateLegacyData(accountId);
+      migrateLegacyLibrary(accountId);
+    } catch (migrationError) {
+      console.warn("[auth] legacy migration failed:", migrationError);
+      if (migrationError?.message === STORAGE_FULL_ERROR) {
+        return { ok: false, error: STORAGE_FULL_ERROR };
+      }
     }
 
-    clearEmptySavedWatchlist(accountId);
-    const listId = ensureDefaultList(accountId);
-    const library = getLibrary(accountId);
-    const defaultListId = getDefaultListId(accountId);
-    const activeListId =
-      (defaultListId && library.some((entry) => entry.listId === defaultListId)
-        ? defaultListId
-        : null) ||
-      library[0]?.listId ||
-      listId;
-    const needsUpgrade = isLegacyNumericCode(code);
+    try {
+      if (options.create) {
+        const listId = accountId;
+        registerList(listId, {
+          accountId,
+          name: options.listName || "My list",
+          description: options.description || "",
+        });
+        localStorage.setItem(emptyListKey(listId), "1");
+        localStorage.setItem(defaultListKey(accountId), listId);
+        setSession(accountId, listId);
+        return { ok: true, accountId, listId };
+      }
 
-    setSession(accountId, activeListId, needsUpgrade ? { needsCodeUpgrade: true } : {});
+      clearEmptySavedWatchlist(accountId);
+      const listId = ensureDefaultList(accountId);
+      const library = getLibrary(accountId);
+      const defaultListId = getDefaultListId(accountId);
+      const activeListId =
+        (defaultListId && library.some((entry) => entry.listId === defaultListId)
+          ? defaultListId
+          : null) ||
+        library[0]?.listId ||
+        listId;
+      const needsUpgrade = isLegacyNumericCode(code);
 
-    return { ok: true, accountId, listId: activeListId };
+      setSession(accountId, activeListId, needsUpgrade ? { needsCodeUpgrade: true } : {});
+
+      return { ok: true, accountId, listId: activeListId };
+    } catch (signInError) {
+      console.warn("[auth] sign in failed:", signInError);
+      return {
+        ok: false,
+        error:
+          signInError?.message === STORAGE_FULL_ERROR
+            ? STORAGE_FULL_ERROR
+            : "Could not sign in. Try clearing site storage and reload.",
+      };
+    }
   }
 
   function validateListName(name) {
@@ -565,6 +652,9 @@
     }
     localStorage.removeItem(syncMetaKey(listId));
     localStorage.removeItem(emptyListKey(listId));
+
+    void window.WatchlistImportJobStore?.clearJob?.(listId);
+    void window.WatchlistIdb?.deleteWatchlistCache?.(listId);
 
     const accountId = getAccountId();
     if (!accountId) return;

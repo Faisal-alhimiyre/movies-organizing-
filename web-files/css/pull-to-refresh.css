@@ -1,6 +1,8 @@
-html.app-ready,
-html.app-ready body {
-  overscroll-behavior-y: contain;
+@media (max-width: 640px) {
+  html:not(.item-modal-scroll-lock):not(.td-scroll-lock),
+  html:not(.item-modal-scroll-lock):not(.td-scroll-lock) body {
+    touch-action: pan-y pinch-zoom;
+  }
 }
 
 .pull-refresh {

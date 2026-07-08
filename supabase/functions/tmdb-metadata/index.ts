@@ -437,6 +437,13 @@ async function actionSearch(
       const poster = s(item.poster_path);
       const tmdbId = n(item.id);
       if (!tmdbId) return null;
+      const originCountry = Array.isArray(item.origin_country)
+        ? (item.origin_country as string[]).map((c) => String(c).toUpperCase())
+        : [];
+      const genreIds = Array.isArray(item.genre_ids)
+        ? (item.genre_ids as number[]).map(Number).filter(Number.isFinite)
+        : [];
+      const originalLanguage = s(item.original_language);
 
       return {
         source: "tmdb",
@@ -447,6 +454,9 @@ async function actionSearch(
         title,
         year,
         type: isMovie ? "movie" : "series",
+        originCountry,
+        originalLanguage,
+        genreIds,
         poster: poster ? `https://image.tmdb.org/t/p/w92${poster}` : "",
         resultKey: `tmdb:${isMovie ? "movie" : "tv"}:${tmdbId}`,
       };

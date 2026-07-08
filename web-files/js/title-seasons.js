@@ -1395,6 +1395,11 @@
 
       _seriesResult = result;
       persistRegularEpisodeTotal();
+      window.WatchlistApp?.repairAnimePosterFromSeasons?.(_item, result.seasons, {
+        seriesPoster: result.series?.poster,
+        persist: true,
+        refreshCard: true,
+      });
       const RS = meta.ResultState;
 
       switch (result?.state) {
@@ -1836,6 +1841,7 @@
     if (_selectedSeason !== seasonNum) return;
     const poster = season.poster || getItemPoster() || "";
     const seasonName = seasonDisplayName(season);
+    const needsMainRepair = window.WatchlistApp?.itemAnimePosterNeedsRepair?.(_item);
     const changed =
       (poster && _item.cardPoster !== poster) ||
       _item.lastSelectedSeason !== seasonNum ||
@@ -1850,6 +1856,13 @@
       };
       if (poster) patch.cardPoster = poster;
       window.WatchlistApp?.patchItem?.(_item.id, patch);
+    }
+    if (needsMainRepair && poster) {
+      window.WatchlistApp?.repairAnimePosterFromSeasons?.(_item, _seriesResult?.seasons, {
+        selectedSeason: seasonNum,
+        persist: true,
+        refreshCard: true,
+      });
     }
   }
 
@@ -2880,6 +2893,7 @@
     if (!_episodeModalEl) return;
     _episodeModalEl.removeEventListener("click", onSlotClick);
     _episodeModalEl.removeEventListener("keydown", onEpisodeModalKeydown);
+    _episodeModalEl.hidden = true;
     if (_episodeModalEl.parentElement === document.body) {
       _episodeModalEl.remove();
     }

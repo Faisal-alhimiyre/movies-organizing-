@@ -1,0 +1,13 @@
+{
+  "name": "anime-index-etl",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "etl": "node etl.mjs",
+    "test:titles": "node test-titles.mjs"
+  },
+  "dependencies": {
+    "@mongodb-js/zstd": "^2.0.1",
+    "@supabase/supabase-js": "^2.49.1"
+  }
+}

@@ -26,7 +26,7 @@
       "btn.rateLater": "Rate later",
       "btn.saveRating": "Save rating",
       "btn.loadMore": "Load more",
-      "btn.copyTemplate": "Copy template for AI",
+      "btn.copyTemplate": "Copy prompt",
       "menu.label": "Menu",
       "menu.switchList": "Switch list",
       "menu.manageLists": "Manage lists",
@@ -127,6 +127,9 @@
       "stats.filterWatched": "Show watched titles",
       "stats.filterInProgress": "Show in progress titles",
       "sync.savingShort": "Saving…",
+      "sync.cloudRestore": "Your cloud list is being restored",
+      "sync.cloudRestoreTitle": "Restore from cloud",
+      "sync.cloudRestoreFailed": "Could not restore your list from the cloud. Check your connection and try again.",
       "sync.failedShort": "Backup failed",
       "sync.savedShort": "Saved",
       "sync.offlineShort": "Offline",
@@ -135,16 +138,19 @@
       "sync.saving": " · saving…",
       "sync.failed": " · save failed",
       "sync.saved": " · saved",
+      "sync.cacheRecoveryTitle": "Missing titles detected",
+      "sync.cacheRecoveryPrompt":
+        "Your list shows {current} titles, but a local backup has {cached} ({gap} more). Restore the backup? This will replace your current list and sync to the cloud.",
       "ptr.refreshing": "Refreshing…",
       "ptr.failed": "Could not refresh. Showing your saved list.",
       "empty.noTitles": "Your watchlist is empty",
       "empty.noTitlesHint":
-        "Search for a title, add many at once with Multiple titles, or enter details manually.",
+        "Search for one title, import a whole list, or add details yourself.",
       "empty.firstTitle": "Add your first title",
       "empty.firstSubtitle": "Pick any way below — you can mix them anytime.",
       "empty.hintSearch": "Search add — find movies, TV, or anime by name",
       "empty.hintLink": "Manual add — paste an IMDb or AniList link",
-      "empty.hintBulk": "Multiple titles — paste a list from ChatGPT or notes",
+      "empty.hintBulk": "Import list — paste titles from ChatGPT or a notes app",
       "empty.ctaSearch": "Search for a title",
       "empty.ctaBulk": "Paste multiple titles",
       "empty.ctaImport": "Import a shared list",
@@ -284,7 +290,7 @@
       "modal.close": "Close",
       "add.search": "Search",
       "add.manual": "Manual",
-      "add.bulk": "Multiple titles",
+      "add.bulk": "Import list",
       "add.mode": "Add mode",
       "changeCode.title": "Change list code",
       "changeCode.text":
@@ -373,20 +379,198 @@
       "rating.notePlaceholder": "Your thoughts",
       "rating.yourThoughts": "Your thoughts",
       "rating.thoughtsSoFar": "Thoughts so far…",
-      "bulk.headline": "Add many titles at once with your AI",
-      "bulk.step1Title": "Copy our template",
+      "bulk.headline": "Add a whole list at once",
+      "bulk.step1Title": "Copy the AI prompt",
       "bulk.step1Text":
-        "Click the button below. It tells your AI exactly what info to fill in for each title.",
-      "bulk.step2Title": "Send it to your AI",
+        "Tap below to copy a short message for ChatGPT, Claude, or any chatbot. It asks the AI to return a simple list with each title, year, and type (movie, TV show, or anime).",
+      "bulk.step2Title": "Paste into your AI",
       "bulk.step2Text":
-        "Paste the template into ChatGPT, Claude, or any AI. Then add your titles, for example:",
+        "Paste the prompt into your chatbot, then tell it which titles you want. For example:",
       "bulk.example":
-        "“Here are my movies: Breaking Bad, Interstellar, Attack on Titan…”",
-      "bulk.step3Title": "Paste the filled list",
+        "“Here are my titles: Breaking Bad, Interstellar, Attack on Titan…”",
+      "bulk.step3Title": "Paste or upload your list",
       "bulk.step3Text":
-        "Copy what your AI returns and paste it here. We'll add every valid title at once.",
-      "bulk.pastePlaceholder": "Paste here…",
-      "bulk.pasteLabel": "Paste filled list from AI",
+        "Paste what your AI sent you in the box below, or upload a file with the exact same list. Only plain text files work (.txt or .tsv) — not PDF, Word, Excel, or images.",
+      "bulk.pastePlaceholder": "Paste your list here…",
+      "bulk.pasteLabel": "List from your AI",
+      "bulk.fileLabel": "Upload list file (.txt or .tsv)",
+      "bulk.fileHint": "Same list as above — plain text only.",
+      "bulk.fileWrongType":
+        "That file type won’t work. Save your list as a .txt or .tsv file (plain text), not PDF, Word, or an image.",
+      "bulk.fileReadFailed": "Could not read that file.",
+      "bulk.pickMatch": "Choose a match…",
+      "bulk.commitSkipped": "{count} titles were skipped (duplicate or incomplete).",
+      "bulk.commitResult":
+        "Added successfully: {added}\nAlready present: {alreadyPresent}\nGrouped: {grouped}\nFailed to add: {failed}\nStill ready: {stillReady}",
+      "bulk.commitFailed": "Could not add verified titles. Try again.",
+      "bulk.persistenceFailed":
+        "Import progress could not be saved. Database migration or permissions need attention.",
+      "bulk.addingProgress": "Adding {current} of {total}",
+      "bulk.continuing": "Continuing…",
+      "bulk.resolving": "Resolving…",
+      "bulk.workerBusy": "Processing is already running. Wait for it to finish.",
+      "bulk.continueFailed": "Could not start processing.",
+      "bulk.resolveNothing": "No unresolved titles need attention.",
+      "bulk.changeType": "Change type",
+      "bulk.changeTypeApply": "Apply",
+      "bulk.changeTypeFailed": "Could not change type. Try again when processing is idle.",
+      "bulk.changeTypeHint": "Tap the type to change it, then choose Movie, TV series, or Anime.",
+      "bulk.typeCorrectedNote": "Type corrected: {from} → {to}",
+      "bulk.typeOriginal": "Original type",
+      "bulk.typeCorrected": "Corrected type",
+      "bulk.dupHeading": "Duplicate",
+      "bulk.dupMatchedAgainst": "Matched against",
+      "bulk.dupProvider": "Provider",
+      "bulk.dupWatchlistState": "Status",
+      "bulk.dupOnWatchlist": "Already on your watchlist",
+      "bulk.dupImportOnly": "Only duplicated inside this import",
+      "bulk.searchPlaceholder": "Search import rows…",
+      "bulk.searchClear": "Clear search",
+      "bulk.groupsTitle": "Grouped titles",
+      "bulk.jobSubmitted": "Submitted",
+      "bulk.jobProcessing": "Processing",
+      "bulk.jobExact": "Verified",
+      "bulk.jobPossible": "Possible matches",
+      "bulk.jobDuplicates": "Duplicates",
+      "bulk.jobNotFound": "Not found",
+      "bulk.jobFailed": "Failed",
+      "bulk.jobReady": "Ready to add",
+      "bulk.jobNeedsAttention": "Needs attention",
+      "bulk.jobWaiting": "Waiting",
+      "bulk.jobGrouped": "Grouped",
+      "bulk.jobCorrected": "Corrected",
+      "bulk.jobOther": "Other",
+      "bulk.jobAdded": "Added",
+      "bulk.status.corrected": "Corrected",
+      "bulk.importStatusIncomplete": "Import status is incomplete. Resolve hidden rows first.",
+      "bulk.checkingProgress": "Checking title {current} of {total}",
+      "bulk.waitingAnilist": "Waiting for AniList — retrying automatically",
+      "bulk.waitingRetryIn":
+        "Waiting for {provider} — retrying in {seconds} · Next retry at {time} · Resolved {resolved} of {total}",
+      "bulk.queueResolved": "Resolved {resolved} of {total}",
+      "bulk.matchProgress":
+        "Matched {matched} of {total} — checking {remaining} remaining anime",
+      "bulk.anilistPaused":
+        "AniList is temporarily limited — continuing automatically at {time} · Matched {matched} of {total}",
+      "credits.menu": "Credits & data sources",
+      "credits.title": "Credits & data sources",
+      "credits.animeAttribution":
+        "Anime identity data contains information from anime-offline-database by manami-project, available under ODbL 1.0 and DbCL 1.0.",
+      "credits.providersHint":
+        "Movie and TV metadata may come from TMDb, OMDb, TVDB, and AniList when you search or enrich titles. Your private lists, ratings, and watch progress are stored separately and are not part of the licensed anime index.",
+      "credits.indexVersion":
+        "Offline anime index: release {version} · {count} titles · upstream date {updated}",
+      "credits.archivedNote":
+        "Offline anime index source (anime-offline-database) is an archived read-only dataset; the installed version continues to work without future upstream updates.",
+      "credits.close": "Close",
+      "bulk.queueOffline": "Offline — processing will resume when connection returns",
+      "bulk.queueStalled":
+        "Queue idle — {due} titles ready to retry · Resolved {resolved} of {total}",
+      "bulk.continueProcessing": "Continue processing",
+      "bulk.waitingRowDetail": "{provider} · retry {retries} · {reason}",
+      "bulk.waitingRowCountdown": "in {seconds}",
+      "bulk.groupsCollapsed": "Grouped titles — {count} group(s)",
+      "bulk.resolveRemaining": "Resolve remaining titles",
+      "bulk.exportUnresolved": "Export unresolved",
+      "bulk.advancedRecovery": "Advanced recovery",
+      "bulk.advancedRetry": "Retry now",
+      "bulk.jobRunning": "Matching titles with providers…",
+      "bulk.jobPaused": "Paused — tap Resume to continue.",
+      "bulk.retryProgress": "{label} {current} of {total}",
+      "bulk.filter.all": "All",
+      "bulk.filter.allCount": "All — {count} titles",
+      "bulk.filter.statusCount": "{status} — {count} titles",
+      "bulk.filter.showAll": "Show all",
+      "bulk.yearUnknown": "Unknown",
+      "bulk.matchedOk": "Matched",
+      "bulk.previewColProvider": "Provider",
+      "bulk.previewColReason": "Reason",
+      "bulk.action.retryAllFailed": "Retry all failed",
+      "bulk.action.retryAnilist": "Retry AniList failures",
+      "bulk.action.retryAnimeFailures": "Retry anime failures",
+      "bulk.action.retryTransient": "Retry temporary failures",
+      "bulk.action.retryNotFound": "Retry not found",
+      "bulk.action.exportFailed": "Export failed titles",
+      "bulk.action.exportNotFound": "Export not-found titles",
+      "bulk.action.exportUnresolved": "Export unresolved TSV",
+      "bulk.action.importCorrected": "Import corrected TSV",
+      "bulk.action.addVerified": "Add to watchlist",
+      "bulk.correctedImportTitle": "Import corrected TSV",
+      "bulk.correctedImportDone":
+        "Updated {updated} rows. Skipped {skipped}. Ambiguous matches: {ambiguous}.",
+      "bulk.correctedImportFailed":
+        "Could not read that TSV. Use columns: ImportItemID, Title, Year, Type, ProviderURL.",
+      "bulk.pause": "Pause",
+      "bulk.resume": "Resume",
+      "bulk.retryFailed": "Retry failed",
+      "bulk.cancelRemaining": "Cancel remaining",
+      "bulk.reviewPossible": "Review possible matches",
+      "bulk.reviewImport": "Check my list",
+      "bulk.addVerified": "Add to watchlist",
+      "bulk.addVerifiedCount": "Add to watchlist ({count})",
+      "bulk.copyUnresolvedTitle": "Copy unresolved TSV",
+      "bulk.copyUnresolved": "Copy unresolved TSV",
+      "bulk.copyUnresolvedCopied": "Copied!",
+      "bulk.copyUnresolvedEmpty": "No unresolved titles to copy.",
+      "bulk.pasteCorrected": "Paste corrected TSV",
+      "bulk.pasteFromClipboard": "Paste",
+      "bulk.applyCorrections": "Apply corrections",
+      "bulk.correctedPasteEmpty": "Paste corrected TSV text first.",
+      "bulk.correctedPasteFailed": "Could not read from clipboard.",
+      "bulk.correctedPasteHint":
+        "Paste rows with ImportItemID, Title, Year, Type, and optional ProviderURL.",
+      "bulk.replaceJobTitle": "Replace import job?",
+      "bulk.replaceJobWarning":
+        "You already have an import job with {count} titles in progress. Pasting again will discard that progress unless you cancel.",
+      "bulk.replaceJobConfirm": "Replace job",
+      "bulk.fileLabelOptional": "Upload corrected file (optional)",
+      "bulk.verifyBeforeAdd": "Wait until titles are matched before adding.",
+      "bulk.previewTitle": "Review your list",
+      "bulk.previewTotal": "Submitted",
+      "bulk.previewValid": "Valid rows",
+      "bulk.previewDuplicates": "Duplicates",
+      "bulk.previewInvalid": "Invalid",
+      "bulk.previewPending": "Pending verification",
+      "bulk.previewColTitle": "Title",
+      "bulk.previewColYear": "Year",
+      "bulk.previewColType": "Type",
+      "bulk.previewColStatus": "Status",
+      "bulk.status.pending": "Pending verification",
+      "bulk.status.duplicateList": "Already on your list",
+      "bulk.status.duplicateImport": "Duplicate in paste",
+      "bulk.status.invalid": "Invalid",
+      "bulk.status.processing": "Processing",
+      "bulk.status.matching": "Matching…",
+      "bulk.status.exact": "Exact match",
+      "bulk.status.possible": "Possible match",
+      "bulk.status.duplicate": "Duplicate",
+      "bulk.status.grouped": "Grouped",
+      "bulk.groupedUnderParent": "Will be grouped under {parent}",
+      "bulk.willBeAddedInside": "Will be added inside {parent}",
+      "bulk.status.notFound": "Not found",
+      "bulk.status.failed": "Failed",
+      "bulk.status.ready": "Ready to add",
+      "bulk.status.added": "Added",
+      "bulk.status.cancelled": "Cancelled",
+      "bulk.type.movies": "Movie",
+      "bulk.type.tvSeries": "TV series",
+      "bulk.type.anime": "Anime",
+      "bulk.backToPaste": "Back to paste step",
+      "bulk.largeImportTitle": "Large import",
+      "bulk.largeImportWarning":
+        "You pasted {count} titles. They will be reviewed in batches — nothing is added until each title is verified. Continue?",
+      "bulk.pasteEmpty": "Paste a list to import.",
+      "bulk.unrecognizedFormat":
+        "Could not read that list. Use TSV, lines like Title | Year | Type, CSV, or a strict JSON array.",
+      "bulk.noneParsed": "No valid rows found in that paste.",
+      "bulk.jsonEmpty": "Paste a JSON array to import.",
+      "bulk.jsonNotArray": "JSON must be a single array of title objects.",
+      "bulk.jsonInvalid":
+        "Could not parse that JSON. Check commas, quotes, and braces — truncated or partial JSON is not accepted.",
+      "bulk.jsonTruncated":
+        "That JSON looks incomplete. Copy the full array from your AI (from [ to ]) and try again.",
+      "bulk.jsonCurlyQuotes":
+        "Could not parse that JSON. Curly “smart quotes” were detected — re-copy as plain text.",
       "bulk.readFailed": "Could not read that paste.",
       "bulk.allDuplicates": "Every title was already on your list.",
       "bulk.noneAdded": "No titles could be added.",
@@ -428,6 +612,8 @@
       "auth.needNumber": "Use at least one number.",
       "auth.listNameRequired": "Give your list a name.",
       "auth.listNameLong": "Keep the name under 48 characters.",
+      "auth.storageFull":
+        "Device storage is full. Clear this site's browser data or remove old import drafts, then try again.",
       "mobile.notWatched": "Not watched yet",
       "mobile.watchedUnrated": "Watched — not rated yet",
       "mobile.rateTitle": "Rate this title",
@@ -692,7 +878,7 @@
       "btn.rateLater": "التقييم لاحقاً",
       "btn.saveRating": "حفظ التقييم",
       "btn.loadMore": "عرض المزيد",
-      "btn.copyTemplate": "نسخ القالب للذكاء الاصطناعي",
+      "btn.copyTemplate": "نسخ الرسالة",
       "menu.label": "القائمة",
       "menu.switchList": "تبديل القائمة",
       "menu.manageLists": "إدارة القوائم",
@@ -702,6 +888,17 @@
       "menu.signOut": "تسجيل الخروج",
       "menu.language": "اللغة",
       "menu.theme": "المظهر",
+      "credits.menu": "الاعتمادات ومصادر البيانات",
+      "credits.title": "الاعتمادات ومصادر البيانات",
+      "credits.animeAttribution":
+        "تحتوي بيانات هوية الأنمي على معلومات من anime-offline-database من manami-project، متاحة بموجب ODbL 1.0 و DbCL 1.0.",
+      "credits.providersHint":
+        "قد تأتي بيانات الأفلام والمسلسلات من TMDb و OMDb و TVDB و AniList عند البحث أو إثراء العناوين. قوائمك الخاصة وتقييماتك وتقدم المشاهدة مخزنة بشكل منفصل وليست جزءًا من فهرس الأنمي المرخص.",
+      "credits.indexVersion":
+        "فهرس الأنمي دون اتصال: إصدار {version} · {count} عنوان · تاريخ المصدر {updated}",
+      "credits.archivedNote":
+        "مصدر فهرس الأنمي (anime-offline-database) مجموعة بيانات مؤرشفة للقراءة فقط؛ الإصدار المثبت يستمر بالعمل دون تحديثات مستقبلية من المصدر.",
+      "credits.close": "إغلاق",
       "theme.dark": "داكن",
       "theme.light": "فاتح",
       "theme.purple": "بنفسجي",
@@ -793,6 +990,9 @@
       "stats.filterWatched": "عرض العناوين المشاهدة",
       "stats.filterInProgress": "عرض العناوين قيد المشاهدة",
       "sync.savingShort": "جاري الحفظ…",
+      "sync.cloudRestore": "جاري استعادة قائمتك من السحابة",
+      "sync.cloudRestoreTitle": "استعادة من السحابة",
+      "sync.cloudRestoreFailed": "تعذرت استعادة قائمتك من السحابة. تحقق من الاتصال وحاول مرة أخرى.",
       "sync.failedShort": "فشل النسخ الاحتياطي",
       "sync.savedShort": "تم الحفظ",
       "sync.offlineShort": "غير متصل",
@@ -801,6 +1001,9 @@
       "sync.saving": " · جاري الحفظ…",
       "sync.failed": " · فشل الحفظ",
       "sync.saved": " · تم الحفظ",
+      "sync.cacheRecoveryTitle": "عناوين مفقودة",
+      "sync.cacheRecoveryPrompt":
+        "قائمتك تعرض {current} عنواناً، لكن يوجد نسخة احتياطية محلية فيها {cached} ({gap} إضافية). استعادة النسخة الاحتياطية؟ سيستبدل ذلك قائمتك الحالية ويُزامَن مع السحابة.",
       "ptr.refreshing": "جاري التحديث…",
       "ptr.failed": "تعذّر التحديث. تُعرض قائمتك المحفوظة.",
       "empty.noTitles": "قائمتك فارغة",
@@ -950,7 +1153,7 @@
       "modal.close": "إغلاق",
       "add.search": "بحث",
       "add.manual": "يدوي",
-      "add.bulk": "عناوين متعددة",
+      "add.bulk": "استيراد قائمة",
       "add.mode": "طريقة الإضافة",
       "changeCode.title": "تغيير رمز القائمة",
       "changeCode.text":
@@ -1037,20 +1240,65 @@
       "rating.thoughtsSoFar": "أفكارك حتى الآن…",
       "rating.note": "ملاحظة لنفسك",
       "rating.notePlaceholder": "أفكارك",
-      "bulk.headline": "أضف عدة عناوين دفعة واحدة بالذكاء الاصطناعي",
-      "bulk.step1Title": "انسخ قالبنا",
+      "bulk.headline": "أضف قائمة كاملة دفعة واحدة",
+      "bulk.step1Title": "انسخ رسالة الذكاء الاصطناعي",
       "bulk.step1Text":
-        "اضغط الزر أدناه. يخبر الذكاء الاصطناعي بالضبط ما المعلومات المطلوبة لكل عنوان.",
-      "bulk.step2Title": "أرسله للذكاء الاصطناعي",
+        "اضغط الزر أدناه لنسخ رسالة قصيرة لـ ChatGPT أو Claude أو أي روبوت محادثة. تطلب قائمة بسيطة: العنوان والسنة والنوع (فيلم، مسلسل، أو أنمي).",
+      "bulk.step2Title": "الصقها في الذكاء الاصطناعي",
       "bulk.step2Text":
-        "الصق القالب في ChatGPT أو Claude أو أي ذكاء اصطناعي. ثم أضف عناوينك، مثلاً:",
+        "الصق الرسالة في المحادثة، ثم أخبره بالعناوين التي تريدها. مثلاً:",
       "bulk.example":
-        "«هذه أفلامي: Breaking Bad، Interstellar، Attack on Titan…»",
-      "bulk.step3Title": "الصق القائمة المعبأة",
+        "«هذه عناويني: Breaking Bad، Interstellar، Attack on Titan…»",
+      "bulk.step3Title": "الصق قائمتك أو ارفعها",
       "bulk.step3Text":
-        "انسخ ما أعاده الذكاء الاصطناعي والصقه هنا. سنضيف كل عنوان صالح دفعة واحدة.",
-      "bulk.pastePlaceholder": "الصق هنا…",
-      "bulk.pasteLabel": "الصق القائمة المعبأة من الذكاء الاصطناعي",
+        "الصق ما أرسله الذكاء الاصطناعي في المربع أدناه، أو ارفع ملفاً بنفس القائمة تماماً. الملفات النصية فقط (.txt أو .tsv) — وليس PDF أو Word أو Excel أو صور.",
+      "bulk.pastePlaceholder": "الصق قائمتك هنا…",
+      "bulk.pasteLabel": "القائمة من الذكاء الاصطناعي",
+      "bulk.fileLabel": "رفع ملف القائمة (.txt أو .tsv)",
+      "bulk.fileHint": "نفس القائمة أعلاه — نص عادي فقط.",
+      "bulk.fileWrongType":
+        "نوع الملف غير مدعوم. احفظ القائمة كملف .txt أو .tsv (نص عادي)، وليس PDF أو Word أو صورة.",
+      "bulk.fileReadFailed": "تعذر قراءة الملف.",
+      "bulk.reviewImport": "تحقق من قائمتي",
+      "bulk.addVerified": "أضف إلى قائمتي",
+      "bulk.verifyBeforeAdd": "انتظر حتى يتم مطابقة العناوين قبل الإضافة.",
+      "bulk.previewTitle": "راجع قائمتك",
+      "bulk.previewTotal": "المُرسَل",
+      "bulk.previewValid": "صفوف صالحة",
+      "bulk.previewDuplicates": "مكررات",
+      "bulk.previewInvalid": "غير صالح",
+      "bulk.previewPending": "بانتظار التحقق",
+      "bulk.previewColTitle": "العنوان",
+      "bulk.previewColYear": "السنة",
+      "bulk.previewColType": "النوع",
+      "bulk.previewColStatus": "الحالة",
+      "bulk.status.pending": "بانتظار التحقق",
+      "bulk.status.duplicateList": "موجود في قائمتك",
+      "bulk.status.duplicateImport": "مكرر في اللصق",
+      "bulk.status.invalid": "غير صالح",
+      "bulk.type.movies": "فيلم",
+      "bulk.type.tvSeries": "مسلسل",
+      "bulk.type.anime": "أنمي",
+      "bulk.backToPaste": "العودة للصق",
+      "bulk.copyUnresolved": "نسخ العناوين غير المحلولة",
+      "bulk.copyUnresolvedCopied": "تم النسخ!",
+      "bulk.copyUnresolvedEmpty": "لا توجد عناوين غير محلولة للنسخ.",
+      "bulk.advancedRecovery": "استرداد متقدم",
+      "bulk.largeImportTitle": "استيراد كبير",
+      "bulk.largeImportWarning":
+        "لصقت {count} عنواناً. ستُراجع على دفعات — لا يُضاف شيء حتى يُتحقق من كل عنوان. متابعة؟",
+      "bulk.pasteEmpty": "الصق قائمة للاستيراد.",
+      "bulk.unrecognizedFormat":
+        "تعذر قراءة القائمة. استخدم مصفوفة JSON أو أسطراً مثل: العنوان | السنة | النوع",
+      "bulk.noneParsed": "لم يُعثر على صفوف صالحة في اللصق.",
+      "bulk.jsonEmpty": "الصق مصفوفة JSON للاستيراد.",
+      "bulk.jsonNotArray": "يجب أن يكون JSON مصفوفة واحدة من كائنات العناوين.",
+      "bulk.jsonInvalid":
+        "تعذر تحليل JSON. تحقق من الفواصل والاقتباسات — لا نقبل JSON مقطوعاً أو جزئياً.",
+      "bulk.jsonTruncated":
+        "يبدو أن JSON غير مكتمل. انسخ المصفوفة كاملة من [ إلى ] وحاول مجدداً.",
+      "bulk.jsonCurlyQuotes":
+        "تعذر تحليل JSON. وُجدت علامات اقتباس منحنية — أعد النسخ كنص عادي.",
       "bulk.readFailed": "تعذر قراءة ما لصقته.",
       "bulk.allDuplicates": "كل العناوين موجودة في قائمتك بالفعل.",
       "bulk.noneAdded": "لم يُضف أي عنوان.",
@@ -1089,6 +1337,8 @@
       "auth.needNumber": "استخدم رقماً واحداً على الأقل.",
       "auth.listNameRequired": "أدخل اسماً للقائمة.",
       "auth.listNameLong": "اجعل الاسم أقل من 48 حرفاً.",
+      "auth.storageFull":
+        "مساحة التخزين على الجهاز ممتلئة. امسح بيانات الموقع من المتصفح أو أزل مسودات الاستيراد القديمة، ثم حاول مرة أخرى.",
       "mobile.notWatched": "لم تُشاهد بعد",
       "mobile.watchedUnrated": "شُوهدت — لم تُقيَّم بعد",
       "mobile.rateTitle": "قيّم هذا العنوان",
@@ -1363,6 +1613,8 @@
     "Use at least one number.": "auth.needNumber",
     "Give your list a name.": "auth.listNameRequired",
     "Keep the name under 48 characters.": "auth.listNameLong",
+    "Device storage is full. Clear this site's browser data or remove old import drafts, then try again.":
+      "auth.storageFull",
   };
 
   const APP_MESSAGE_MAP = {
@@ -1481,6 +1733,7 @@
     setText("[data-action='manage-lists']", "menu.manageLists");
     setText("[data-action='share']", "menu.share");
     setText("[data-action='open-theme']", "menu.theme");
+    setText("[data-action='open-credits']", "credits.menu");
     setText("[data-action='change-code']", "menu.changeCode");
     setText("[data-action='delete-account']", "menu.deleteAccount");
     setText("[data-action='sign-out']", "menu.signOut");
@@ -1635,7 +1888,37 @@
     setText("#importNewListSubmit", "import.newListSubmit");
 
     setText("#bulkAddPanel .modal__footer .btn--ghost", "btn.cancel");
-    setText("#bulkAddConfirm", "btn.addAllTitles");
+    setText("#bulkAddConfirm", "bulk.reviewImport");
+    setText("#bulkImportBack", "bulk.backToPaste");
+    setText("#bulkImportResolve", "bulk.resolveRemaining");
+    setText("#bulkImportAdvancedSummary", "bulk.advancedRecovery");
+    setText("#bulkImportCopyUnresolved", "bulk.copyUnresolved");
+    setText("#creditsModalTitle", "credits.title");
+    setText("#creditsProvidersHint", "credits.providersHint");
+    setText("#creditsArchivedNote", "credits.archivedNote");
+    setText("#creditsModal .btn--primary", "credits.close");
+    setText("#bulkImportPasteCorrected", "bulk.pasteCorrected");
+    setText("#bulkImportFileLabelOptional", "bulk.fileLabelOptional");
+    setText("#bulkCorrectedTsvTitle", "bulk.correctedImportTitle");
+    setText("#bulkCorrectedTsvHint", "bulk.correctedPasteHint");
+    setText("#bulkCorrectedTsvPaste", "bulk.pasteFromClipboard");
+    setText("#bulkCorrectedTsvApply", "bulk.applyCorrections");
+    setText("#bulkCorrectedTsvModal [data-action='close-bulk-corrected']", "btn.cancel");
+    setText("#bulkImportConfirm", "bulk.addVerified");
+    setText("#bulkImportPreviewTitle", "bulk.previewTitle");
+    setText("#bulkImportColTitle", "bulk.previewColTitle");
+    setText("#bulkImportColYear", "bulk.previewColYear");
+    setText("#bulkImportColType", "bulk.previewColType");
+    setText("#bulkImportColStatus", "bulk.previewColStatus");
+    setText("#bulkImportColProvider", "bulk.previewColProvider");
+    setText("#bulkImportColReason", "bulk.previewColReason");
+    setText("#bulkImportShowAll", "bulk.filter.showAll");
+    setText("#bulkFileLabel", "bulk.fileLabel");
+    setText("#bulkFileHint", "bulk.fileHint");
+    setText("#bulkImportPause", "bulk.pause");
+    setText("#bulkImportResume", "bulk.resume");
+    setText("#bulkImportRetry", "bulk.retryFailed");
+    setText("#bulkImportCancel", "bulk.cancelRemaining");
     setText(".bulk-add__headline", "bulk.headline");
     setText(".bulk-add__step:nth-child(1) .bulk-add__step-title", "bulk.step1Title");
     setText(".bulk-add__step:nth-child(1) p", "bulk.step1Text");

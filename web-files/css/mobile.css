@@ -288,6 +288,8 @@
     overflow: visible;
     z-index: 35;
   }
+
+  .card__body {
     display: flex;
     flex-direction: column;
     flex: 1;

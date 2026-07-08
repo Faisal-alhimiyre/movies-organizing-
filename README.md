@@ -40,6 +40,7 @@ Run in **Supabase → SQL Editor** (once per project):
 
 1. **New project:** run `supabase/schema.sql`
 2. **Existing project with accounts:** run `supabase/migrate-incremental.sql` only
+3. **Bulk anime import (offline index):** run `supabase/migrate-anime-title-index.sql`, then see [`docs/ANIME-DATASET.md`](docs/ANIME-DATASET.md) (admin record), [`docs/ANIME-DATA-LICENSE.md`](docs/ANIME-DATA-LICENSE.md), and `scripts/anime-index-etl/README.md`. Upstream is **archived** — pinned release **`2026-27`** (41,537 entries).
 
 Older upgrades:
 
@@ -113,3 +114,5 @@ cd flutter_app
 ## License
 
 Personal project — add a license file if you open-source formally.
+
+**Third-party anime identity data:** bulk-import matching uses a server-side derivative of [anime-offline-database](https://github.com/manami-project/anime-offline-database) (ODbL 1.0 + DbCL 1.0). The upstream repo is **archived**; pinned release **`2026-27`**. See [`docs/ANIME-DATASET.md`](docs/ANIME-DATASET.md) and [`docs/ANIME-DATA-LICENSE.md`](docs/ANIME-DATA-LICENSE.md).

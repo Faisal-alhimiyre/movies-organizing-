@@ -128,7 +128,7 @@
       : "btn btn--primary";
 
     root.hidden = false;
-    document.body.style.overflow = "hidden";
+    window.WatchlistApp?.updateBodyScrollLock?.();
     (isAlert ? confirmBtn : cancelBtn).focus();
 
     return new Promise((resolve) => {
@@ -140,13 +140,7 @@
     if (!root) return;
     root.hidden = true;
     settle = null;
-
-    if (
-      !document.querySelector(".modal:not([hidden])") &&
-      !document.querySelector(".app-dialog:not([hidden])")
-    ) {
-      document.body.style.overflow = "";
-    }
+    window.WatchlistApp?.updateBodyScrollLock?.();
   }
 
   function alert(message, options = {}) {

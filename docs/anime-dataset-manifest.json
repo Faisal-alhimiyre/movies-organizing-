@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "status": "pinned_archived_release",
+  "source": {
+    "repository": "https://github.com/manami-project/anime-offline-database",
+    "repositoryArchived": true,
+    "repositoryReadOnly": true,
+    "maintainer": "manami-project",
+    "license": {
+      "database": "ODbL-1.0",
+      "contents": "DbCL-1.0",
+      "licenseUrl": "https://github.com/manami-project/anime-offline-database/blob/2026-27/LICENSE"
+    }
+  },
+  "pinnedRelease": {
+    "releaseTag": "2026-27",
+    "publishedAt": "2026-07-04T15:39:29Z",
+    "upstreamLastUpdate": "2026-07-04",
+    "upstreamEntryCount": 41537,
+    "artifactPreferred": "anime-offline-database.jsonl.zst",
+    "artifactFallback": "anime-offline-database.jsonl",
+    "downloadUrlPreferred": "https://github.com/manami-project/anime-offline-database/releases/download/2026-27/anime-offline-database.jsonl.zst",
+    "checksumSha256Preferred": "9ed7e3fd8f0f47b63d977e915a555b7f6e552a7a25a465773451dbccd9cb8e03",
+    "checksumSha256Jsonl": "8a63189782176fe19e00eca275288ba855ce54d6cb4d7ae97ec71450f861b1aa",
+    "artifactSizeBytesPreferred": 6034492,
+    "artifactSizeBytesJsonl": 62331124
+  },
+  "installed": {
+    "activeVersion": null,
+    "upstreamLastUpdate": null,
+    "acceptedRows": null,
+    "importedRows": null,
+    "rejectedRows": null,
+    "checksumSha256": null,
+    "downloadedAt": null,
+    "activatedAt": null,
+    "notes": "Populated automatically by scripts/anime-index-etl after a successful run."
+  },
+  "policy": {
+    "doNotAutoDownloadForks": true,
+    "doNotAssumeFutureReleases": true,
+    "replacementRequiresManualApproval": true,
+    "anilistFallbackWhenNoAnilistId": true
+  },
+  "attribution": "Anime identity data contains information from anime-offline-database by manami-project, available under ODbL 1.0 and DbCL 1.0."
+}

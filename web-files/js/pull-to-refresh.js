@@ -6,12 +6,13 @@
   const PULL_THRESHOLD = 108;
   const MAX_PULL = 128;
   const PULL_DAMPING = 0.34;
-  const MOBILE_QUERY = "(max-width: 640px), (hover: none) and (pointer: coarse)";
+  const MOBILE_QUERY = "(max-width: 640px)";
 
   let indicator = null;
   let spinner = null;
   let message = null;
   let touchStartY = 0;
+  let touchStartedAtTop = false;
   let pulling = false;
   let pullArmed = false;
   let pullDistance = 0;
@@ -30,8 +31,17 @@
     return (window.scrollY || document.documentElement.scrollTop || 0) <= 0;
   }
 
+  function isPageScrollBlocked() {
+    if (document.body.style.position === "fixed") return true;
+    const itemModal = document.getElementById("itemModal");
+    if (itemModal && itemModal.hidden === false) return true;
+    if (document.querySelector(".td-overlay.td-is-open")) return true;
+    return false;
+  }
+
   function canStartPull() {
     if (!isMobilePtr()) return false;
+    if (isPageScrollBlocked()) return false;
     if (!isScrollAtTop()) return false;
     return window.WatchlistApp?.canPullToRefresh?.() === true;
   }
@@ -106,23 +116,33 @@
   }
 
   function onTouchStart(event) {
-    if (!canStartPull() || refreshPromise || window.WatchlistApp?.isPullToRefreshActive?.()) return;
-    if (event.touches.length !== 1) return;
-    touchStartY = event.touches[0].clientY;
+    if (!isMobilePtr() || event.touches.length !== 1) return;
+
+    touchStartedAtTop = isScrollAtTop();
     pulling = false;
     pullArmed = false;
     pullDistance = 0;
+    touchStartY = event.touches[0].clientY;
+
+    if (!touchStartedAtTop || !canStartPull() || refreshPromise || window.WatchlistApp?.isPullToRefreshActive?.()) {
+      return;
+    }
   }
 
   function onTouchMove(event) {
+    if (!isMobilePtr() || event.touches.length !== 1) return;
     if (refreshPromise || window.WatchlistApp?.isPullToRefreshActive?.()) return;
-    if (!isScrollAtTop()) {
+
+    // Never interfere with scroll gestures that did not start at the top.
+    if (!touchStartedAtTop || !isScrollAtTop()) {
       pulling = false;
       pullArmed = false;
       pullDistance = 0;
       setIndicatorState({ visible: false });
       return;
     }
+
+    if (isPageScrollBlocked()) return;
 
     const y = event.touches[0].clientY;
     const delta = y - touchStartY;
@@ -144,7 +164,6 @@
 
     if (pullDistance >= INDICATOR_THRESHOLD) {
       setIndicatorState({ visible: true, distance: pullDistance, refreshing: false });
-      event.preventDefault();
       return;
     }
 
@@ -175,7 +194,7 @@
     if (bound) return;
     bound = true;
     document.addEventListener("touchstart", onTouchStart, { passive: true });
-    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("touchmove", onTouchMove, { passive: true });
     document.addEventListener("touchend", onTouchEnd, { passive: true });
     document.addEventListener("touchcancel", onTouchEnd, { passive: true });
   }

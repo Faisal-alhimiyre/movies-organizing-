@@ -5,6 +5,203 @@
   const ANILIST_API = "https://graphql.anilist.co";
   const TMDB_IMAGE = "https://image.tmdb.org/t/p/w500";
   const TMDB_IMAGE_SM = "https://image.tmdb.org/t/p/w92";
+  const TMDB_LOW_RES = /\/t\/p\/w(92|154|185|342)\//;
+
+  function upgradeTmdbPosterUrl(url) {
+    if (!url || typeof url !== "string") return url || "";
+    if (!url.includes("image.tmdb.org")) return url;
+    return url.replace(/\/t\/p\/w\d+\//, "/t/p/w500/");
+  }
+
+  function pickAnilistCoverUrl(coverImage) {
+    if (!coverImage) return "";
+    if (typeof coverImage === "string") return coverImage.trim();
+    return (
+      coverImage.extraLarge ||
+      coverImage.large ||
+      coverImage.medium ||
+      ""
+    ).trim();
+  }
+
+  const BULK_ADD_TRACE_TITLE_NEEDLES = [
+    "fairy tail",
+    "tokyo ghoul",
+    "ushio and tora",
+    "no game, no life",
+    "love through a prism",
+  ];
+
+  function isBulkAddTraceTitle(title) {
+    const hay = String(title || "").toLowerCase();
+    return BULK_ADD_TRACE_TITLE_NEEDLES.some((needle) => hay.includes(needle));
+  }
+
+  function isAddPipelineDebugEnabled() {
+    try {
+      return localStorage.getItem("watchlist-debug-add") === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function logBulkVsSearchBuild(label, payload = {}) {
+    if (!isAddPipelineDebugEnabled() && !isBulkAddTraceTitle(payload.title)) return;
+    console.warn("[bulk-vs-search-build]", { label, ...payload });
+  }
+
+  function probePosterImageUrl(url, timeoutMs = 8000) {
+    return new Promise((resolve) => {
+      const trimmed = String(url || "").trim();
+      if (!trimmed) {
+        resolve(false);
+        return;
+      }
+      const img = new Image();
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        img.onload = null;
+        img.onerror = null;
+        img.src = "";
+        resolve(ok);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      img.onload = () => finish(true);
+      img.onerror = () => finish(false);
+      img.src = trimmed;
+    });
+  }
+
+  function collectRawAnilistCoverUrls(details = {}) {
+    return [
+      details.poster,
+      details.coverImageExtraLarge,
+      details.coverImageLarge,
+      details.coverImageMedium,
+      details.coverImage?.extraLarge,
+      details.coverImage?.large,
+      details.coverImage?.medium,
+    ]
+      .map((url) => String(url || "").trim())
+      .filter(isRawAnilistPosterUrl)
+      .filter((url, index, list) => list.indexOf(url) === index);
+  }
+
+  async function verifyAnimePosterForSave(details) {
+    if (!details) return { ok: false, reason: "no_details", verified: false };
+    const candidates = collectRawAnilistCoverUrls(details);
+    if (!candidates.length) {
+      return { ok: false, reason: "no_poster_url", verified: false, poster: "" };
+    }
+    for (const url of candidates) {
+      if (await probePosterImageUrl(url)) {
+        details.poster = url;
+        details.posterBroken = false;
+        details.posterVerified = true;
+        return { ok: true, reason: "image_probe_ok", verified: true, poster: url };
+      }
+    }
+    return {
+      ok: false,
+      reason: "image_probe_failed",
+      verified: false,
+      poster: details.poster || candidates[0] || "",
+    };
+  }
+
+  function anilistCacheHasUsablePoster(cached) {
+    if (!cached) return false;
+    if (isRawAnilistPosterUrl(cached.poster)) return true;
+    return collectRawAnilistCoverUrls(cached).length > 0;
+  }
+
+  function patchAnilistProviderCache(anilistId, patch) {
+    const id = Number(anilistId);
+    if (!Number.isFinite(id) || !patch) return null;
+    const key = `anilist:${id}`;
+    const existing = readCached(key) || {};
+    const merged = {
+      ...existing,
+      ...patch,
+      source: "anilist",
+      anilistId: id,
+    };
+    if (patch.coverImageExtraLarge || patch.coverImageLarge || patch.coverImageMedium) {
+      attachAnilistCoverFields(merged, {
+        extraLarge: patch.coverImageExtraLarge,
+        large: patch.coverImageLarge,
+        medium: patch.coverImageMedium,
+      });
+    }
+    if (!merged.link) merged.link = `https://anilist.co/anime/${id}/`;
+    writeCacheEntry(key, merged);
+    return merged;
+  }
+
+  function logAnimeCoverFetch(payload = {}) {
+    const shouldLog =
+      payload.reason === "provider_cache_missing_poster" ||
+      isBulkAddTraceTitle(payload.title) ||
+      isAddPipelineDebugEnabled();
+    if (!shouldLog) return;
+    console.warn("[anime-cover-fetch]", payload);
+  }
+
+  function isRawAnilistPosterUrl(url) {
+    const trimmed = String(url || "").trim();
+    if (!trimmed) return false;
+    if (!trimmed.includes("anilist")) return false;
+    return /^https?:\/\//i.test(trimmed);
+  }
+
+  function applyRawAnilistPosterToDetails(details, posterUrl, source = "anilist") {
+    if (!details || !isRawAnilistPosterUrl(posterUrl)) return details;
+    const prev = details.poster || "";
+    details.poster = String(posterUrl).trim();
+    details.posterBroken = false;
+    details.posterSource = source;
+    if (prev && prev !== details.poster && isAddPipelineDebugEnabled()) {
+      console.warn("[bulk-vs-search-build] poster replaced", {
+        title: details.title,
+        previous: prev,
+        next: details.poster,
+        source,
+      });
+    }
+    return details;
+  }
+
+  /**
+   * AniList GraphQL names (extraLarge / large / medium) map to CDN folders
+   * (large / medium / small). There is no /extraLarge/ folder on the CDN.
+   */
+  function upgradeAnilistPosterUrl(url) {
+    if (!url || typeof url !== "string") return url || "";
+    if (!url.includes("anilist")) return url;
+    return url
+      .replace(/\/extraLarge\//, "/large/")
+      .replace(/\/small\//, "/large/")
+      .replace(/\/medium\//, "/large/");
+  }
+
+  function isLowResPosterUrl(url) {
+    if (!url || typeof url !== "string") return false;
+    if (TMDB_LOW_RES.test(url)) return true;
+    if (url.includes("anilist") && /\/small\//.test(url)) return true;
+    if (url.includes("anilist") && /\/medium\//.test(url)) return true;
+    return false;
+  }
+
+  function upgradePosterForStorage(url, details = {}) {
+    if (!url) return "";
+    if (details.source === "anilist" || details.anilistId || String(url).includes("anilist")) {
+      return upgradeAnilistPosterUrl(url);
+    }
+    return upgradeTmdbPosterUrl(url);
+  }
 
   const memory = new Map();
 
@@ -302,6 +499,286 @@
     return mapped.length ? mapped : [ANIME_GENRE_FALLBACK];
   }
 
+  const TMDB_KEYWORD_GENRE_HINTS = {
+    gangster: "Crime",
+    mafia: "Crime",
+    heist: "Crime",
+    detective: "Crime",
+    murder: "Crime",
+    organized: "Crime",
+    "organized crime": "Crime",
+    superhero: "Action",
+    "super hero": "Action",
+    "superhero team": "Action",
+    batman: "Action",
+    "dc comics": "Action",
+    villain: "Thriller",
+    psychological: "Thriller",
+    dystopia: "Science Fiction",
+    "post-apocalyptic": "Science Fiction",
+    vampire: "Horror",
+    zombie: "Horror",
+    serial: "Thriller",
+    "serial killer": "Thriller",
+    western: "Western",
+    war: "War",
+    sports: "Sports",
+    sport: "Sports",
+    musical: "Family",
+    biography: "Historical",
+    historical: "Historical",
+  };
+
+  let genreMergeDebugWesternLogged = false;
+
+  function mapKeywordToGenre(keyword, standardGenres = []) {
+    const raw = String(keyword?.name || keyword || "").trim();
+    if (!raw) return null;
+    const lower = raw.toLowerCase();
+    const hinted = TMDB_KEYWORD_GENRE_HINTS[lower];
+    if (hinted && standardGenres.includes(hinted)) return hinted;
+    return mapGenreToStandard(raw, standardGenres);
+  }
+
+  function mergeProviderGenreSources(sources = {}, standardGenres = [], contentType = "") {
+    const raw = [];
+    const seen = new Set();
+    const pushRaw = (value) => {
+      for (const genre of parseGenreList(value)) {
+        const key = genre.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        raw.push(genre);
+      }
+    };
+
+    pushRaw(sources.existing);
+    pushRaw(sources.tmdb);
+    pushRaw(sources.omdb);
+    for (const keyword of sources.keywords || []) {
+      const mapped = mapKeywordToGenre(keyword, standardGenres);
+      if (mapped) pushRaw(mapped);
+      else pushRaw(keyword?.name || keyword);
+    }
+
+    const suggested = suggestGenres(raw, standardGenres, contentType);
+    return { raw, suggested };
+  }
+
+  function applyMergedGenresToItem(item, mergeResult, contentType = "") {
+    if (!item || !mergeResult?.suggested?.length) return false;
+
+    const { raw, suggested } = mergeResult;
+    const type = contentType || item.contentType || "";
+    const current = [item.genre, ...(item.secondaryGenres || [])].filter(Boolean);
+    let changed = false;
+
+    if (raw.length) {
+      const prev = JSON.stringify(item.sourceGenres || []);
+      const next = JSON.stringify(raw);
+      if (prev !== next) {
+        item.sourceGenres = raw;
+        changed = true;
+      }
+    }
+
+    if (current.length > suggested.length && current.length >= 2) {
+      const extras = suggested.filter((g) => g !== item.genre && !current.includes(g));
+      if (extras.length) {
+        item.secondaryGenres = [...(item.secondaryGenres || []), ...extras].filter(
+          (g, i, arr) => arr.indexOf(g) === i
+        );
+        changed = true;
+      }
+      return changed;
+    }
+
+    const primary = suggested[0];
+    const secondaries = suggested.slice(1);
+    if (primary && (!item.genre || item.genre === "Drama" || current.length <= 1)) {
+      if (item.genre !== primary) {
+        item.genre = primary;
+        changed = true;
+      }
+      const nextSecondary = secondaries.filter((g) => g !== primary);
+      const prevSec = JSON.stringify(item.secondaryGenres || []);
+      const nextSec = JSON.stringify(nextSecondary);
+      if (prevSec !== nextSec) {
+        item.secondaryGenres = nextSecondary;
+        changed = true;
+      }
+    } else if (secondaries.length) {
+      const extras = secondaries.filter((g) => g !== item.genre && !current.includes(g));
+      if (extras.length) {
+        item.secondaryGenres = [...(item.secondaryGenres || []), ...extras].filter(
+          (g, i, arr) => arr.indexOf(g) === i
+        );
+        changed = true;
+      }
+    }
+
+    return changed;
+  }
+
+  async function fetchTmdbKeywords(mediaType, tmdbId) {
+    const id = parseInt(String(tmdbId || "").trim(), 10);
+    if (!Number.isFinite(id) || id <= 0) return [];
+    const type = mediaType === "tv" ? "tv" : "movie";
+    const cacheKey = `tmdb-keywords:${type}:${id}`;
+    const cached = readCached(cacheKey);
+    if (cached?.keywords) return cached.keywords;
+
+    const json = await fetchTmdb(`${type}/${id}/keywords`);
+    const keywords =
+      type === "tv"
+        ? json?.results || []
+        : json?.keywords || [];
+    if (Array.isArray(keywords) && keywords.length) {
+      writeCacheEntry(cacheKey, { keywords });
+    }
+    return Array.isArray(keywords) ? keywords : [];
+  }
+
+  async function enrichDetailsGenres(details, options = {}) {
+    if (!details) return details;
+    const contentType =
+      options.contentType ||
+      details.contentType ||
+      inferContentType(details.mediaType || details.omdbType, details.genres || []);
+    if (contentType === "anime") return details;
+
+    const standardGenres = options.standardGenres || [];
+    const sources = {
+      existing: details.genres || [],
+      tmdb: details.genres || [],
+      omdb: [],
+      keywords: details.tmdbKeywords || [],
+    };
+
+    if (details.imdbId && hasOmdbKey()) {
+      const omdb = await getMetadata(details.imdbId);
+      if (omdb?.genres?.length) sources.omdb = omdb.genres;
+    }
+
+    if (details.tmdbId && details.tmdbType && !sources.keywords.length) {
+      sources.keywords = await fetchTmdbKeywords(details.tmdbType, details.tmdbId);
+    }
+
+    const merged = mergeProviderGenreSources(sources, standardGenres, contentType);
+    details.genres = merged.raw;
+    details.mergedGenres = merged.suggested;
+
+    const debug =
+      options.debugLabel &&
+      (contentType === "tvSeries" || contentType === "movies") &&
+      !genreMergeDebugWesternLogged;
+    if (debug) {
+      genreMergeDebugWesternLogged = true;
+      console.warn("[metadata:genre-merge]", {
+        title: options.debugLabel,
+        contentType,
+        tmdbGenres: sources.tmdb,
+        omdbGenres: sources.omdb,
+        tmdbKeywords: (sources.keywords || []).map((k) => k?.name || k).slice(0, 12),
+        finalMerged: merged.suggested,
+        skippedOmdb: !details.imdbId || !hasOmdbKey(),
+        skippedKeywords: !details.tmdbId,
+      });
+    }
+
+    return details;
+  }
+
+  async function mergeAndApplyItemGenres(item, details, options = {}) {
+    if (!item || !details) return false;
+    const contentType = options.contentType || item.contentType || "";
+    if (contentType === "anime") return false;
+
+    const enriched = await enrichDetailsGenres(details, {
+      contentType,
+      standardGenres: options.standardGenres || [],
+      debugLabel: options.debugLabel || item.title,
+    });
+    const mergeResult = {
+      raw: enriched.genres || [],
+      suggested:
+        enriched.mergedGenres ||
+        suggestGenres(enriched.genres, options.standardGenres || [], contentType),
+    };
+    return applyMergedGenresToItem(item, mergeResult, contentType);
+  }
+
+  function tmdbOriginCountries(item) {
+    const raw = item?.origin_country || item?.originCountry || [];
+    return Array.isArray(raw) ? raw.map((c) => String(c).toUpperCase()) : [];
+  }
+
+  function isJapaneseTmdbProduction(item) {
+    if (!item) return false;
+    const countries = tmdbOriginCountries(item);
+    if (countries.includes("JP")) return true;
+    const lang = String(item.original_language || item.originalLanguage || "").toLowerCase();
+    return lang === "ja";
+  }
+
+  function isLikelyAnimeSearchResult(result) {
+    if (!result) return false;
+    if (result.source === "anilist" || result.anilistId) return true;
+    if (String(result.type || "").toLowerCase() === "anime") return true;
+    if (isJapaneseTmdbProduction(result)) return true;
+    if (isAnimatedContent(result.genres)) return true;
+    if (Array.isArray(result.genreIds) && result.genreIds.includes(16)) return true;
+    const lang = String(
+      result.originalLanguage || result.original_language || ""
+    ).toLowerCase();
+    if (lang === "ja") return true;
+    if (result.title) {
+      const cached = lookupCachedAnilistMatch(result.title, { year: result.year });
+      if (cached?.pick?.anilistId) return true;
+    }
+    return false;
+  }
+
+  function displayTypeForSearchResult(result) {
+    if (!result) return "";
+    if (result.displayType) return result.displayType;
+    if (isLikelyAnimeSearchResult(result)) return "anime";
+    const raw = String(result.type || "").toLowerCase();
+    if (raw === "movie") return "movie";
+    if (result.tmdbType === "tv" || raw === "series") return "series";
+    return raw || "series";
+  }
+
+  function pickPreferredSearchResult(existing, candidate) {
+    const existingAnilist = existing.source === "anilist";
+    const candidateAnilist = candidate.source === "anilist";
+    const existingWestTv =
+      existing.source === "tmdb" &&
+      existing.tmdbType === "tv" &&
+      !isJapaneseTmdbProduction(existing);
+    const candidateWestTv =
+      candidate.source === "tmdb" &&
+      candidate.tmdbType === "tv" &&
+      !isJapaneseTmdbProduction(candidate);
+    const existingJpTv =
+      existing.source === "tmdb" &&
+      existing.tmdbType === "tv" &&
+      isJapaneseTmdbProduction(existing);
+    const candidateJpTv =
+      candidate.source === "tmdb" &&
+      candidate.tmdbType === "tv" &&
+      isJapaneseTmdbProduction(candidate);
+
+    if (existingAnilist && candidateWestTv) return candidate;
+    if (candidateAnilist && existingWestTv) return existing;
+    if (existingAnilist && candidateJpTv) return existing;
+    if (candidateAnilist && existingJpTv) return candidate;
+    if (existingAnilist || candidateAnilist) {
+      return existingAnilist ? existing : candidate;
+    }
+    return existing;
+  }
+
   function isAnimatedContent(genres) {
     return parseGenreList(genres).some((genre) => {
       const lower = genre.toLowerCase();
@@ -311,16 +788,9 @@
 
   function inferContentType(mediaType, genres = []) {
     const type = String(mediaType || "").toLowerCase();
-    const animated = isAnimatedContent(genres);
-
-    if (type === "anime" || type === "animation") return "anime";
-    if (type === "series" || type === "episode" || type === "tv") {
-      return animated ? "anime" : "tvSeries";
-    }
-    if (type === "movie" || type === "game") {
-      return animated ? "anime" : "movies";
-    }
-    if (animated) return "anime";
+    if (type === "anime") return "anime";
+    if (type === "series" || type === "episode" || type === "tv") return "tvSeries";
+    if (type === "movie" || type === "game") return "movies";
     return "movies";
   }
 
@@ -689,6 +1159,108 @@
     if (details.episodeCount) target.episodeCount = details.episodeCount;
   }
 
+  function extractLeadCast(details, limit = 5) {
+    if (!details) return [];
+    let names = [];
+    if (Array.isArray(details.actors) && details.actors.length) {
+      names = details.actors.map((name) => String(name || "").trim()).filter(Boolean);
+    } else if (details.director) {
+      names = [String(details.director).trim()].filter(Boolean);
+    }
+    return [...new Set(names)].slice(0, limit);
+  }
+
+  async function enrichLeadCastForItem(item, details = null) {
+    if (!item) {
+      return { names: [], source: "", provider: "", providerId: null, reason: "no_item" };
+    }
+
+    const ct = item.contentType;
+    const limit = ct === "anime" ? 4 : 5;
+
+    if (details?.actors?.length) {
+      const names = extractLeadCast(details, limit);
+      if (names.length) {
+        return {
+          names,
+          source: details.source || "details",
+          provider: details.source || "details",
+          providerId: details.anilistId || details.tmdbId || details.imdbId || null,
+        };
+      }
+    }
+
+    if (ct === "anime") {
+      const anilistId = item.anilistId || details?.anilistId;
+      if (anilistId) {
+        const full = await fetchAnilistById(anilistId);
+        const names = extractLeadCast(full, limit);
+        if (names.length) {
+          return { names, source: "anilist", provider: "AniList", providerId: anilistId };
+        }
+        return {
+          names: [],
+          source: "",
+          provider: "AniList",
+          providerId: anilistId,
+          reason: "anime_voice_cast_unavailable",
+        };
+      }
+      return { names: [], source: "", provider: "", providerId: null, reason: "anime_cast_optional" };
+    }
+
+    const tmdbId = item.tmdbId || details?.tmdbId;
+    if (tmdbId) {
+      const mediaType = ct === "movies" ? "movie" : "tv";
+      const tmdb = await fetchTmdbDetails(mediaType, tmdbId);
+      const names = extractLeadCast(tmdb, limit);
+      if (names.length) {
+        return {
+          names,
+          source: "tmdb_credits",
+          provider: "TMDb",
+          providerId: `tmdb:${mediaType}:${tmdbId}`,
+        };
+      }
+    }
+
+    const imdbId = item.imdbId || details?.imdbId;
+    if (imdbId) {
+      const omdb = await getMetadata(imdbId);
+      const names = extractLeadCast(omdb, limit);
+      if (names.length) {
+        return {
+          names,
+          source: "omdb_actors",
+          provider: "OMDb",
+          providerId: imdbId,
+        };
+      }
+      if (tmdbId) {
+        return {
+          names: [],
+          source: "",
+          provider: "TMDb",
+          providerId: `tmdb:${ct === "movies" ? "movie" : "tv"}:${tmdbId}`,
+          reason: "tmdb_and_omdb_cast_empty",
+        };
+      }
+      return { names: [], source: "", provider: "OMDb", providerId: imdbId, reason: "omdb_cast_empty" };
+    }
+
+    if (tmdbId) {
+      return {
+        names: [],
+        source: "",
+        provider: "TMDb",
+        providerId: `tmdb:${ct === "movies" ? "movie" : "tv"}:${tmdbId}`,
+        reason: "tmdb_credits_empty",
+      };
+    }
+
+    return { names: [], source: "", provider: "", providerId: null, reason: "no_provider_id" };
+  }
+
   function cachedHasTitleMeta(payload) {
     if (!payload) return false;
     if (payload.ageRating) return true;
@@ -728,40 +1300,1161 @@
     return `${normalizeTitleKey(result.title)}::${result.year || ""}`;
   }
 
+  function resultProviderIdentityKey(result) {
+    if (result.anilistId) return `anilist:${result.anilistId}`;
+    if (result.tmdbId) {
+      return `tmdb:${result.tmdbType || "tv"}:${result.tmdbId}`;
+    }
+    if (result.imdbId) return `imdb:${String(result.imdbId).toLowerCase()}`;
+    return `title:${resultDedupeKey(result)}`;
+  }
+
+  /**
+   * Keep AniList and TMDb as separate search rows — never merge anime into TMDb TV.
+   */
   function mergeSearchResults(lists) {
-    const merged = [];
-    const seen = new Set();
+    const byProvider = new Map();
 
     for (const list of lists) {
       for (const result of list || []) {
         if (!result?.title) continue;
-        const key = result.resultKey || resultDedupeKey(result);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        merged.push({ ...result, resultKey: key });
+        const key = resultProviderIdentityKey(result);
+        if (byProvider.has(key)) continue;
+        byProvider.set(key, {
+          ...result,
+          resultKey: result.resultKey || key,
+        });
       }
     }
 
-    return merged;
+    return [...byProvider.values()];
   }
 
-  async function anilistQuery(query, variables) {
+  function resolveContentTypeForWatchlistAdd(pick, details, options = {}) {
+    const filter = String(options.searchTypeFilter || options.contentType || "").toLowerCase();
+    if (filter === "anime") return "anime";
+    if (options.contentType === "anime") return "anime";
+    if (pick?.displayType === "anime") return "anime";
+    if (pick?.anilistId || pick?.source === "anilist") return "anime";
+    if (details?.anilistId && !details?.tmdbId) return "anime";
+    if (details?.contentType === "anime" || details?.mediaType === "anime") return "anime";
+    if (pick?.title || details?.title) {
+      const cached = lookupCachedAnilistMatch(pick?.title || details?.title, {
+        year: pick?.year ?? details?.year,
+      });
+      if (cached?.pick?.anilistId) return "anime";
+    }
+    if (pick && isLikelyAnimeSearchResult(pick)) return "anime";
+    if (pick?.tmdbType === "movie" || details?.tmdbType === "movie") return "movies";
+    if (
+      pick?.tmdbType === "tv" ||
+      details?.tmdbType === "tv" ||
+      details?.mediaType === "series"
+    ) {
+      return "tvSeries";
+    }
+    if (details?.contentType) return details.contentType;
+    return "movies";
+  }
+
+  function attachAnilistCoverFields(payload, coverImage) {
+    if (!payload || !coverImage) return payload;
+    payload.coverImageExtraLarge = String(coverImage.extraLarge || "").trim();
+    payload.coverImageLarge = String(coverImage.large || "").trim();
+    payload.coverImageMedium = String(coverImage.medium || "").trim();
+    return payload;
+  }
+
+  async function fetchAnilistCoverOnly(anilistId, options = {}) {
+    const id = Number(anilistId);
+    if (!Number.isFinite(id)) return { payload: null, fetchMeta: { ran: false } };
+    const cacheKey = `anilist:cover:${id}`;
+    const forceLive = options.forceLive === true || options.bypassCache === true;
+    if (!forceLive) {
+      const cached = readCached(cacheKey);
+      if (cached?.poster && isRawAnilistPosterUrl(cached.poster)) {
+        return { payload: cached, fetchMeta: { ran: false, source: "cover_cache" } };
+      }
+    }
+
+    const query = `query ($id: Int) {
+        Media(id: $id, type: ANIME) {
+          id
+          title { english romaji native }
+          startDate { year }
+          coverImage { extraLarge large medium }
+        }
+      }`;
+    const meta = await anilistQueryDetailed(query, { id });
+    const fetchMeta = {
+      ran: true,
+      operation: "Media.coverImage",
+      httpStatus: meta.httpStatus ?? null,
+      ok: Boolean(meta.ok),
+      rateLimited: Boolean(meta.rateLimited),
+      requestUrl: ANILIST_API,
+      requestBody: { query: "Media(id).coverImage", variables: { id } },
+    };
+    if (!meta.ok) {
+      logAnimeCoverFetch({
+        title: options.title || "",
+        anilistId: id,
+        reason: options.reason || "cover_fetch",
+        error: meta.errors || meta.httpStatus || meta.message,
+        ...fetchMeta,
+      });
+      return { payload: null, fetchMeta };
+    }
+    const media = meta.data?.Media;
+    const logBase = {
+      title: options.title || "",
+      anilistId: id,
+      reason: options.reason || "cover_fetch",
+      coverImageExtraLarge: "",
+      coverImageLarge: "",
+      coverImageMedium: "",
+      selectedPoster: "",
+      cacheUpdated: false,
+    };
+    if (!media) {
+      logAnimeCoverFetch({ ...logBase, error: "anilist_query_empty", ...fetchMeta });
+      return { payload: null, fetchMeta };
+    }
+    const poster = pickAnilistCoverUrl(media.coverImage);
+    const title =
+      media.title?.english || media.title?.romaji || media.title?.native || "";
+    const payload = attachAnilistCoverFields(
+      {
+        source: "anilist",
+        anilistId: Number(media.id),
+        poster,
+        title,
+        year: media.startDate?.year ? String(media.startDate.year) : "",
+        contentType: "anime",
+      },
+      media.coverImage
+    );
+    logAnimeCoverFetch({
+      ...logBase,
+      title: title || logBase.title,
+      coverImageExtraLarge: payload.coverImageExtraLarge || "",
+      coverImageLarge: payload.coverImageLarge || "",
+      coverImageMedium: payload.coverImageMedium || "",
+      selectedPoster: poster || "",
+      cacheUpdated: Boolean(poster),
+      ...fetchMeta,
+    });
+    if (!poster) return { payload: null, fetchMeta };
+    writeCacheEntry(cacheKey, payload);
+    patchAnilistProviderCache(id, payload);
+    return { payload, fetchMeta };
+  }
+
+  function inspectAnilistProviderCache(anilistId) {
+    const id = Number(anilistId);
+    const key = `anilist:${id}`;
+    const cached = readCached(key) || {};
+    return {
+      providerCacheKey: key,
+      providerCachePoster: cached.poster || "",
+      coverImageExtraLarge: cached.coverImageExtraLarge || "",
+      coverImageLarge: cached.coverImageLarge || "",
+      coverImageMedium: cached.coverImageMedium || "",
+      hasUsablePoster: anilistCacheHasUsablePoster(cached),
+    };
+  }
+
+  async function selectLoadableAnilistPoster(coverPayload, options = {}) {
+    if (!coverPayload) return { poster: "", field: "", probeResults: [] };
+    const candidates = [
+      { field: "extraLarge", url: coverPayload.coverImageExtraLarge },
+      { field: "large", url: coverPayload.coverImageLarge },
+      { field: "medium", url: coverPayload.coverImageMedium },
+      { field: "poster", url: coverPayload.poster },
+    ].filter((entry) => isRawAnilistPosterUrl(entry.url));
+    const probeResults = [];
+    for (const entry of candidates) {
+      const loaded = options.skipProbe
+        ? true
+        : await probePosterImageUrl(entry.url, options.probeTimeoutMs || 8000);
+      probeResults.push({ field: entry.field, url: entry.url, loaded });
+      if (loaded) {
+        return { poster: entry.url, field: entry.field, probeResults };
+      }
+    }
+    return { poster: "", field: "", probeResults };
+  }
+
+  async function resolveAnimePosterForBulkCommit(pick, options = {}) {
+    const anilistId = Number(pick?.anilistId);
+    const title = options.title || pick?.title || "";
+    const cacheBefore = inspectAnilistProviderCache(anilistId);
+    const rootCause = {
+      title,
+      importedType: options.importedType || "anime",
+      resolvedAnilistId: anilistId,
+      providerCacheKey: cacheBefore.providerCacheKey,
+      providerCachePosterBefore: cacheBefore.providerCachePoster,
+      providerCacheCoverExtraLargeBefore: cacheBefore.coverImageExtraLarge,
+      providerCacheCoverLargeBefore: cacheBefore.coverImageLarge,
+      providerCacheCoverMediumBefore: cacheBefore.coverImageMedium,
+      liveCoverFetchRan: false,
+      liveAnilistOperation: "",
+      liveAnilistRequestUrl: "",
+      liveAnilistResponseStatus: null,
+      rawCoverImageExtraLarge: "",
+      rawCoverImageLarge: "",
+      rawCoverImageMedium: "",
+      selectedPosterBeforeFinalBuild: "",
+      builderFunction: "buildItemFromSearchDetails",
+      failingStage: "",
+    };
+
+    const { payload: cover, fetchMeta } = await fetchAnilistCoverOnly(anilistId, {
+      forceLive: true,
+      bypassCache: true,
+      title,
+      reason: "bulk_commit_cover",
+    });
+    rootCause.liveCoverFetchRan = Boolean(fetchMeta?.ran);
+    rootCause.liveAnilistOperation = fetchMeta?.operation || "";
+    rootCause.liveAnilistRequestUrl = fetchMeta?.requestUrl || ANILIST_API;
+    rootCause.liveAnilistResponseStatus = fetchMeta?.httpStatus ?? null;
+    if (cover) {
+      rootCause.rawCoverImageExtraLarge = cover.coverImageExtraLarge || "";
+      rootCause.rawCoverImageLarge = cover.coverImageLarge || "";
+      rootCause.rawCoverImageMedium = cover.coverImageMedium || "";
+    }
+
+    const picked = await selectLoadableAnilistPoster(cover, { skipProbe: false });
+    rootCause.posterProbeResults = picked.probeResults;
+    rootCause.selectedPosterBeforeFinalBuild = picked.poster || "";
+    if (!picked.poster) {
+      if (!fetchMeta?.ran) rootCause.failingStage = "A";
+      else if (!cover) rootCause.failingStage = "B";
+      else rootCause.failingStage = "G";
+    }
+
+    return { cover, picked, rootCause, fetchMeta };
+  }
+
+  async function ensureAnimePosterOnDetails(details, options = {}) {
+    if (!details) return null;
+    const anilistId = Number(
+      options.pick?.anilistId || details.anilistId || options.anilistId
+    );
+    if (!Number.isFinite(anilistId)) return details;
+
+    details.anilistId = anilistId;
+    details.source = details.source || "anilist";
+    details.contentType = details.contentType || "anime";
+
+    const full = readCached(`anilist:${anilistId}`);
+    if (full) {
+      attachAnilistCoverFields(details, {
+        extraLarge: full.coverImageExtraLarge,
+        large: full.coverImageLarge,
+        medium: full.coverImageMedium,
+      });
+    }
+
+    if (isRawAnilistPosterUrl(full?.poster)) {
+      applyRawAnilistPosterToDetails(details, full.poster, "provider_cache");
+      details.posterPending = false;
+      return details;
+    }
+
+    const coverFromCacheFields = pickAnilistCoverUrl({
+      extraLarge: full?.coverImageExtraLarge,
+      large: full?.coverImageLarge,
+      medium: full?.coverImageMedium,
+    });
+    if (isRawAnilistPosterUrl(coverFromCacheFields)) {
+      applyRawAnilistPosterToDetails(details, coverFromCacheFields, "provider_cache");
+      patchAnilistProviderCache(anilistId, { poster: coverFromCacheFields });
+      details.posterPending = false;
+      return details;
+    }
+
+    const incompleteCache = Boolean(full && !anilistCacheHasUsablePoster(full));
+    const bypassCache =
+      options.bypassCache === true ||
+      options.forceLive === true ||
+      incompleteCache;
+
+    if (options.allowCoverFetch !== false) {
+      const { payload: cover } = await fetchAnilistCoverOnly(anilistId, {
+        forceLive: bypassCache,
+        bypassCache,
+        title: details.title || options.pick?.title || "",
+        reason: incompleteCache
+          ? "provider_cache_missing_poster"
+          : options.reason || "poster_missing",
+      });
+      if (cover?.poster) {
+        const picked = await selectLoadableAnilistPoster(cover, { skipProbe: false });
+        const posterUrl = picked.poster || cover.poster;
+        attachAnilistCoverFields(details, {
+          extraLarge: cover.coverImageExtraLarge,
+          large: cover.coverImageLarge,
+          medium: cover.coverImageMedium,
+        });
+        applyRawAnilistPosterToDetails(details, posterUrl, "anilist_cover_fetch");
+        if (!details.title && cover.title) details.title = cover.title;
+        if (!details.year && cover.year) details.year = cover.year;
+        details.posterPending = false;
+        details.posterBroken = false;
+        logAnimeCoverFetch({
+          title: details.title || options.pick?.title || "",
+          anilistId,
+          reason: incompleteCache
+            ? "provider_cache_missing_poster"
+            : "poster_missing",
+          coverImageExtraLarge: cover.coverImageExtraLarge || "",
+          coverImageLarge: cover.coverImageLarge || "",
+          coverImageMedium: cover.coverImageMedium || "",
+          selectedPoster: posterUrl,
+          cacheUpdated: true,
+          importItemMovedToReady: Boolean(options.markReady),
+        });
+        return details;
+      }
+    }
+
+    if (isRawAnilistPosterUrl(details.poster) && details.posterSource) {
+      details.posterBroken = false;
+      details.posterPending = false;
+      return details;
+    }
+
+    if (!details.poster && options.required) {
+      details.posterPending = true;
+      details.posterBroken = false;
+    } else if (details.poster) {
+      details.posterBroken = false;
+      details.posterPending = false;
+    }
+
+    return details;
+  }
+
+  async function resolveAnimeDetailsForWatchlistAdd(pick, options = {}) {
+    const trace = options.trace || {};
+    trace.awaitedFetchAnilistById = false;
+    trace.awaitedEnsureAnimeDetails = false;
+    trace.awaitedFetchAnilistCoverOnly = false;
+
+    const anilistId = Number(pick?.anilistId);
+    if (!Number.isFinite(anilistId)) {
+      return { details: null, trace };
+    }
+
+    trace.awaitedFetchAnilistById = true;
+    let details = await fetchAnilistById(anilistId, {
+      forceLive: options.bypassCache === true || options.forceLive === true,
+    });
+    if (details) {
+      trace.coverImageExtraLarge = details.coverImageExtraLarge || "";
+      trace.coverImageLarge = details.coverImageLarge || "";
+      trace.coverImageMedium = details.coverImageMedium || "";
+    }
+
+    if (!details?.poster) {
+      trace.awaitedFetchAnilistCoverOnly = true;
+      const { payload: cover } = await fetchAnilistCoverOnly(anilistId, {
+        forceLive: true,
+        bypassCache: options.bypassCache === true || options.forceLive === true,
+        title: pick?.title || details?.title || "",
+        reason: "resolve_anime_details",
+      });
+      if (cover) {
+        details = { ...(details || {}), ...cover };
+        trace.coverImageExtraLarge = cover.coverImageExtraLarge || "";
+        trace.coverImageLarge = cover.coverImageLarge || "";
+        trace.coverImageMedium = cover.coverImageMedium || "";
+      }
+    }
+
+    if (details?.title) {
+      trace.awaitedEnsureAnimeDetails = true;
+      details = await ensureAnimeDetails(details, {
+        pick,
+        preferAnime: true,
+        forceAnime: true,
+      });
+      trace.coverImageExtraLarge = details.coverImageExtraLarge || trace.coverImageExtraLarge || "";
+      trace.coverImageLarge = details.coverImageLarge || trace.coverImageLarge || "";
+      trace.coverImageMedium = details.coverImageMedium || trace.coverImageMedium || "";
+    }
+
+    if (details) {
+      details = await ensureAnimePosterOnDetails(details, {
+        pick,
+        required: options.posterRequired === true,
+        allowCoverFetch: options.allowCoverFetch !== false,
+        bypassCache: options.bypassCache === true || options.forceLive === true,
+        forceLive: options.bypassCache === true || options.forceLive === true,
+      });
+    }
+
+    return { details, trace };
+  }
+
+  async function resolveDetailsForWatchlistAdd(pick, contentType, options = {}) {
+    if (!pick) return null;
+    const resolvedType = resolveContentTypeForWatchlistAdd(pick, null, {
+      ...options,
+      contentType,
+    });
+    const preferAnime = resolvedType === "anime";
+    let details = null;
+    const trace = options.trace || null;
+
+    if (preferAnime && pick.anilistId) {
+      if (trace) trace.awaitedResolveDetailsForWatchlistAdd = true;
+      const animeResolved = await resolveAnimeDetailsForWatchlistAdd(pick, options);
+      details = animeResolved.details;
+      if (trace) Object.assign(trace, animeResolved.trace);
+    } else {
+      details = await getDetailsForPick(pick, {
+        searchQuery: options.searchQuery || pick.title || "",
+        preferAnime,
+      });
+      if (!details?.title && preferAnime && pick.title) {
+        const match = await fetchAnilistMatchByTitle(pick.title, pick.year);
+        if (match?.anilistId) {
+          details = await fetchAnilistById(match.anilistId);
+        }
+      }
+      if (preferAnime && details?.title) {
+        if (trace) trace.awaitedEnsureAnimeDetails = true;
+        details = await ensureAnimeDetails(details, {
+          pick,
+          preferAnime: true,
+          forceAnime: true,
+        });
+      }
+      if (preferAnime && details) {
+        details = await ensureAnimePosterOnDetails(details, {
+          pick,
+          required: options.posterRequired === true,
+          allowCoverFetch: options.allowCoverFetch !== false,
+        });
+        details.contentType = "anime";
+        if (details.poster) details.posterBroken = false;
+      } else if (details?.poster) {
+        details.poster = upgradePosterForStorage(details.poster, details);
+        details.posterBroken = false;
+      }
+    }
+
+    if (preferAnime && details) {
+      details.contentType = "anime";
+      if (!details.poster && options.posterRequired) {
+        details = await ensureAnimePosterOnDetails(details, {
+          pick,
+          required: true,
+          bypassCache: true,
+          forceLive: true,
+          reason: "poster_required_final",
+        });
+      }
+      if (options.verifyPoster === true && details.poster) {
+        const verified = await verifyAnimePosterForSave(details);
+        if (!verified.ok && options.posterRequired) {
+          const { payload: refetched } = await fetchAnilistCoverOnly(
+            details.anilistId || pick?.anilistId,
+            {
+              forceLive: true,
+              bypassCache: true,
+              title: details.title || pick?.title,
+              reason: "image_probe_retry",
+            }
+          );
+          if (refetched?.poster) {
+            const picked = await selectLoadableAnilistPoster(refetched);
+            const posterUrl = picked.poster || refetched.poster;
+            applyRawAnilistPosterToDetails(
+              details,
+              posterUrl,
+              "anilist_cover_fetch"
+            );
+            attachAnilistCoverFields(details, {
+              extraLarge: refetched.coverImageExtraLarge,
+              large: refetched.coverImageLarge,
+              medium: refetched.coverImageMedium,
+            });
+            details.posterPending = false;
+          } else {
+            details.posterPending = true;
+            details.poster = "";
+          }
+        }
+        if (trace) {
+          trace.posterVerified = Boolean(verified.verified || details.poster);
+          trace.posterVerifyReason = verified.reason;
+        }
+      } else if (details.poster) {
+        details.posterPending = false;
+        details.posterBroken = false;
+      }
+    }
+
+    logBulkVsSearchBuild(options.pipeline || "resolve", {
+      title: details?.title || pick?.title || "",
+      type: resolvedType,
+      provider: details?.source || pick?.source || "",
+      anilistId: details?.anilistId || pick?.anilistId || null,
+      link: details?.link || pick?.link || "",
+      poster: details?.poster || "",
+      posterBroken: Boolean(details?.posterBroken),
+      posterPending: Boolean(details?.posterPending),
+      posterSource: details?.posterSource || "",
+      detailsSource: details?.source || "",
+      coverImageExtraLarge: details?.coverImageExtraLarge || "",
+      coverImageLarge: details?.coverImageLarge || "",
+      coverImageMedium: details?.coverImageMedium || "",
+    });
+    return details;
+  }
+
+  async function anilistQueryDetailed(query, variables) {
     try {
+      await waitForAnilistGate();
       const response = await fetch(ANILIST_API, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ query, variables }),
       });
-      const json = await response.json();
-      if (!response.ok || json.errors?.length) {
-        console.warn("[anilist] query failed:", json.errors || response.status);
-        return null;
+      const retryAfter = response.headers.get("Retry-After");
+      const rateLimitReset = parseAnilistRateLimitReset(response);
+      let json;
+      try {
+        json = await response.json();
+      } catch {
+        json = {};
       }
-      return json.data;
+      const rateLimited = response.status === 429;
+      const transient =
+        rateLimited ||
+        response.status >= 500 ||
+        response.status === 408;
+      if (rateLimited) {
+        noteAnilistRateLimit(retryAfter, rateLimitReset);
+        return {
+          ok: false,
+          transient: true,
+          rateLimited: true,
+          httpStatus: 429,
+          retryAfter,
+          rateLimitReset,
+          errors: json.errors || [],
+        };
+      }
+      if (transient) {
+        return {
+          ok: false,
+          transient: true,
+          httpStatus: response.status,
+          errors: json.errors || [],
+        };
+      }
+      if (!response.ok || json.errors?.length) {
+        return {
+          ok: false,
+          transient: false,
+          httpStatus: response.status,
+          errors: json.errors || [],
+        };
+      }
+      return { ok: true, data: json.data, httpStatus: response.status };
     } catch (error) {
-      console.warn("[anilist] request failed:", error);
+      return {
+        ok: false,
+        transient: true,
+        networkError: true,
+        message: String(error?.message || error),
+      };
+    }
+  }
+
+  async function anilistQuery(query, variables) {
+    const meta = await anilistQueryDetailed(query, variables);
+    if (!meta.ok) {
+      console.warn("[anilist] query failed:", meta.errors || meta.httpStatus || meta.message);
       return null;
     }
+    return meta.data;
+  }
+
+  let anilistBulkChain = Promise.resolve();
+  let anilistBulkLastAt = 0;
+  const ANILIST_BULK_GAP_MS = 950;
+  let anilistGlobalPauseUntil = 0;
+
+  function parseAnilistRateLimitReset(response) {
+    if (!response?.headers) return 0;
+    const raw = response.headers.get("X-RateLimit-Reset");
+    if (!raw) return 0;
+    const n = parseInt(String(raw), 10);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return n > 1e12 ? n : n * 1000;
+  }
+
+  function noteAnilistRateLimit(retryAfterHeader, resetMs) {
+    const now = Date.now();
+    let until = now + 60000;
+    if (retryAfterHeader) {
+      const sec = parseInt(String(retryAfterHeader), 10);
+      if (sec > 0) until = Math.max(until, now + sec * 1000);
+    }
+    if (resetMs > now) until = Math.max(until, resetMs);
+    anilistGlobalPauseUntil = Math.max(anilistGlobalPauseUntil, until);
+  }
+
+  async function waitForAnilistGate() {
+    const now = Date.now();
+    if (anilistGlobalPauseUntil > now) {
+      await sleepMs(anilistGlobalPauseUntil - now);
+    }
+  }
+
+  function getAnilistQueueStatus() {
+    const now = Date.now();
+    if (anilistGlobalPauseUntil > now) {
+      return { paused: true, resumeAt: anilistGlobalPauseUntil };
+    }
+    return { paused: false, resumeAt: 0 };
+  }
+
+  function normalizeTitleForCacheLookup(text) {
+    return String(text || "")
+      .toLowerCase()
+      .replace(/[''`]/g, "")
+      .replace(/[^\w\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function lookupCachedAnilistMatch(title, options = {}) {
+    const passes = (options.searchPasses || [String(title || "").trim()]).filter(Boolean);
+    const cache = readCache();
+    for (const pass of passes) {
+      const norm = normalizeTitleForCacheLookup(pass);
+      if (!norm) continue;
+      for (const [key, entry] of Object.entries(cache)) {
+        if (!key.startsWith("anilist:") || !entry?.anilistId) continue;
+        const variants = [
+          entry.title,
+          entry.titleEnglish,
+          entry.titleRomaji,
+          entry.titleNative,
+        ].filter(Boolean);
+        for (const variant of variants) {
+          if (normalizeTitleForCacheLookup(variant) === norm) {
+            return {
+              pick: {
+                source: "anilist",
+                anilistId: entry.anilistId,
+                title: entry.title || variant,
+                titleEnglish: entry.titleEnglish,
+                titleRomaji: entry.titleRomaji,
+                poster: entry.poster,
+                year: entry.year,
+                genres: entry.genres || [],
+              },
+              details: entry,
+            };
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  async function invokeAnimeIndexSearch(body) {
+    const sb = window.WatchlistAuth?.getSupabase?.();
+    if (!sb?.functions?.invoke) return null;
+    try {
+      const { data, error } = await sb.functions.invoke("anime-index-search", { body });
+      if (error) {
+        console.warn("[anime-index-search]", error.message || error);
+        return null;
+      }
+      return data;
+    } catch (err) {
+      console.warn("[anime-index-search]", err);
+      return null;
+    }
+  }
+
+  const offlineSearchCache = new Map();
+  const OFFLINE_SEARCH_CACHE_MAX = 800;
+
+  function offlineSearchCacheKey(title, options = {}) {
+    const norm = normalizeTitleForCacheLookup(title);
+    const year = options.year ?? "";
+    const passes = (options.searchPasses || []).slice(0, 4).join("|");
+    return `${norm}::${year}::${passes}`;
+  }
+
+  function rememberOfflineSearch(key, value) {
+    if (offlineSearchCache.size >= OFFLINE_SEARCH_CACHE_MAX) {
+      const first = offlineSearchCache.keys().next().value;
+      offlineSearchCache.delete(first);
+    }
+    offlineSearchCache.set(key, value);
+  }
+
+  function mapOfflineIndexHit(hit) {
+    if (!hit?.anilist_id && !hit?.anilistId) return null;
+    const anilistId = hit.anilist_id || hit.anilistId;
+    return {
+      source: "anilist",
+      anilistId,
+      format: hit.format || "",
+      title:
+        hit.english_title ||
+        hit.canonical_title ||
+        hit.titleEnglish ||
+        hit.titleRomaji ||
+        hit.title ||
+        "",
+      titleEnglish: hit.english_title || hit.titleEnglish || "",
+      titleRomaji: hit.romaji_title || hit.titleRomaji || "",
+      titleNative: hit.native_title || hit.titleNative || "",
+      synonyms: hit.synonyms || [],
+      year: hit.start_year ? String(hit.start_year) : hit.year ? String(hit.year) : "",
+      type: "anime",
+      poster: String(hit.poster || hit.picture_url || "").trim(),
+      offlineScore: hit.score ?? hit.offlineScore ?? null,
+      offlineReason: hit.matchReason || hit.offlineReason || "",
+      resultKey: `anilist:${anilistId}`,
+    };
+  }
+
+  function mapOfflineSearchResponse(data) {
+    if (!data?.ok) return { ok: false, results: [], pick: null };
+    const results = (data.results || data.candidates || [])
+      .map(mapOfflineIndexHit)
+      .filter(Boolean);
+    const rawPick = data.pick ? mapOfflineIndexHit(data.pick) : null;
+    const pick = rawPick?.anilistId ? rawPick : null;
+    return {
+      ok: true,
+      results,
+      pick,
+      autoReason: data.autoReason || pick?.offlineReason || "",
+      needsAnilistFallback: Boolean(data.autoReason === "low_confidence" || (rawPick && !rawPick.anilistId)),
+    };
+  }
+
+  async function searchAnimeOfflineIndex(title, options = {}) {
+    const cacheKey = offlineSearchCacheKey(title, options);
+    if (offlineSearchCache.has(cacheKey)) {
+      return offlineSearchCache.get(cacheKey);
+    }
+    const data = await invokeAnimeIndexSearch({
+      action: "search",
+      title: String(title || "").trim(),
+      year: options.year ?? null,
+      passes: options.searchPasses || [],
+      limit: 15,
+    });
+    const mapped = mapOfflineSearchResponse(data);
+    rememberOfflineSearch(cacheKey, mapped);
+    return mapped;
+  }
+
+  async function searchAnimeOfflineBatch(requests) {
+    const out = new Map();
+    const list = (requests || []).filter((r) => r?.id);
+    if (!list.length) return out;
+
+    const pending = [];
+    for (const req of list) {
+      const cacheKey = offlineSearchCacheKey(req.title, {
+        year: req.year,
+        searchPasses: req.searchPasses,
+      });
+      if (offlineSearchCache.has(cacheKey)) {
+        out.set(req.id, offlineSearchCache.get(cacheKey));
+      } else {
+        pending.push(req);
+      }
+    }
+
+    if (pending.length) {
+      const data = await invokeAnimeIndexSearch({
+        action: "batchSearch",
+        requests: pending.map((req) => ({
+          id: req.id,
+          title: req.title,
+          year: req.year ?? null,
+          passes: req.searchPasses || [],
+        })),
+        limit: 15,
+      });
+
+      for (const req of pending) {
+        const block = data?.resultsById?.[req.id];
+        const mapped = mapOfflineSearchResponse(block || { ok: false });
+        const cacheKey = offlineSearchCacheKey(req.title, {
+          year: req.year,
+          searchPasses: req.searchPasses,
+        });
+        rememberOfflineSearch(cacheKey, mapped);
+        out.set(req.id, mapped);
+      }
+    }
+
+    for (const req of list) {
+      if (!out.has(req.id)) {
+        out.set(req.id, { ok: false, results: [], pick: null });
+      }
+    }
+    return out;
+  }
+
+  async function fetchAnimeIndexMeta() {
+    return invokeAnimeIndexSearch({ action: "meta" });
+  }
+
+  function sleepMs(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function runAnilistBulkScheduled(fn) {
+    const run = async () => {
+      const wait = Math.max(0, ANILIST_BULK_GAP_MS - (Date.now() - anilistBulkLastAt));
+      if (wait) await sleepMs(wait);
+      anilistBulkLastAt = Date.now();
+      return fn();
+    };
+    const scheduled = anilistBulkChain.then(run, run);
+    anilistBulkChain = scheduled.catch(() => {});
+    return scheduled;
+  }
+
+  const ANILIST_BULK_SEARCH_QUERY = `query ($search: String, $page: Int) {
+    Page(page: $page, perPage: 15) {
+      media(search: $search, type: ANIME, sort: SEARCH_MATCH) {
+        id
+        format
+        title { romaji english native }
+        synonyms
+        genres
+        startDate { year }
+        coverImage { extraLarge large medium }
+        averageScore
+      }
+    }
+  }`;
+
+  function mapAnilistBulkSearchMedia(media) {
+    const format = String(media.format || "").toUpperCase();
+    const titleEnglish = media.title?.english || "";
+    const titleRomaji = media.title?.romaji || "";
+    const titleNative = media.title?.native || "";
+    const displayTitle = titleEnglish || titleRomaji || titleNative || "";
+    return {
+      source: "anilist",
+      anilistId: media.id,
+      format,
+      title: displayTitle,
+      titleEnglish,
+      titleRomaji,
+      titleNative,
+      synonyms: media.synonyms || [],
+      genres: media.genres || [],
+      year: media.startDate?.year ? String(media.startDate.year) : "",
+      type: "anime",
+      poster: pickAnilistCoverUrl(media.coverImage) || "",
+      averageScore: media.averageScore ?? null,
+      anilistRating: media.averageScore != null ? String(media.averageScore) : "",
+      resultKey: `anilist:${media.id}`,
+    };
+  }
+
+  function getCachedDetailsForPick(pick) {
+    if (!pick) return null;
+    if (pick.anilistId) {
+      const cached = ensureAnilistRating(readCached(`anilist:${pick.anilistId}`));
+      if (cached?.title) return cached;
+    }
+    if (pick.imdbId) {
+      const cached = readCached(`omdb:${pick.imdbId}`);
+      if (cached?.title) return cached;
+    }
+    if (pick.tmdbId && pick.tmdbType) {
+      const cached = readCached(`tmdb:${pick.tmdbType}:${pick.tmdbId}`);
+      if (cached?.title) return cached;
+    }
+    return null;
+  }
+
+  function buildLightweightDetailsFromSearchResult(pick, contentType) {
+    if (!pick) return null;
+
+    const cached = getCachedDetailsForPick(pick);
+    if (cached?.title) {
+      const out = { ...cached, enrichmentDeferred: !cached.plot };
+      if (out.poster && (pick.anilistId || pick.source === "anilist" || out.anilistId)) {
+        out.poster = String(out.poster).trim();
+      } else if (out.poster) {
+        out.poster = upgradePosterForStorage(out.poster, out);
+      }
+      return out;
+    }
+
+    if (pick.anilistId || pick.source === "anilist") {
+      const title =
+        pick.title ||
+        pick.titleEnglish ||
+        pick.titleRomaji ||
+        pick.titleNative ||
+        "";
+      return buildDetailPayload({
+        source: "anilist",
+        anilistId: pick.anilistId,
+        title,
+        year: pick.year || "",
+        poster: String(pick.poster || "").trim(),
+        anilistRating:
+          pick.anilistRating ||
+          (pick.averageScore != null ? String(pick.averageScore) : ""),
+        genres: pick.genres || [],
+        plot: "",
+        mediaType: "anime",
+        omdbType: "anime",
+        contentType: "anime",
+        seasonCount: 1,
+      });
+    }
+
+    if (pick.tmdbId) {
+      const isTv = pick.tmdbType === "tv" || pick.type === "series";
+      return buildDetailPayload({
+        source: "tmdb",
+        tmdbId: pick.tmdbId,
+        tmdbType: pick.tmdbType || (isTv ? "tv" : "movie"),
+        imdbId: pick.imdbId || null,
+        title: pick.title || "",
+        year: pick.year || "",
+        poster: upgradePosterForStorage(pick.poster || "", { source: "tmdb", tmdbId: pick.tmdbId }),
+        rating: pick.rating || "",
+        genres: pick.genres || [],
+        plot: "",
+        mediaType: isTv ? "series" : "movie",
+        omdbType: isTv ? "series" : "movie",
+        contentType: contentType || (isTv ? "tvSeries" : "movies"),
+      });
+    }
+
+    if (pick.imdbId) {
+      return buildDetailPayload({
+        source: "omdb",
+        imdbId: pick.imdbId,
+        title: pick.title || "",
+        year: pick.year || "",
+        poster: pick.poster || "",
+        rating: pick.rating || "",
+        genres: pick.genres || [],
+        plot: "",
+        mediaType: pick.type === "series" ? "series" : "movie",
+        omdbType: pick.type === "series" ? "series" : "movie",
+        contentType:
+          contentType ||
+          (pick.type === "series" ? "tvSeries" : "movies"),
+      });
+    }
+
+    return null;
+  }
+
+  function getLightweightDetailsForPick(pick, options = {}) {
+    const contentType = options.contentType || inferContentType(pick.type, pick.genres);
+    const details = buildLightweightDetailsFromSearchResult(pick, contentType);
+    if (!details?.title) return null;
+    details.enrichmentDeferred = !details.plot;
+    return details;
+  }
+
+  function cacheResolvedPreview(pick, details) {
+    if (!pick || !details?.title) return;
+    if (pick.anilistId) {
+      const key = `anilist:${pick.anilistId}`;
+      const existing = readCached(key) || {};
+      const merged = {
+        ...existing,
+        ...details,
+        anilistId: pick.anilistId,
+      };
+      if (!isRawAnilistPosterUrl(details?.poster) && isRawAnilistPosterUrl(existing?.poster)) {
+        merged.poster = existing.poster;
+      }
+      if (
+        !isRawAnilistPosterUrl(details?.cardPoster) &&
+        isRawAnilistPosterUrl(existing?.cardPoster || existing?.poster)
+      ) {
+        merged.cardPoster = existing.cardPoster || existing.poster;
+      }
+      if (!details?.coverImageExtraLarge && existing?.coverImageExtraLarge) {
+        merged.coverImageExtraLarge = existing.coverImageExtraLarge;
+      }
+      if (!details?.coverImageLarge && existing?.coverImageLarge) {
+        merged.coverImageLarge = existing.coverImageLarge;
+      }
+      if (!details?.coverImageMedium && existing?.coverImageMedium) {
+        merged.coverImageMedium = existing.coverImageMedium;
+      }
+      writeCacheEntry(key, merged);
+      return;
+    }
+    if (pick.imdbId) {
+      const key = `omdb:${pick.imdbId}`;
+      const existing = readCached(key) || {};
+      writeCacheEntry(key, { ...existing, ...details, imdbId: pick.imdbId });
+      return;
+    }
+    if (pick.tmdbId && pick.tmdbType) {
+      const key = `tmdb:${pick.tmdbType}:${pick.tmdbId}`;
+      const existing = readCached(key) || {};
+      writeCacheEntry(key, {
+        ...existing,
+        ...details,
+        tmdbId: pick.tmdbId,
+        tmdbType: pick.tmdbType,
+      });
+    }
+  }
+
+  async function searchAnilistBulkBatch(requests, options = {}) {
+    const batchSize = Math.min(5, Math.max(1, Number(options.batchSize) || 5));
+    const out = new Map();
+    const list = (requests || []).filter((r) => r?.id);
+    if (!list.length) return out;
+
+    for (let offset = 0; offset < list.length; offset += batchSize) {
+      const chunk = list.slice(offset, offset + batchSize);
+      const varDecl = [];
+      const varUse = [];
+      const body = [];
+
+      chunk.forEach((req, idx) => {
+        const term = String(
+          req.searchTerm || req.searchPasses?.[0] || req.title || ""
+        ).trim();
+        const vName = `search${idx}`;
+        varDecl.push(`$${vName}: String`);
+        varUse.push(`${vName}: $${vName}`);
+        body.push(
+          `s${idx}: Page(page: 1, perPage: 15) {
+            media(search: $${vName}, type: ANIME, sort: SEARCH_MATCH) {
+              id
+              format
+              title { romaji english native }
+              synonyms
+              genres
+              startDate { year }
+              coverImage { extraLarge large medium }
+              averageScore
+            }
+          }`
+        );
+        req._batchTerm = term;
+      });
+
+      const query = `query BatchAnilistSearch(${varDecl.join(", ")}) { ${body.join("\n")} }`;
+      const variables = {};
+      chunk.forEach((req, idx) => {
+        variables[`search${idx}`] = req._batchTerm;
+      });
+
+      const meta = await runAnilistBulkScheduled(() =>
+        anilistQueryDetailed(query, variables)
+      );
+
+      if (meta.transient) {
+        for (const req of chunk) {
+          out.set(req.id, {
+            ok: false,
+            transient: true,
+            rateLimited: Boolean(meta.rateLimited),
+            retryAfter: meta.retryAfter,
+            httpStatus: meta.httpStatus,
+            errors: meta.errors,
+            results: [],
+          });
+        }
+        continue;
+      }
+
+      chunk.forEach((req, idx) => {
+        const mediaList = meta.data?.[`s${idx}`]?.media || [];
+        const results = [];
+        const seen = new Set();
+        for (const media of mediaList) {
+          const mapped = mapAnilistBulkSearchMedia(media);
+          if (!seen.has(mapped.anilistId)) {
+            seen.add(mapped.anilistId);
+            results.push(mapped);
+          }
+        }
+        out.set(req.id, {
+          ok: true,
+          transient: false,
+          results,
+          meta,
+        });
+      });
+    }
+
+    return out;
+  }
+
+  async function searchAnilistForBulkImport(title, options = {}) {
+    const passes = (options.searchPasses || [String(title || "").trim()]).filter(
+      (p) => String(p).trim().length >= 2
+    );
+    const byId = new Map();
+    let lastMeta = null;
+
+    for (const searchTerm of passes) {
+      const meta = await runAnilistBulkScheduled(() =>
+        anilistQueryDetailed(ANILIST_BULK_SEARCH_QUERY, {
+          search: searchTerm,
+          page: 1,
+        })
+      );
+      lastMeta = meta;
+
+      if (meta.transient) {
+        return {
+          ok: false,
+          transient: true,
+          rateLimited: Boolean(meta.rateLimited),
+          retryAfter: meta.retryAfter,
+          httpStatus: meta.httpStatus,
+          errors: meta.errors,
+          searchTerm,
+          results: [],
+        };
+      }
+      if (!meta.ok) continue;
+
+      for (const media of meta.data?.Page?.media || []) {
+        const mapped = mapAnilistBulkSearchMedia(media);
+        if (!byId.has(mapped.anilistId)) byId.set(mapped.anilistId, mapped);
+      }
+    }
+
+    return {
+      ok: true,
+      transient: false,
+      results: [...byId.values()],
+      meta: lastMeta,
+    };
   }
 
   function normalizeAnilistMedia(media) {
@@ -785,14 +2478,14 @@
       format === "MOVIE" || format === "ONE_SHOT" ? "movie" : "anime";
     const isAnimeSeries = mediaType === "anime";
 
-    return buildDetailPayload({
+    const payload = buildDetailPayload({
       source: "anilist",
       anilistId: media.id,
       link: `https://anilist.co/anime/${media.id}/`,
       title,
       year: media.startDate?.year ? String(media.startDate.year) : "",
       plot: stripHtml(media.description),
-      poster: media.coverImage?.large || "",
+      poster: pickAnilistCoverUrl(media.coverImage) || "",
       anilistRating:
         media.averageScore != null ? String(media.averageScore) : "",
       actors: leads,
@@ -805,6 +2498,7 @@
       episodeCount: parsePositiveInt(media.episodes),
       seasonCount: isAnimeSeries ? 1 : null,
     });
+    return attachAnilistCoverFields(payload, media.coverImage);
   }
 
   /**
@@ -849,6 +2543,12 @@
       });
     }
 
+    let imdbRating = details.rating || details.imdbRating || "";
+    if (imdbId && !imdbRating && hasOmdbKey()) {
+      const omdb = await getMetadata(imdbId);
+      if (omdb?.rating) imdbRating = omdb.rating;
+    }
+
     const isMovie =
       anilist.mediaType === "movie" ||
       String(anilist.omdbType || "").toLowerCase() === "movie";
@@ -872,6 +2572,7 @@
     return {
       ...anilist,
       imdbId,
+      rating: imdbRating,
       contentType: isMovie ? "movies" : "anime",
       seasonCount,
       episodeCount,
@@ -880,10 +2581,13 @@
     };
   }
 
-  async function fetchAnilistById(anilistId) {
+  async function fetchAnilistById(anilistId, options = {}) {
     const cacheKey = `anilist:${anilistId}`;
     const cached = ensureAnilistRating(readCached(cacheKey));
-    if (cached) return cached;
+    const forceLive = options.forceLive === true || options.bypassCache === true;
+    if (cached && anilistCacheHasUsablePoster(cached) && !forceLive) {
+      return cached;
+    }
 
     const data = await anilistQuery(
       `query ($id: Int) {
@@ -895,7 +2599,7 @@
           genres
           averageScore
           startDate { year }
-          coverImage { large }
+          coverImage { extraLarge large medium }
           episodes
           duration
           isAdult
@@ -929,7 +2633,7 @@
           genres
           averageScore
           startDate { year }
-          coverImage { large }
+          coverImage { extraLarge large medium }
           episodes
           duration
           isAdult
@@ -1018,7 +2722,7 @@
             format
             title { romaji english }
             startDate { year }
-            coverImage { large }
+            coverImage { extraLarge large medium }
           }
         }
       }`,
@@ -1037,7 +2741,8 @@
         title: media.title?.english || media.title?.romaji || "",
         year: media.startDate?.year ? String(media.startDate.year) : "",
         type: isFilm ? "anime" : "anime",
-        poster: media.coverImage?.large || "",
+        poster: pickAnilistCoverUrl(media.coverImage) || "",
+        resultKey: `anilist:${media.id}`,
       };
     });
   }
@@ -1081,6 +2786,8 @@
       genres,
       mediaType: mediaType === "tv" ? "series" : "movie",
       omdbType: mediaType === "tv" ? "series" : "movie",
+      originCountry: tmdbOriginCountries(item),
+      originalLanguage: item.original_language || "",
       ageRating: pickTmdbAgeRating(item, mediaType),
       runtime: pickTmdbRuntime(item, mediaType),
       seasonCount:
@@ -1218,7 +2925,7 @@
           title: pickTmdbDisplayTitle(item, titleLocale),
           year: (item.release_date || "").slice(0, 4),
           type: "movie",
-          poster: item.poster_path ? `${TMDB_IMAGE_SM}${item.poster_path}` : "",
+          poster: item.poster_path ? `${TMDB_IMAGE}${item.poster_path}` : "",
         });
       }
     }
@@ -1235,7 +2942,13 @@
           title: pickTmdbDisplayTitle(item, titleLocale),
           year: (item.first_air_date || "").slice(0, 4),
           type: "series",
-          poster: item.poster_path ? `${TMDB_IMAGE_SM}${item.poster_path}` : "",
+          originCountry: tmdbOriginCountries(item),
+          originalLanguage: item.original_language || "",
+          genreIds: Array.isArray(item.genre_ids)
+            ? item.genre_ids.map(Number).filter(Number.isFinite)
+            : [],
+          poster: item.poster_path ? `${TMDB_IMAGE}${item.poster_path}` : "",
+          resultKey: `tmdb:tv:${item.id}`,
         });
       }
     }
@@ -1318,27 +3031,42 @@
     return data;
   }
 
+  async function resolveAnimeFromJapaneseTmdb(tmdbDetails, pick = {}) {
+    if (!tmdbDetails?.title) return null;
+    if (pick.tmdbType !== "tv" && tmdbDetails.tmdbType !== "tv") return null;
+    if (!isJapaneseTmdbProduction(tmdbDetails)) return null;
+
+    const match = await fetchAnilistMatchByTitle(
+      tmdbDetails.title,
+      tmdbDetails.year || pick.year
+    );
+    if (!match?.anilistId) return null;
+
+    const anilist = await fetchAnilistById(match.anilistId);
+    return anilist || null;
+  }
+
   async function getDetailsForPick(pick, options = {}) {
     if (!pick) return null;
 
     const titleLocale = detectQueryTitleLocale(options.searchQuery || "");
     const preferAnime = options.preferAnime === true;
 
-    if (pick.anilistId || preferAnime) {
-      if (pick.anilistId) {
-        return fetchAnilistById(pick.anilistId);
-      }
-      if (preferAnime && pick.title) {
-        const match = await fetchAnilistMatchByTitle(pick.title, pick.year);
-        if (match?.anilistId) {
-          return fetchAnilistById(match.anilistId);
-        }
+    if (pick.anilistId) {
+      return fetchAnilistById(pick.anilistId);
+    }
+
+    if (preferAnime && pick.title) {
+      const match = await fetchAnilistMatchByTitle(pick.title, pick.year);
+      if (match?.anilistId) {
+        return fetchAnilistById(match.anilistId);
       }
     }
 
     if (pick.tmdbType && pick.tmdbId) {
       const tmdb = await fetchTmdbDetails(pick.tmdbType, pick.tmdbId, titleLocale);
-      if (preferAnime && tmdb) {
+      if (!tmdb) return null;
+      if (preferAnime) {
         return ensureAnimeDetails(tmdb, { pick, preferAnime: true, forceAnime: true });
       }
       return tmdb;
@@ -1430,13 +3158,31 @@
         }
       }
 
-      if (type === "all") {
+      if (type === "all" || type === "series") {
         tasks.push(searchAnilist(q, page));
       }
     }
 
     const lists = await Promise.all(tasks);
-    const results = mergeSearchResults(lists);
+    let results = mergeSearchResults(lists);
+
+    if (type === "all" || type === "series" || type === "anime") {
+      try {
+        const offline = await searchAnimeOfflineIndex(q, {});
+        if (offline?.pick?.anilistId) {
+          results = mergeSearchResults([results, [offline.pick]]);
+        } else if (offline?.results?.length) {
+          results = mergeSearchResults([results, offline.results.slice(0, 6)]);
+        }
+      } catch (error) {
+        console.warn("[search] offline anime index append failed:", error);
+      }
+    }
+
+    results = results.map((entry) => ({
+      ...entry,
+      displayType: displayTypeForSearchResult(entry),
+    }));
 
     return {
       ok: true,
@@ -1490,16 +3236,56 @@
     extractAnilistId,
     extractMalId,
     getMetadata,
+    fetchTmdbDetails,
     getDetailsForPick,
+    resolveDetailsForWatchlistAdd,
+    resolveAnimeDetailsForWatchlistAdd,
+    resolveContentTypeForWatchlistAdd,
+    ensureAnimePosterOnDetails,
+    fetchAnilistCoverOnly,
+    inspectAnilistProviderCache,
+    selectLoadableAnilistPoster,
+    resolveAnimePosterForBulkCommit,
+    patchAnilistProviderCache,
+    logAnimeCoverFetch,
+    verifyAnimePosterForSave,
+    probePosterImageUrl,
+    isBulkAddTraceTitle,
+    logBulkVsSearchBuild,
+    getCachedDetailsForPick,
+    getLightweightDetailsForPick,
+    buildLightweightDetailsFromSearchResult,
+    cacheResolvedPreview,
     fetchAnilistById,
     fetchAnilistByMalId,
     fetchAnilistByTitleMatch,
     fetchAnilistMatchByTitle,
     fetchAnilistScoreByTitle,
     searchTitles,
+    searchAnilistForBulkImport,
+    searchAnilistBulkBatch,
+    searchAnimeOfflineIndex,
+    searchAnimeOfflineBatch,
+    lookupCachedAnilistMatch,
+    getAnilistQueueStatus,
+    noteAnilistRateLimit,
+    fetchAnimeIndexMeta,
+    anilistQueryDetailed,
     suggestGenres,
+    mergeProviderGenreSources,
+    applyMergedGenresToItem,
+    enrichDetailsGenres,
+    mergeAndApplyItemGenres,
+    fetchTmdbKeywords,
+    extractLeadCast,
+    enrichLeadCastForItem,
     defaultGenreForContentType,
     inferContentType,
+    displayTypeForSearchResult,
+    isLikelyAnimeSearchResult,
+    resultProviderIdentityKey,
+    isJapaneseTmdbProduction,
+    isJapaneseTmdbProduction,
     resolveMetadataFromLink,
     defaultLinkForDetails,
     formatTitleMetaParts,
@@ -1517,5 +3303,10 @@
     hasSearchConfigured,
     preferLocalizedTitle,
     getApiKey: getOmdbKey,
+    upgradeTmdbPosterUrl,
+    upgradeAnilistPosterUrl,
+    upgradePosterForStorage,
+    isLowResPosterUrl,
+    pickAnilistCoverUrl,
   };
 })();

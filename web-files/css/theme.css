@@ -1120,10 +1120,6 @@ html[lang="ar"] {
     gap: 0.9rem;
   }
 
-  .cards .card {
-    height: 100%;
-  }
-
   .card {
     padding: 1rem;
   }
@@ -1134,5 +1130,17 @@ html[lang="ar"] {
 
   .card__rating-badges {
     margin-bottom: 0.55rem;
+  }
+
+  .card:has(.card__body) .card__body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .card__genre-row {
+    min-height: 2.85rem;
+    align-content: flex-start;
   }
 }

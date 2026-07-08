@@ -69,13 +69,20 @@
 
   function lockBackgroundScroll() {
     _savedScrollY = window.scrollY || window.pageYOffset || 0;
-    document.documentElement.classList.add("td-scroll-lock");
-    document.body.classList.add("td-scroll-lock");
-    document.body.style.position = "fixed";
-    document.body.style.top = `-${_savedScrollY}px`;
-    document.body.style.left = "0";
-    document.body.style.right = "0";
-    document.body.style.width = "100%";
+    if (isMobileSheet()) {
+      document.documentElement.classList.add("td-scroll-lock");
+      document.body.classList.add("td-scroll-lock");
+      document.body.style.position = "fixed";
+      document.body.style.top = `-${_savedScrollY}px`;
+      document.body.style.left = "0";
+      document.body.style.right = "0";
+      document.body.style.width = "100%";
+      return;
+    }
+    // Desktop/tablet: overflow-only lock (#tdScroll still scrolls). Avoid wheel/touch
+    // listeners on the fixed overlay — WebKit can keep blocking page input after close.
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
   }
 
   function restorePageScrollY(y) {
@@ -87,15 +94,33 @@
   }
 
   function unlockBackgroundScroll() {
-    document.documentElement.classList.remove("td-scroll-lock");
-    document.body.classList.remove("td-scroll-lock");
     const y = _savedScrollY;
+    const hadMobileLock =
+      document.body.classList.contains("td-scroll-lock") ||
+      document.body.style.position === "fixed";
+    document.documentElement.classList.remove("td-scroll-lock", "td-scroll-lock-desktop");
+    document.body.classList.remove("td-scroll-lock", "td-scroll-lock-desktop");
+    document.documentElement.style.overflow = "";
     document.body.style.position = "";
     document.body.style.top = "";
     document.body.style.left = "";
     document.body.style.right = "";
     document.body.style.width = "";
-    restorePageScrollY(y);
+    document.body.style.overflow = "";
+    if (hadMobileLock) {
+      restorePageScrollY(y);
+    }
+    window.WatchlistApp?.updateBodyScrollLock?.();
+  }
+
+  function hideDesktopOverlay() {
+    if (!_overlay || isMobileSheet()) return;
+    _overlay.setAttribute("hidden", "");
+  }
+
+  function showDesktopOverlay() {
+    if (!_overlay || isMobileSheet()) return;
+    _overlay.removeAttribute("hidden");
   }
 
   function scrollAtTop() {
@@ -119,6 +144,53 @@
     _panel.style.transform = "";
     const backdrop = _overlay.querySelector("#tdBackdrop");
     if (backdrop) backdrop.style.opacity = "";
+  }
+
+  /** Move focus out of #tdScroll so wheel/touchpad scroll the page again after close. */
+  function releaseDetailFocus(returnFocus) {
+    const active = document.activeElement;
+    if (active && _overlay?.contains(active)) {
+      active.blur();
+    }
+
+    if (_scroll) {
+      _scroll.scrollTop = 0;
+    }
+
+    let focusTarget = null;
+    if (returnFocus && document.contains(returnFocus)) {
+      focusTarget = returnFocus;
+    } else {
+      const main = document.getElementById("mainContent");
+      if (main) {
+        if (!main.hasAttribute("tabindex")) {
+          main.setAttribute("tabindex", "-1");
+        }
+        focusTarget = main;
+      }
+    }
+
+    if (focusTarget?.focus) {
+      try {
+        focusTarget.focus({ preventScroll: true });
+      } catch {
+        /* opener may not accept focus */
+      }
+    }
+
+    if (_overlay?.contains(document.activeElement)) {
+      const main = document.getElementById("mainContent");
+      if (main) {
+        if (!main.hasAttribute("tabindex")) {
+          main.setAttribute("tabindex", "-1");
+        }
+        try {
+          main.focus({ preventScroll: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }
   }
 
   function onPanelTouchStart(event) {
@@ -1258,6 +1330,7 @@
     `;
 
     document.body.appendChild(_overlay);
+    _overlay.setAttribute("hidden", "");
 
     _panel = _overlay.querySelector("#tdPanel");
     _scroll = _overlay.querySelector("#tdScroll");
@@ -1331,7 +1404,9 @@
 
     _overlay.removeAttribute("inert");
     _overlay.removeAttribute("aria-hidden");
+    _overlay.removeAttribute("hidden");
     _overlay.classList.add("td-is-open");
+    showDesktopOverlay();
 
     lockBackgroundScroll();
 
@@ -1393,24 +1468,18 @@
     _activeItemId = null;
     _ignoreMutations = false;
 
-    // Move focus out before aria-hidden — close button often still has focus here.
-    const active = document.activeElement;
-    if (active && _overlay.contains(active)) {
-      active.blur();
-    }
-    if (returnFocus && document.contains(returnFocus)) {
-      try {
-        returnFocus.focus({ preventScroll: true });
-      } catch {
-        /* opener may not accept focus */
-      }
-    }
+    releaseDetailFocus(returnFocus);
 
     _overlay.classList.remove("td-is-open");
     _overlay.setAttribute("aria-hidden", "true");
     _overlay.setAttribute("inert", "");
+    hideDesktopOverlay();
 
     unlockBackgroundScroll();
+    if (isMobileSheet()) {
+      _overlay.setAttribute("hidden", "");
+    }
+    requestAnimationFrame(() => window.WatchlistApp?.updateBodyScrollLock?.());
 
     disconnectObservers();
     _topbarTitle?.classList.remove("td-topbar__title--visible");

@@ -5,11 +5,54 @@
   const LISTS_TABLE = "lists";
   const ITEMS_TABLE = "watchlist_items";
   const SNAPSHOTS_TABLE = "list_snapshots";
+  const IMPORT_JOBS_TABLE = "import_jobs";
+  const IMPORT_ITEMS_TABLE = "import_items";
   const DEBOUNCE_MS = 900;
+  const PUSH_CHUNK_SIZE = 100;
+  const FETCH_PAGE_SIZE = 500;
+
+  async function fetchAllRows(sb, table, { listId, columns = "*" } = {}) {
+    const rows = [];
+    let from = 0;
+
+    while (true) {
+      let query = sb.from(table).select(columns);
+      if (listId) query = query.eq("list_id", listId);
+      const { data, error } = await query.range(from, from + FETCH_PAGE_SIZE - 1);
+      if (error) {
+        return { ok: false, error, rows };
+      }
+      const page = data || [];
+      rows.push(...page);
+      if (page.length < FETCH_PAGE_SIZE) break;
+      from += FETCH_PAGE_SIZE;
+    }
+
+    return { ok: true, rows };
+  }
 
   let client = null;
   let syncTimer = null;
   let syncing = false;
+  let snapshotInFlight = false;
+  let syncOpSeq = 0;
+
+  function debugSyncLog(location, message, data = {}, hypothesisId = "SYNC") {
+    // #region agent log
+    fetch("http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "913c94" },
+      body: JSON.stringify({
+        sessionId: "913c94",
+        location,
+        message,
+        data,
+        hypothesisId,
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }
 
   function config() {
     return window.WATCHLIST_CONFIG || {};
@@ -27,6 +70,104 @@
       client = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
     }
     return client;
+  }
+
+  function countWatchlistItems(watchlist) {
+    let count = 0;
+    for (const genres of Object.values(watchlist || {})) {
+      if (!genres || typeof genres !== "object") continue;
+      for (const titles of Object.values(genres)) {
+        if (Array.isArray(titles)) count += titles.length;
+      }
+    }
+    return count;
+  }
+
+  async function fetchListStats(listId) {
+    const sb = getClient();
+    if (!sb || !listId) return null;
+    const { data, error } = await sb
+      .from(LISTS_TABLE)
+      .select("title_count, updated_at")
+      .eq("list_id", listId)
+      .maybeSingle();
+    if (error) {
+      console.warn("[sync] list stats failed:", error.message);
+      return null;
+    }
+    return data;
+  }
+
+  async function validateCloudPush(listId, watchlist, options = {}) {
+    const lifecycle = window.WatchlistLifecycle;
+    if (lifecycle && !lifecycle.canWriteCloud() && !options.force) {
+      return { ok: false, blocked: true, reason: "init-incomplete" };
+    }
+
+    const localCount = countWatchlistItems(watchlist);
+    if (localCount === 0 && !options.allowEmpty) {
+      const stats = options.remoteStats || (await fetchListStats(listId));
+      const remoteCount = stats?.title_count ?? 0;
+      if (remoteCount > 0) {
+        console.warn(
+          `[sync] blocked empty local push — cloud has ${remoteCount} items for ${listId}`
+        );
+        return { ok: false, blocked: true, reason: "empty-local-vs-cloud", remoteCount };
+      }
+    }
+
+    if (!options.allowShrink && localCount > 0) {
+      const stats = options.remoteStats || (await fetchListStats(listId));
+      const remoteCount = stats?.title_count ?? 0;
+      const lastPushed = Number(options.lastPushedCount) || 0;
+      if (remoteCount > 0 && localCount < remoteCount - 2) {
+        const reference = Math.max(lastPushed, remoteCount);
+        if (localCount < reference - 2) {
+          console.warn(
+            `[sync] blocked shrink push — local ${localCount} vs cloud ${remoteCount}` +
+              (lastPushed ? ` (last pushed ${lastPushed})` : "")
+          );
+          return {
+            ok: false,
+            blocked: true,
+            reason: "shrink-vs-cloud",
+            remoteCount,
+            localCount,
+            lastPushed,
+          };
+        }
+      }
+    }
+
+    return { ok: true, localCount };
+  }
+
+  async function insertRowsChunked(sb, rows, onProgress) {
+    const total = rows.length;
+    let saved = 0;
+    for (let i = 0; i < rows.length; i += PUSH_CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + PUSH_CHUNK_SIZE);
+      const { error } = await sb.from(ITEMS_TABLE).insert(chunk);
+      if (error) return { ok: false, error, saved };
+      saved += chunk.length;
+      onProgress?.({ saved, total });
+    }
+    return { ok: true, saved };
+  }
+
+  async function upsertRowsChunked(sb, rows, onProgress) {
+    const total = rows.length;
+    let saved = 0;
+    for (let i = 0; i < rows.length; i += PUSH_CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + PUSH_CHUNK_SIZE);
+      const { error } = await sb.from(ITEMS_TABLE).upsert(chunk, {
+        onConflict: "list_id,item_id",
+      });
+      if (error) return { ok: false, error, saved };
+      saved += chunk.length;
+      onProgress?.({ saved, total });
+    }
+    return { ok: true, saved };
   }
 
   function emptyWatchlist() {
@@ -157,17 +298,17 @@
   }
 
   async function fetchExistingAddedAtMap(sb, listId) {
-    const { data, error } = await sb
-      .from(ITEMS_TABLE)
-      .select("item_id, added_at")
-      .eq("list_id", listId);
+    const result = await fetchAllRows(sb, ITEMS_TABLE, {
+      listId,
+      columns: "item_id, added_at",
+    });
 
-    if (error) {
-      console.warn("[sync] added_at fetch failed:", error.message);
+    if (!result.ok) {
+      console.warn("[sync] added_at fetch failed:", result.error?.message);
       return new Map();
     }
 
-    return new Map((data || []).map((row) => [row.item_id, row.added_at]));
+    return new Map((result.rows || []).map((row) => [row.item_id, row.added_at]));
   }
 
   function rowsToWatchlist(rows) {
@@ -298,14 +439,13 @@
     const sb = getClient();
     if (!sb || !listId) return null;
 
-    const [{ data: listRow, error: listError }, { data: items, error: itemsError }] =
-      await Promise.all([
+    const [{ data: listRow, error: listError }, itemsResult] = await Promise.all([
         sb
           .from(LISTS_TABLE)
-          .select("account_id, name, description, updated_at")
+          .select("account_id, name, description, updated_at, title_count")
           .eq("list_id", listId)
           .maybeSingle(),
-        sb.from(ITEMS_TABLE).select("*").eq("list_id", listId),
+        fetchAllRows(sb, ITEMS_TABLE, { listId, columns: "*" }),
       ]);
 
     if (listError) {
@@ -313,9 +453,19 @@
       return null;
     }
 
-    if (itemsError) {
-      console.warn("[sync] items fetch failed:", itemsError.message);
+    if (!itemsResult.ok) {
+      console.warn("[sync] items fetch failed:", itemsResult.error?.message);
       return null;
+    }
+
+    const items = itemsResult.rows || [];
+    const expectedCount = Number(listRow?.title_count) || 0;
+    if (expectedCount > 0 && items.length < expectedCount) {
+      console.error("[sync:truncated-fetch]", {
+        listId,
+        fetched: items.length,
+        expected: expectedCount,
+      });
     }
 
     if (!listRow && (!items || items.length === 0)) {
@@ -345,19 +495,45 @@
       description: listRow?.description || "",
       account_id: listRow?.account_id || null,
       updated_at: listRow?.updated_at || null,
+      title_count: expectedCount || items.length,
+      fetched_count: items.length,
     };
   }
 
-  async function pushSnapshot(listId, watchlist, watched, meta = {}) {
+  async function pushSnapshot(listId, watchlist, watched, meta = {}, options = {}) {
+    if (snapshotInFlight) {
+      debugSyncLog("sync.js:pushSnapshot", "skipped snapshot in flight", { listId }, "H1");
+      return { ok: false, skipped: true, reason: "snapshot-in-flight" };
+    }
+    const opId = ++syncOpSeq;
+    snapshotInFlight = true;
+    debugSyncLog(
+      "sync.js:pushSnapshot",
+      "start",
+      { opId, listId, rowCount: countWatchlistItems(watchlist), syncing },
+      "H1"
+    );
     const sb = getClient();
-    if (!sb || !listId) return { ok: false };
+    if (!sb || !listId) {
+      snapshotInFlight = false;
+      return { ok: false };
+    }
 
     const accountId = meta.accountId || meta.account_id;
     if (!accountId) {
       console.warn("[sync] push skipped — missing accountId");
+      snapshotInFlight = false;
       return { ok: false };
     }
 
+    const validation = await validateCloudPush(listId, watchlist, options);
+    if (!validation.ok) {
+      dispatchStatus("error");
+      snapshotInFlight = false;
+      return { ok: false, blocked: true, reason: validation.reason };
+    }
+
+    try {
     syncing = true;
     dispatchStatus("saving");
 
@@ -410,13 +586,32 @@
     }
 
     if (rows.length) {
-      const { error: insertError } = await sb.from(ITEMS_TABLE).insert(rows);
+      const insertResult = await insertRowsChunked(sb, rows, (progress) => {
+        dispatchStatus("saving");
+        window.dispatchEvent(
+          new CustomEvent("watchlist-sync-progress", {
+            detail: { listId, ...progress, label: `Saving ${progress.saved} of ${progress.total}` },
+          })
+        );
+      });
 
-      if (insertError) {
+      if (!insertResult.ok) {
         syncing = false;
-        console.warn("[sync] item save failed:", insertError.message);
+        debugSyncLog(
+          "sync.js:pushSnapshot",
+          "insert failed",
+          {
+            opId,
+            listId,
+            error: insertResult.error?.message,
+            saved: insertResult.saved,
+            rowCount: rows.length,
+          },
+          "H2"
+        );
+        console.warn("[sync] item save failed:", insertResult.error?.message);
         dispatchStatus("error");
-        return { ok: false, error: insertError };
+        return { ok: false, error: insertResult.error };
       }
     }
 
@@ -438,7 +633,11 @@
 
     syncing = false;
     dispatchStatus("saved");
+    debugSyncLog("sync.js:pushSnapshot", "done", { opId, listId, titleCount }, "H1");
     return { ok: true };
+    } finally {
+      snapshotInFlight = false;
+    }
   }
 
   async function createListRow(accountId, listId, name, description) {
@@ -476,6 +675,49 @@
     return { ok: true };
   }
 
+  async function pushRowsUpsert(listId, watchlist, watched, itemIds, meta = {}) {
+    const opId = ++syncOpSeq;
+    debugSyncLog(
+      "sync.js:pushRowsUpsert",
+      "start",
+      { opId, listId, itemIds, snapshotInFlight, syncing },
+      "H3"
+    );
+    const sb = getClient();
+    if (!sb || !listId || !itemIds?.length) return { ok: false };
+
+    const accountId = meta.accountId || meta.account_id;
+    if (!accountId) return { ok: false };
+
+    const validation = await validateCloudPush(listId, watchlist, { allowEmpty: false });
+    if (!validation.ok) return { ok: false, blocked: true, reason: validation.reason };
+
+    const existingAddedAt = await fetchExistingAddedAtMap(sb, listId);
+    const allRows = watchlistToRows(listId, watchlist, watched, existingAddedAt);
+    const idSet = new Set(itemIds);
+    const rows = allRows.filter((row) => idSet.has(row.item_id));
+    if (!rows.length) return { ok: true, saved: 0 };
+
+    syncing = true;
+    dispatchStatus("saving");
+    const result = await upsertRowsChunked(sb, rows, (progress) => {
+      window.dispatchEvent(
+        new CustomEvent("watchlist-sync-progress", {
+          detail: { listId, ...progress, label: `Saving ${progress.saved} of ${progress.total}` },
+        })
+      );
+    });
+    syncing = false;
+    dispatchStatus(result.ok ? "saved" : "error");
+    debugSyncLog(
+      "sync.js:pushRowsUpsert",
+      result.ok ? "done" : "failed",
+      { opId, listId, itemIds, error: result.error?.message || null },
+      "H3"
+    );
+    return result;
+  }
+
   function dispatchStatus(status) {
     window.dispatchEvent(
       new CustomEvent("watchlist-sync-status", { detail: { status } })
@@ -504,8 +746,13 @@
         listId,
         payload.watchlist,
         payload.watched,
-        payload.meta
+        payload.meta,
+        payload.pushOptions || {}
       );
+      if (result?.reason === "snapshot-in-flight") {
+        schedulePush(listId, getPayload, onComplete);
+        return;
+      }
       onComplete?.(result);
     }, DEBOUNCE_MS);
   }
@@ -565,6 +812,9 @@
   async function deleteList(listId) {
     const sb = getClient();
     if (!sb || !listId) return { ok: false };
+
+    await sb.from(IMPORT_ITEMS_TABLE).delete().eq("list_id", listId);
+    await sb.from(IMPORT_JOBS_TABLE).delete().eq("list_id", listId);
 
     const { error: itemsError } = await sb
       .from(ITEMS_TABLE)
@@ -705,11 +955,16 @@
 
   window.WatchlistSync = {
     isConfigured,
+    getClient,
     listExists,
     accountExists,
     fetchListsForAccount,
+    fetchListStats,
     fetchSnapshot,
     pushSnapshot,
+    pushRowsUpsert,
+    validateCloudPush,
+    countWatchlistItems,
     createListRow,
     updateListMeta,
     migrateAccount,

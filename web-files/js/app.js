@@ -101,6 +101,34 @@
   const PTR_COOLDOWN_MS = 2000;
   let mutationRevision = 0;
   const itemMutationRevision = new Map();
+  let bulkImportStatusFilter = "all";
+  let bulkImportExpandedRowId = null;
+  let bulkImportSearchQuery = "";
+  let bulkImportWorkerBusy = false;
+  let bulkImportCommitBusy = false;
+  let bulkImportTypeEditId = null;
+  let bulkImportCopyUnresolvedResetTimer = null;
+  let cloudShrinkPushAllowed = false;
+  const SYNC_RACE_WINDOW_MS = 5 * 60 * 1000;
+  let cacheRecoveryProbed = false;
+  const enrichmentUpsertTimers = new Map();
+  const ENRICHMENT_UPSERT_DEBOUNCE_MS = 700;
+
+  const INIT_CLOUD_SYNC_TIMEOUT_MS = Math.max(
+    5000,
+    parseInt(window.WATCHLIST_CONFIG?.initCloudSyncTimeoutMs || "25000", 10) || 25000
+  );
+
+  function withTimeout(promise, ms, label) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`${label || "Operation"} timed out after ${ms}ms`));
+        }, ms);
+      }),
+    ]);
+  }
 
   const state = {
     type: "all",
@@ -150,6 +178,118 @@
         listId === state.activeListId &&
         listId === window.WatchlistAuth?.getProfile(),
     );
+  }
+
+  function persistWatchlistCache(listId = state.activeListId) {
+    if (!listId || !state.data) return;
+    void window.WatchlistIdb?.putWatchlistCache?.(listId, state.data, state.watched, {
+      itemCount: state.items.length,
+      revision: Date.now(),
+    });
+  }
+
+  async function loadWatchlistCacheFirst(listId) {
+    if (!listId || !window.WatchlistIdb) return false;
+    try {
+      const cached = await window.WatchlistIdb.getWatchlistCache(listId);
+      if (!cached?.data || window.WatchlistAuth?.isWatchlistEmpty?.(cached.data)) return false;
+      state.data = cached.data;
+      state.items = flattenWatchlist(state.data);
+      state.watched = { ...state.watched, ...(cached.watched || {}) };
+      window.WatchlistLifecycle?.setPhase?.(window.WatchlistLifecycle.PHASE.showing_cache, {
+        cachedItemCount: cached.itemCount || state.items.length,
+      });
+      return true;
+    } catch (err) {
+      console.warn("[app] cache load failed:", err);
+      return false;
+    }
+  }
+
+  async function cloudBootstrap(listId, hadLocal) {
+    await syncAccountLists();
+    if (state.activeListId !== listId) return;
+
+    const remote = await window.WatchlistSync.fetchSnapshot(listId);
+    if (state.activeListId !== listId) return;
+
+    const remoteCount = remote
+      ? window.WatchlistSync.countWatchlistItems(remote.watchlist)
+      : 0;
+    window.WatchlistLifecycle?.markCloudReady(remoteCount);
+
+    if (!hadLocal && remoteCount > 0) {
+      applyRemoteSnapshotQuiet(remote);
+      writeSyncMeta(listId, {
+        syncedAt: new Date(remote.updated_at || Date.now()).getTime(),
+        localUpdated: Date.now(),
+      });
+      persistWatchlistCache(listId);
+      return;
+    }
+
+    if (hadLocal) {
+      await reconcileWithCloud();
+      if (state.activeListId === listId) persistWatchlistCache(listId);
+    }
+  }
+
+  async function restoreListFromCloud() {
+    const listId = state.activeListId;
+    if (!listId || !window.WatchlistSync?.isConfigured()) {
+      return { ok: false, reason: "not-configured" };
+    }
+
+    window.WatchlistLifecycle?.showRestoreBanner(true);
+    window.WatchlistLifecycle?.setPhase(window.WatchlistLifecycle.PHASE.loading_cloud);
+
+    try {
+      stopBackgroundListWrites();
+      const remote = await window.WatchlistSync.fetchSnapshot(listId);
+      if (!remote || window.WatchlistAuth.isWatchlistEmpty(remote.watchlist)) {
+        window.WatchlistLifecycle?.setPhase(window.WatchlistLifecycle.PHASE.restore_failed);
+        return { ok: false, reason: "empty-remote" };
+      }
+
+      applyRemoteSnapshotQuiet(remote);
+      const { data, watched } = storageKeys();
+      localStorage.setItem(data, JSON.stringify(state.data));
+      localStorage.setItem(watched, JSON.stringify(state.watched));
+      writeSyncMeta(listId, {
+        syncedAt: new Date(remote.updated_at || Date.now()).getTime(),
+        localUpdated: Date.now(),
+      });
+      persistWatchlistCache(listId);
+      window.WatchlistLifecycle?.markLocalReady(state.items.length);
+      window.WatchlistLifecycle?.markCloudReady(state.items.length);
+      window.WatchlistLifecycle?.setPhase(window.WatchlistLifecycle.PHASE.synced);
+      window.WatchlistLifecycle?.showRestoreBanner(false);
+      updateHeaderTitle();
+      renderListSwitcher();
+      updateGenreOptions();
+      updateStats();
+      render();
+      return { ok: true, count: state.items.length };
+    } catch (error) {
+      console.warn("[app] restore from cloud failed:", error);
+      window.WatchlistLifecycle?.setPhase(window.WatchlistLifecycle.PHASE.restore_failed);
+      return { ok: false, reason: "error", error };
+    }
+  }
+
+  function updateCloudRestoreBanner() {
+    if (!els.cloudRestoreBanner) return;
+    const lifecycle = window.WatchlistLifecycle?.getState?.();
+    const show =
+      lifecycle?.restoreBanner ||
+      lifecycle?.phase === window.WatchlistLifecycle?.PHASE.loading_cloud ||
+      lifecycle?.phase === window.WatchlistLifecycle?.PHASE.cloud_retrying;
+    els.cloudRestoreBanner.hidden = !show;
+    if (!show) {
+      els.cloudRestoreBanner.textContent = "";
+      return;
+    }
+    els.cloudRestoreBanner.textContent = t("sync.cloudRestore");
   }
 
   function stopBackgroundListWrites() {
@@ -227,6 +367,10 @@
       updateGenreOptions();
       updateStats();
       void runMetadataBackfill();
+      if (!cacheRecoveryProbed) {
+        cacheRecoveryProbed = true;
+        void probeWatchlistCacheRecovery(listId);
+      }
     } catch (error) {
       console.warn("[sync] background sync failed:", error);
       if (state.activeListId === listId) {
@@ -252,6 +396,7 @@
     sortDirectionBtn: document.getElementById("sortDirectionBtn"),
     clearFiltersBtn: document.getElementById("clearFiltersBtn"),
     ratingsBackfillBanner: document.getElementById("ratingsBackfillBanner"),
+    cloudRestoreBanner: document.getElementById("cloudRestoreBanner"),
     shareArrivalBanner: document.getElementById("shareArrivalBanner"),
     shareArrivalTitle: document.getElementById("shareArrivalTitle"),
     shareArrivalText: document.getElementById("shareArrivalText"),
@@ -279,6 +424,8 @@
     accountMenuSwitchWrap: document.getElementById("accountMenuSwitchWrap"),
     shareModal: document.getElementById("shareModal"),
     themeModal: document.getElementById("themeModal"),
+    creditsModal: document.getElementById("creditsModal"),
+    creditsDatasetMeta: document.getElementById("creditsDatasetMeta"),
     changeCodeBtn: null,
     deleteAccountBtn: null,
     changeCodeModal: document.getElementById("changeCodeModal"),
@@ -330,8 +477,40 @@
     searchConfirmSecondaryChips: document.getElementById("searchConfirmSecondaryChips"),
     searchConfirmAdd: document.getElementById("searchConfirmAdd"),
     bulkAddPanel: document.getElementById("bulkAddPanel"),
+    bulkAddSteps: document.getElementById("bulkAddSteps"),
     bulkPasteInput: document.getElementById("bulkPasteInput"),
     bulkPasteError: document.getElementById("bulkPasteError"),
+    bulkImportPreview: document.getElementById("bulkImportPreview"),
+    bulkImportSummary: document.getElementById("bulkImportSummary"),
+    bulkImportFilterHeading: document.getElementById("bulkImportFilterHeading"),
+    bulkImportSearch: document.getElementById("bulkImportSearch"),
+    bulkImportSearchClear: document.getElementById("bulkImportSearchClear"),
+    bulkImportShowAll: document.getElementById("bulkImportShowAll"),
+    bulkImportContinue: document.getElementById("bulkImportContinue"),
+    bulkImportResolve: document.getElementById("bulkImportResolve"),
+    bulkImportMainActions: document.getElementById("bulkImportMainActions"),
+    bulkImportAccounting: document.getElementById("bulkImportAccounting"),
+    bulkImportPersistenceError: document.getElementById("bulkImportPersistenceError"),
+    bulkImportCopyUnresolved: document.getElementById("bulkImportCopyUnresolved"),
+    bulkImportPasteCorrected: document.getElementById("bulkImportPasteCorrected"),
+    bulkImportAdvanced: document.getElementById("bulkImportAdvanced"),
+    bulkImportCorrectedTsv: document.getElementById("bulkImportCorrectedTsv"),
+    bulkCorrectedTsvModal: document.getElementById("bulkCorrectedTsvModal"),
+    bulkCorrectedTsvInput: document.getElementById("bulkCorrectedTsvInput"),
+    bulkCorrectedTsvPaste: document.getElementById("bulkCorrectedTsvPaste"),
+    bulkCorrectedTsvApply: document.getElementById("bulkCorrectedTsvApply"),
+    bulkImportToolbar: document.getElementById("bulkImportToolbar"),
+    bulkImportProgress: document.getElementById("bulkImportProgress"),
+    bulkImportTableBody: document.getElementById("bulkImportTableBody"),
+    bulkImportPause: document.getElementById("bulkImportPause"),
+    bulkImportResume: document.getElementById("bulkImportResume"),
+    bulkImportRetry: document.getElementById("bulkImportRetry"),
+    bulkImportCancel: document.getElementById("bulkImportCancel"),
+    bulkFileInput: document.getElementById("bulkFileInput"),
+    bulkAddPasteFooter: document.getElementById("bulkAddPasteFooter"),
+    bulkImportPreviewFooter: document.getElementById("bulkImportPreviewFooter"),
+    bulkImportBack: document.getElementById("bulkImportBack"),
+    bulkImportConfirm: document.getElementById("bulkImportConfirm"),
     copyBulkTemplate: document.getElementById("copyBulkTemplate"),
     bulkAddConfirm: document.getElementById("bulkAddConfirm"),
     ratingModal: document.getElementById("ratingModal"),
@@ -466,6 +645,7 @@
       }
 
       if (state.addMode === "bulk" && !els.bulkAddPanel?.hidden) {
+        if (els.bulkImportPreview && !els.bulkImportPreview.hidden) return;
         event.preventDefault();
         handleBulkAdd();
         return;
@@ -507,7 +687,16 @@
   }
 
   function readSyncMeta(listId) {
-    return loadJson(syncMetaKey(listId), { localUpdated: 0, syncedAt: 0 });
+    return loadJson(syncMetaKey(listId), { localUpdated: 0, syncedAt: 0, lastPushedCount: 0 });
+  }
+
+  function recordCloudPushSuccess(listId, count = countLocalTitles()) {
+    if (!listId) return;
+    writeSyncMeta(listId, {
+      syncedAt: Date.now(),
+      lastPushedCount: count,
+    });
+    cloudShrinkPushAllowed = false;
   }
 
   function writeSyncMeta(listId, patch) {
@@ -565,10 +754,20 @@
     writeSyncMeta(listId, { localUpdated: Date.now() });
   }
 
+  function buildCloudPushOptions(listId) {
+    const meta = readSyncMeta(listId);
+    return {
+      allowShrink: cloudShrinkPushAllowed,
+      lastPushedCount: meta.lastPushedCount ?? 0,
+    };
+  }
+
   function queueCloudSync() {
     const listId = state.activeListId;
     if (!listId || !canPersistActiveList(listId)) return;
+    if (bulkImportCommitBusy) return;
     if (!window.WatchlistSync?.isConfigured()) return;
+    if (window.WatchlistLifecycle && !window.WatchlistLifecycle.canWriteCloud()) return;
 
     touchLocalUpdated();
     state.syncStatus = "pending";
@@ -580,6 +779,7 @@
         watchlist: state.data,
         watched: state.watched,
         meta: listSyncMeta(),
+        pushOptions: buildCloudPushOptions(listId),
       }),
       (result) => {
         if (result?.skipped) {
@@ -588,8 +788,12 @@
           return;
         }
         if (result?.ok) {
-          writeSyncMeta(listId, { syncedAt: Date.now() });
+          recordCloudPushSuccess(listId);
           state.syncStatus = "saved";
+        } else if (result?.blocked && result?.reason === "shrink-vs-cloud") {
+          cloudShrinkPushAllowed = false;
+          console.error("[sync:data-loss-prevented] blocked stale shrink push");
+          state.syncStatus = "error";
         } else {
           state.syncStatus = resolveSyncFailureStatus();
         }
@@ -603,6 +807,177 @@
     const revision = mutationRevision;
     if (itemId) itemMutationRevision.set(itemId, revision);
     return revision;
+  }
+
+  const ENRICHMENT_PROTECTED_FIELDS = new Set([
+    "poster",
+    "cardPoster",
+    "posterBroken",
+    "link",
+    "provider",
+    "providerId",
+    "contentType",
+    "anilistId",
+    "tmdbId",
+    "imdbId",
+    "imdbLink",
+    "lastSelectedSeason",
+    "cardSeasonName",
+    "noSpecials",
+    "genre",
+    "secondaryGenres",
+    "title",
+    "id",
+    "kind",
+  ]);
+
+  function isPosterOverwriteDebugEnabled() {
+    try {
+      return localStorage.getItem("watchlist-debug-poster-overwrite") === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function isCastEnrichDebugEnabled() {
+    return isPosterOverwriteDebugEnabled() || isImportAuditDebugEnabled();
+  }
+
+  function isBulkPosterTraceTitle(title) {
+    return window.WatchlistMetadata?.isBulkAddTraceTitle?.(title);
+  }
+
+  function itemPosterUrl(item) {
+    return String(item?.cardPoster || item?.poster || "").trim();
+  }
+
+  function isTrustedPosterUrl(url, item = null) {
+    const trimmed = String(url || "").trim();
+    if (!trimmed || !/^https?:\/\//i.test(trimmed)) return false;
+    if (trimmed.includes("/extraLarge/")) return false;
+    const WM = window.WatchlistMetadata;
+    if (item?.contentType === "anime" || trimmed.includes("anilist")) {
+      return WM?.isRawAnilistPosterUrl?.(trimmed) ?? trimmed.includes("anilist.co");
+    }
+    return true;
+  }
+
+  function itemHasTrustedPoster(item) {
+    return isTrustedPosterUrl(itemPosterUrl(item), item);
+  }
+
+  function stripProtectedEnrichmentFields(patch, item) {
+    if (!patch || typeof patch !== "object") return {};
+    const safe = { ...patch };
+    for (const key of ENRICHMENT_PROTECTED_FIELDS) {
+      if (!(key in safe)) continue;
+      if (key === "poster" || key === "cardPoster") {
+        if (!isTrustedPosterUrl(safe[key], item)) delete safe[key];
+        continue;
+      }
+      if (key === "posterBroken") {
+        if (safe[key] === true && itemHasTrustedPoster(item)) delete safe[key];
+        continue;
+      }
+      delete safe[key];
+    }
+    return safe;
+  }
+
+  function shouldApplyEnrichmentPoster(item, incomingUrl) {
+    const incoming = String(incomingUrl || "").trim();
+    if (!isTrustedPosterUrl(incoming, item)) return false;
+    const current = itemPosterUrl(item);
+    if (!current) return true;
+    if (item?.contentType === "anime") {
+      if (item.posterBroken || !isTrustedPosterUrl(current, item)) return true;
+      return false;
+    }
+    if (item.posterBroken || !current || current.includes("/extraLarge/")) return true;
+    return false;
+  }
+
+  function preservePosterFieldsOnItem(item, incoming = {}) {
+    if (!item) return item;
+    const beforePoster = itemPosterUrl(item);
+    const beforeBroken = Boolean(item.posterBroken);
+    const incomingPoster = String(incoming.poster || incoming.cardPoster || "").trim();
+    if (incomingPoster && shouldApplyEnrichmentPoster(item, incomingPoster)) {
+      item.poster = incomingPoster;
+      item.cardPoster = incoming.cardPoster || incomingPoster;
+      item.posterBroken = false;
+    } else if (itemHasTrustedPoster(item)) {
+      item.posterBroken = false;
+    }
+    if (isPosterOverwriteDebugEnabled() && isBulkPosterTraceTitle(item.title)) {
+      const afterPoster = itemPosterUrl(item);
+      if (beforePoster !== afterPoster || beforeBroken !== Boolean(item.posterBroken)) {
+        console.warn("[poster-overwrite-trace]", {
+          title: item.title,
+          functionName: incoming.__source || "preservePosterFieldsOnItem",
+          itemId: item.id,
+          posterBefore: beforePoster,
+          posterAfter: afterPoster,
+          posterBrokenBefore: beforeBroken,
+          posterBrokenAfter: Boolean(item.posterBroken),
+          updatePayloadKeys: Object.keys(incoming).filter((k) => k !== "__source"),
+          payloadContainsPoster: "poster" in incoming || "cardPoster" in incoming,
+          payloadContainsPosterBroken: "posterBroken" in incoming,
+          source: incoming.__source || "poster preserve",
+        });
+      }
+    }
+    return item;
+  }
+
+  function tracePosterFieldWrite(item, functionName, patch, source) {
+    if (!isPosterOverwriteDebugEnabled() || !isBulkPosterTraceTitle(item?.title)) return;
+    const touchesPoster =
+      patch &&
+      ("poster" in patch || "cardPoster" in patch || "posterBroken" in patch);
+    if (!touchesPoster) return;
+    console.warn("[poster-overwrite-trace]", {
+      title: item?.title || "",
+      functionName,
+      itemId: item?.id || "",
+      posterBefore: itemPosterUrl(item),
+      posterAfter: String(patch?.cardPoster || patch?.poster || itemPosterUrl(item) || ""),
+      posterBrokenBefore: Boolean(item?.posterBroken),
+      posterBrokenAfter:
+        "posterBroken" in (patch || {})
+          ? Boolean(patch.posterBroken)
+          : Boolean(item?.posterBroken),
+      updatePayloadKeys: patch ? Object.keys(patch) : [],
+      payloadContainsPoster: Boolean(
+        patch && ("poster" in patch || "cardPoster" in patch)
+      ),
+      payloadContainsPosterBroken: Boolean(patch && "posterBroken" in patch),
+      source,
+    });
+  }
+
+  function applyOwnedEnrichmentFields(item, patch, source) {
+    if (!item || !patch) return false;
+    const safe = stripProtectedEnrichmentFields(patch, item);
+    let changed = false;
+    for (const [key, value] of Object.entries(safe)) {
+      if (value == null || value === "") continue;
+      tracePosterFieldWrite(item, "applyOwnedEnrichmentFields", { [key]: value }, source);
+      if (item[key] !== value) {
+        item[key] = value;
+        changed = true;
+      }
+    }
+    preservePosterFieldsOnItem(item, { __source: source });
+    return changed;
+  }
+
+  function getEnrichmentRevision(itemId) {
+    return itemMutationRevision.get(itemId) || 0;
+  }
+
+  function isEnrichmentStale(itemId, revisionAtStart) {
+    return getEnrichmentRevision(itemId) !== revisionAtStart;
   }
 
   const watchTrace = () => window.WatchlistWatchTrace;
@@ -825,10 +1200,11 @@
           listId,
           state.data,
           state.watched,
-          listSyncMeta()
+          listSyncMeta(),
+          buildCloudPushOptions(listId)
         );
         if (result?.ok) {
-          writeSyncMeta(listId, { syncedAt: Date.now() });
+          recordCloudPushSuccess(listId);
           state.syncStatus = "saved";
         } else {
           state.syncStatus = resolveSyncFailureStatus();
@@ -910,10 +1286,11 @@
           listId,
           state.data,
           state.watched,
-          syncMeta
+          syncMeta,
+          buildCloudPushOptions(listId)
         );
         if (result.ok) {
-          writeSyncMeta(listId, { syncedAt: Date.now() });
+          recordCloudPushSuccess(listId);
           state.syncStatus = "saved";
         } else {
           state.syncStatus = resolveSyncFailureStatus();
@@ -934,7 +1311,43 @@
       (!localHasData || remoteUpdated > localStamp)
     ) {
       if (window.WatchlistAuth?.getProfile() !== listId) return;
-      applyRemoteSnapshotQuiet(remote);
+      const localCount = countLocalTitles();
+      const truncation = remoteSnapshotLooksTruncated(localCount, remote, listId, {
+        remoteUpdated,
+        localStamp,
+      });
+      if (truncation) {
+        console.error("[sync:data-loss-prevented]", truncation);
+        if (localHasData) {
+          const result = await window.WatchlistSync.pushSnapshot(
+            listId,
+            state.data,
+            state.watched,
+            syncMeta,
+            buildCloudPushOptions(listId)
+          );
+          if (result.ok) {
+            recordCloudPushSuccess(listId);
+            state.syncStatus = "saved";
+          } else {
+            state.syncStatus = resolveSyncFailureStatus();
+          }
+        }
+        return;
+      }
+      if (window.WatchlistAuth?.getProfile() !== listId) return;
+      const remoteCount =
+        remote.fetched_count ??
+        window.WatchlistSync?.countWatchlistItems?.(remote.watchlist) ??
+        0;
+      if (localCount > remoteCount + 2) {
+        console.warn("[sync] applying smaller remote snapshot", {
+          localCount,
+          remoteCount,
+          listId,
+        });
+      }
+      applyRemoteSnapshotQuiet(remote, listId, { remoteUpdated, localStamp });
       writeSyncMeta(listId, { syncedAt: remoteUpdated, localUpdated: remoteUpdated });
       state.syncStatus = "saved";
       return;
@@ -946,10 +1359,11 @@
         listId,
         state.data,
         state.watched,
-        syncMeta
+        syncMeta,
+        buildCloudPushOptions(listId)
       );
       if (result.ok) {
-        writeSyncMeta(listId, { syncedAt: Date.now() });
+        recordCloudPushSuccess(listId);
         state.syncStatus = "saved";
       } else {
         state.syncStatus = resolveSyncFailureStatus();
@@ -1044,16 +1458,88 @@
     return ptrRefreshing;
   }
 
-  function applyRemoteSnapshotQuiet(remote) {
+  function countLocalTitles() {
+    return state.items?.length || 0;
+  }
+
+  function remoteSnapshotLooksTruncated(localCount, remote, listId, syncTiming = {}) {
+    if (!remote) return false;
+    const remoteCount =
+      remote.fetched_count ??
+      window.WatchlistSync?.countWatchlistItems?.(remote.watchlist) ??
+      0;
+    const expected = Number(remote.title_count) || 0;
+    const meta = listId ? readSyncMeta(listId) : {};
+    const lastPushed = Number(meta.lastPushedCount) || 0;
+    const remoteUpdated =
+      syncTiming.remoteUpdated ?? new Date(remote.updated_at || 0).getTime();
+    const localStamp =
+      syncTiming.localStamp ?? Math.max(meta.localUpdated, meta.syncedAt);
+    const recentRace = Math.abs(remoteUpdated - localStamp) < SYNC_RACE_WINDOW_MS;
+
+    if (expected > 0 && remoteCount > 0 && remoteCount < expected * 0.9) {
+      return { truncated: true, reason: "fetch-below-title-count", localCount, remoteCount, expected };
+    }
+
+    if (
+      localCount > 150 &&
+      remoteCount > 0 &&
+      remoteCount <= 100 &&
+      localCount > remoteCount + 50
+    ) {
+      return { truncated: true, reason: "large-local-gap", localCount, remoteCount, expected };
+    }
+
+    if (localCount > 120 && remoteCount > 0 && localCount > remoteCount * 1.35) {
+      return { truncated: true, reason: "ratio-gap", localCount, remoteCount, expected };
+    }
+
+    if (
+      recentRace &&
+      lastPushed > 0 &&
+      localCount >= lastPushed - 1 &&
+      remoteCount > 0 &&
+      remoteCount < lastPushed - 2
+    ) {
+      return {
+        truncated: true,
+        reason: "remote-below-last-push",
+        localCount,
+        remoteCount,
+        expected: lastPushed,
+      };
+    }
+
+    return null;
+  }
+
+  function applyRemoteSnapshotQuiet(remote, listId = state.activeListId, syncTiming = {}) {
+    const localCount = countLocalTitles();
+    const truncation = remoteSnapshotLooksTruncated(localCount, remote, listId, syncTiming);
+    if (truncation) {
+      console.error("[sync:data-loss-prevented]", truncation);
+      return false;
+    }
+
     const bundled = window.WATCHLIST ? structuredClone(window.WATCHLIST) : null;
     const scrollY = window.scrollY;
-    const listId = state.activeListId;
     const oldSignatures = new Map(state.items.map((item) => [item.id, itemPtrSignature(item)]));
     const oldIds = new Set(state.items.map((item) => item.id));
 
     const localAddedById = new Map();
+    const localPosterById = new Map();
     for (const item of state.items) {
       if (item.addedAt) localAddedById.set(item.id, item.addedAt);
+      if (itemHasTrustedPoster(item)) {
+        localPosterById.set(item.id, {
+          poster: item.poster || "",
+          cardPoster: item.cardPoster || item.poster || "",
+          posterBroken: false,
+          anilistId: item.anilistId,
+          provider: item.provider,
+          providerId: item.providerId,
+        });
+      }
     }
 
     state.data = applyBundledGenreCorrections(remote.watchlist, bundled);
@@ -1065,6 +1551,34 @@
         const localAt = localAddedById.get(item.id);
         if (localAt) item.addedAt = localAt;
       }
+    }
+    for (const item of state.items) {
+      const localPoster = localPosterById.get(item.id);
+      if (!localPoster) continue;
+      const remotePoster = itemPosterUrl(item);
+      if (!isTrustedPosterUrl(remotePoster, item) && localPoster.poster) {
+        if (isPosterOverwriteDebugEnabled() && isBulkPosterTraceTitle(item.title)) {
+          console.warn("[poster-overwrite-trace]", {
+            title: item.title,
+            functionName: "applyRemoteSnapshotQuiet",
+            itemId: item.id,
+            posterBefore: remotePoster,
+            posterAfter: localPoster.cardPoster || localPoster.poster,
+            posterBrokenBefore: Boolean(item.posterBroken),
+            posterBrokenAfter: false,
+            updatePayloadKeys: ["poster", "cardPoster", "posterBroken"],
+            payloadContainsPoster: true,
+            payloadContainsPosterBroken: true,
+            source: "cloud sync",
+          });
+        }
+        item.poster = localPoster.poster;
+        item.cardPoster = localPoster.cardPoster;
+        item.posterBroken = false;
+      }
+      if (!item.anilistId && localPoster.anilistId) item.anilistId = localPoster.anilistId;
+      if (!item.provider && localPoster.provider) item.provider = localPoster.provider;
+      if (!item.providerId && localPoster.providerId) item.providerId = localPoster.providerId;
     }
     state.data = itemsToNested(state.items);
 
@@ -1118,6 +1632,7 @@
       window.WatchlistTitleDetail.refresh?.();
       window.WatchlistSeasons?.onExternalRefresh?.();
     }
+    return true;
   }
 
   async function pullToRefreshFromCloud() {
@@ -1161,7 +1676,14 @@
         return outcome;
       }
 
-      applyRemoteSnapshotQuiet(remote);
+      const applied = applyRemoteSnapshotQuiet(remote, listId, {
+        remoteUpdated: new Date(remote.updated_at || 0).getTime(),
+        localStamp: Math.max(readSyncMeta(listId).localUpdated, readSyncMeta(listId).syncedAt),
+      });
+      if (!applied) {
+        outcome = { ok: false, reason: "truncated-remote" };
+        return outcome;
+      }
       state.syncStatus = "saved";
       outcome = { ok: true };
       return outcome;
@@ -1190,7 +1712,18 @@
     if (!canPersistActiveList()) return;
     const { data } = storageKeys();
     state.data = itemsToNested(state.items);
-    localStorage.setItem(data, JSON.stringify(state.data));
+    try {
+      localStorage.setItem(data, JSON.stringify(state.data));
+    } catch (err) {
+      console.warn("[app] local save failed:", err);
+      window.WatchlistStorageDiagnostics?.clearDisposableCaches?.();
+      try {
+        localStorage.setItem(data, JSON.stringify(state.data));
+      } catch (retryErr) {
+        console.error("[app] local save failed after cache trim:", retryErr);
+      }
+    }
+    persistWatchlistCache();
     queueCloudSync();
   }
 
@@ -1941,6 +2474,8 @@
       stillVisible,
       expectedProgress,
       hasMainEl: Boolean(els.main),
+      poster: itemPosterUrl(item),
+      posterBroken: Boolean(item?.posterBroken),
     });
 
     let action = "none";
@@ -1950,6 +2485,7 @@
       const newCard = tmp.firstElementChild;
       if (newCard) {
         card.replaceWith(newCard);
+        bindPosterErrorHandlers();
         action = "replaced";
       } else {
         action = "replace-failed-no-newCard";
@@ -2244,6 +2780,12 @@
         entry.sourceGenres = item.sourceGenres;
       }
       if (item.cardPoster) entry.cardPoster = item.cardPoster;
+      if (item.posterBroken === true) entry.posterBroken = true;
+      if (item.anilistId) entry.anilistId = item.anilistId;
+      if (item.tmdbId) entry.tmdbId = item.tmdbId;
+      if (item.imdbId) entry.imdbId = item.imdbId;
+      if (item.provider) entry.provider = item.provider;
+      if (item.providerId) entry.providerId = item.providerId;
       if (item.lastSelectedSeason != null) entry.lastSelectedSeason = item.lastSelectedSeason;
       if (item.cardSeasonName) entry.cardSeasonName = item.cardSeasonName;
       if (item.noSpecials === true) entry.noSpecials = true;
@@ -2336,7 +2878,6 @@
     return deriveItemProgressState(id, raw);
   }
 
-  /** Sort key: unwatched (0) → in progress (1) → watched (2). */
   function progressSortRank(id) {
     const progress = itemProgressState(id);
     if (progress === "inProgress") return 1;
@@ -2532,9 +3073,6 @@
   function sortItemsByRelease(items) {
     const newest = isSortNewestFirst();
     return [...items].sort((a, b) => {
-      const progressDiff = compareItemsByProgress(a, b);
-      if (progressDiff !== 0) return progressDiff;
-
       const aYear = parseReleaseYear(a.year);
       const bYear = parseReleaseYear(b.year);
       if (aYear == null && bYear == null) {
@@ -2589,9 +3127,6 @@
   function sortItemsByRating(items) {
     const bestFirst = isSortBestFirst();
     return [...items].sort((a, b) => {
-      const progressDiff = compareItemsByProgress(a, b);
-      if (progressDiff !== 0) return progressDiff;
-
       const aScore = getRatingSortScore(a);
       const bScore = getRatingSortScore(b);
       if (aScore == null && bScore == null) {
@@ -2608,9 +3143,6 @@
   function sortItemsByAdded(items) {
     const newest = isSortNewestFirst();
     return [...items].sort((a, b) => {
-      const progressDiff = compareItemsByProgress(a, b);
-      if (progressDiff !== 0) return progressDiff;
-
       const aTime = a.addedAt || 0;
       const bTime = b.addedAt || 0;
       if (aTime !== bTime) return newest ? bTime - aTime : aTime - bTime;
@@ -3046,6 +3578,7 @@
 
   function updateAppBanners() {
     updateShareArrivalBanner();
+    updateCloudRestoreBanner();
   }
 
   async function openShareArrivalImport() {
@@ -3364,15 +3897,156 @@
   }
 
   function getAnilistId(item) {
+    const SM = window.WatchlistSeriesMetadata;
+    const sync = SM?.resolveWatchlistItemAnilistIdSync?.(item);
+    if (sync) return String(sync);
     if (item?.anilistId != null && item.anilistId !== "") {
       return String(item.anilistId);
     }
     return window.WatchlistMetadata?.extractAnilistId?.(item.link) || null;
   }
 
+  function getWatchlistAnimeItems() {
+    const SM = window.WatchlistSeriesMetadata;
+    return state.items
+      .filter((item) => item.contentType === "anime")
+      .map((item) => {
+        const anilistId = SM?.resolveWatchlistItemAnilistIdSync?.(item) || getAnilistId(item);
+        if (!anilistId) return null;
+        return { ...item, anilistId: Number(anilistId) };
+      })
+      .filter(Boolean);
+  }
+
+  async function resolveWatchlistAnimeItems(options = {}) {
+    const SM = window.WatchlistSeriesMetadata;
+    const resolved = [];
+    let changed = false;
+
+    for (const item of state.items) {
+      if (item.contentType !== "anime") continue;
+      const result = await SM?.resolveWatchlistItemAnilistId?.(item, {
+        persist: options.persist !== false,
+        allowLive: options.allowLive !== false,
+        allowOffline: options.allowOffline !== false,
+      });
+      if (result?.anilistId) {
+        if (result.source && result.source !== "stored") changed = true;
+        resolved.push({ ...item, anilistId: Number(result.anilistId) });
+      }
+    }
+
+    if (changed && options.persist !== false) saveData();
+    return resolved;
+  }
+
+  const ANIME_GROUP_DEBUG_TITLES = [
+    "fairy tail",
+    "100 years quest",
+    "naruto",
+    "shippuden",
+    "boruto",
+  ];
+
+  function itemMatchesAnimeGroupDebug(item) {
+    if (!item || item.contentType !== "anime") return false;
+    const hay = String(item.title || "").toLowerCase();
+    return ANIME_GROUP_DEBUG_TITLES.some((needle) => hay.includes(needle));
+  }
+
+  function buildAnimeGroupDebugRow(item, resolved, group, probe) {
+    const watchEntry = state.watched[item.id] || null;
+    const decision = group?.groupingDecision || (group?.ok ? "unknown" : "unresolved");
+    return {
+      watchlistItemId: item.id,
+      title: item.title,
+      contentType: item.contentType,
+      link: item.link || "",
+      anilistId: resolved?.anilistId ?? item.anilistId ?? null,
+      anilistResolveSource: resolved?.source || item.anilistIdSource || null,
+      provider: item.provider || null,
+      providerId: item.providerId || null,
+      providerCacheHit: Boolean(probe?.providerCacheHit),
+      providerCacheId: probe?.providerCacheId ?? null,
+      animeTitleIndexHit: Boolean(probe?.animeTitleIndexHit),
+      animeTitleIndexId: probe?.animeTitleIndexId ?? null,
+      resolvedAnilistId: resolved?.anilistId ?? null,
+      resolveSource: resolved?.source || null,
+      rootAnilistId: group?.rootAnilistId ?? null,
+      rootTitle: group?.rootTitle || "",
+      relationPath: group?.relationPath || group?.chainIds || [],
+      allFranchiseTvIds: group?.allFranchiseTvIds || [],
+      groupRole: group?.groupRole ?? null,
+      groupingDecision: decision,
+      shouldMerge: group?.shouldMerge ?? false,
+      standaloneReason: group?.standaloneReason || group?.reason || "",
+      poster: item.cardPoster || item.poster || "",
+      posterBroken: Boolean(item.posterBroken),
+      selectedSeason: item.lastSelectedSeason ?? item.selectedSeason ?? null,
+      selectedSeasonName: item.cardSeasonName || "",
+      groupedDuplicateReview: Boolean(item.groupedDuplicateReview),
+      addedAt: item.addedAt || null,
+      watched: Boolean(watchEntry?.watched),
+      inProgress: Boolean(watchEntry?.inProgress),
+      rating: watchEntry?.rating ?? null,
+      note: watchEntry?.note || "",
+      episodeProgressCount: Array.isArray(watchEntry?.progress?.episodes)
+        ? watchEntry.progress.episodes.length
+        : 0,
+    };
+  }
+
+  async function debugAnimeGroupState(titleNeedles = ANIME_GROUP_DEBUG_TITLES) {
+    const SM = window.WatchlistSeriesMetadata;
+    const needles = (titleNeedles || []).map((s) => String(s).toLowerCase());
+    const rows = [];
+
+    for (const item of state.items) {
+      if (item.contentType !== "anime") continue;
+      const hay = String(item.title || "").toLowerCase();
+      if (needles.length && !needles.some((needle) => hay.includes(needle))) continue;
+
+      const probe = await SM?.probeWatchlistItemAnilistId?.(item);
+      const resolved = await SM?.resolveWatchlistItemAnilistId?.(item, {
+        persist: false,
+        allowLive: true,
+        allowOffline: true,
+      });
+      const group = resolved?.anilistId
+        ? await SM?.resolveAnimeSeriesGroup?.(item, {
+            persist: false,
+            allowLive: false,
+            groupingOnly: true,
+            includeChain: true,
+          })
+        : null;
+      const row = buildAnimeGroupDebugRow(item, resolved, group, probe);
+      rows.push(row);
+      console.warn("[anime-group-debug]", row);
+    }
+
+    const byRoot = new Map();
+    for (const row of rows) {
+      if (!row.rootAnilistId) continue;
+      const key = String(row.rootAnilistId);
+      if (!byRoot.has(key)) byRoot.set(key, []);
+      byRoot.get(key).push(row.title);
+    }
+    for (const [rootId, titles] of byRoot.entries()) {
+      if (titles.length > 1) {
+        console.warn("[anime-group-debug] franchise cluster", { rootAnilistId: rootId, titles });
+      }
+    }
+
+    return rows;
+  }
+
   function itemNeedsImdbBackfill(item) {
+    if (item.imdbRating) return false;
     const imdbId = getImdbId(item);
-    return Boolean(imdbId && !item.imdbRating);
+    if (imdbId) return true;
+    if (item.contentType === "anime" && getAnilistId(item)) return true;
+    return false;
   }
 
   function itemNeedsAnilistBackfill(item) {
@@ -3624,6 +4298,7 @@
       if (meta) {
         const before = itemHasTitleMeta(item);
         window.WatchlistMetadata.applyTitleMetaFromDetails(meta, item, item.contentType);
+        preservePosterFieldsOnItem(item, { __source: "rating backfill" });
         if (!before && itemHasTitleMeta(item)) changed = true;
       }
       if (changed) {
@@ -3638,6 +4313,13 @@
 
     for (const item of anilistQueue) {
       if (!ratingsBackfillRunning || !canPersistActiveList(listId)) break;
+      const anilistPaused =
+        window.WatchlistSeriesMetadata?.isAnilistRateLimited?.() ||
+        window.WatchlistMetadata?.getAnilistQueueStatus?.()?.paused;
+      if (anilistPaused) {
+        console.warn("[ratings] AniList paused — skipping AniList rating backfill");
+        break;
+      }
       try {
         await applyAnilistBackfill(item);
       } catch (error) {
@@ -3657,7 +4339,27 @@
       try {
         if (!window.WatchlistMetadata?.hasOmdbKey?.()) break;
 
-        const imdbId = getImdbId(item);
+        let imdbId = getImdbId(item);
+        if (!imdbId && item.contentType === "anime") {
+          const anilistId = getAnilistId(item);
+          const linked = await window.WatchlistSeriesMetadata?.resolveLinkedImdbId?.(
+            anilistId ? { anilistId: Number(anilistId) } : {},
+            item,
+            {
+              title: item.title,
+              altTitle: item.altTitle,
+              year: item.year,
+              skipAnilist: true,
+            }
+          );
+          if (linked) {
+            imdbId = linked;
+            item.imdbId = linked;
+            item.imdbLink = `https://www.imdb.com/title/${linked}/`;
+          }
+        }
+        if (!imdbId) continue;
+
         const meta = await window.WatchlistMetadata.getMetadata(imdbId);
         let changed = false;
         if (meta?.rating && !item.imdbRating) {
@@ -3667,6 +4369,7 @@
         if (meta) {
           const before = itemHasTitleMeta(item);
           window.WatchlistMetadata.applyTitleMetaFromDetails(meta, item, item.contentType);
+          preservePosterFieldsOnItem(item, { __source: "imdb rating backfill" });
           if (!before && itemHasTitleMeta(item)) changed = true;
         }
         if (changed) {
@@ -3683,7 +4386,7 @@
 
       done += 1;
       updateRatingsBackfillBanner({ running: true, done, total, phase: "imdb" });
-      await new Promise((resolve) => setTimeout(resolve, 280));
+      await new Promise((resolve) => setTimeout(resolve, 420));
     }
 
     ratingsBackfillRunning = false;
@@ -3750,6 +4453,7 @@
           const before = itemHasTitleMeta(item);
           const beforeRuntime = item.runtime || "";
           window.WatchlistMetadata.applyTitleMetaFromDetails(meta, item, item.contentType);
+          preservePosterFieldsOnItem(item, { __source: "title meta backfill" });
           if (
             (!before && itemHasTitleMeta(item)) ||
             (!beforeRuntime && item.runtime)
@@ -3807,8 +4511,9 @@
 
   function applyBadgePatches(item, patches) {
     if (!item || !patches) return false;
+    const safe = stripProtectedEnrichmentFields(patches, item);
     let changed = false;
-    for (const [key, value] of Object.entries(patches)) {
+    for (const [key, value] of Object.entries(safe)) {
       if (value == null || value === "") continue;
       if (key === "episodeCount" || key === "seasonCount") {
         const n = parseInt(String(value).trim(), 10);
@@ -3827,11 +4532,27 @@
         changed = true;
         continue;
       }
+      if (key === "imdbRating") {
+        if (!value || item.imdbRating === value) continue;
+        item.imdbRating = value;
+        changed = true;
+        continue;
+      }
+      if (key === "imdbId") {
+        const id = String(value).toLowerCase();
+        if (!id.startsWith("tt")) continue;
+        if (item.imdbId === id && getImdbId(item) === id) continue;
+        item.imdbId = id;
+        item.imdbLink = `https://www.imdb.com/title/${id}/`;
+        changed = true;
+        continue;
+      }
       if (item[key] !== value) {
         item[key] = value;
         changed = true;
       }
     }
+    preservePosterFieldsOnItem(item, { __source: "badge enrichment" });
     return changed;
   }
 
@@ -3851,24 +4572,10 @@
 
     const item = state.items.find((i) => i.id === itemId);
     if (!item) return;
-    if (item.contentType !== "tvSeries" && item.contentType !== "anime") return;
-
-    const episodes = parseInt(String(item.episodeCount || "").trim(), 10);
-    const needsAnimeRefresh = itemNeedsAnimeProviderRefresh(item);
-    const needsImdbRating =
-      item.contentType === "anime" &&
-      getImdbId(item) &&
-      !item.imdbRating;
-    if (
-      !needsAnimeRefresh &&
-      !needsImdbRating &&
-      !itemNeedsSeriesBadgeRefresh(item) &&
-      Number.isFinite(episodes) &&
-      episodes > 0 &&
-      itemHasTitleMeta(item)
-    ) {
+    if (item.contentType !== "tvSeries" && item.contentType !== "anime" && item.contentType !== "movies") {
       return;
     }
+    if (!itemNeedsBadgeEnrichment(item)) return;
 
     try {
       const locale = window.WatchlistI18n?.getLang?.() || "en";
@@ -3879,11 +4586,17 @@
       if (!patches || !canPersistActiveList(listId)) return;
 
       const live = state.items.find((i) => i.id === itemId);
-      if (!live || !applyBadgePatches(live, patches)) return;
+      if (!live) return;
 
-      state.data = itemsToNested(state.items);
-      saveData();
-      render();
+      const changed = applyBadgePatches(live, patches);
+      if (patches.imdbRating && !live.imdbRating) {
+        live.imdbRating = patches.imdbRating;
+      }
+      preservePosterFieldsOnItem(live, { __source: "badge enrichment" });
+      if (!changed && !patches.imdbRating) return;
+
+      persistEnrichmentSave(itemId);
+      syncListCard(itemId);
     } catch (error) {
       console.warn("[badge-enrich] failed:", error);
     }
@@ -3892,6 +4605,252 @@
   function queueItemBadgeEnrichment(itemId) {
     if (!itemId) return;
     void enrichItemBadges(itemId);
+  }
+
+  const bulkEnrichmentQueue = [];
+  let bulkEnrichmentRunning = false;
+
+  function queueImportedItemEnrichment(itemId) {
+    if (!itemId || bulkEnrichmentQueue.includes(itemId)) return;
+    bulkEnrichmentQueue.push(itemId);
+    void drainBulkEnrichmentQueue();
+  }
+
+  function applyCastFromEnrichment(item, castResult) {
+    if (!item || !castResult) return false;
+    const names = castResult.names || [];
+    if (!names.length) {
+      if (isCastEnrichDebugEnabled()) {
+        console.warn("[cast-enrich:save]", {
+          title: item.title,
+          provider: castResult.provider || "—",
+          providerId: castResult.providerId || "—",
+          castSource: castResult.source || "—",
+          namesSaved: [],
+          reason: castResult.reason || "no_cast_available",
+        });
+      }
+      return false;
+    }
+    if (item.leads?.length) return false;
+
+    const beforePoster = itemPosterUrl(item);
+    const beforeBroken = Boolean(item.posterBroken);
+    item.leads = names;
+    item.lead = names.join(", ");
+    preservePosterFieldsOnItem(item, { __source: "cast enrichment" });
+    if (isCastEnrichDebugEnabled()) {
+      console.warn("[cast-enrich:save]", {
+        title: item.title,
+        provider: castResult.provider,
+        providerId: castResult.providerId,
+        castSource: castResult.source,
+        namesSaved: names,
+      });
+    }
+    if (isPosterOverwriteDebugEnabled() && isBulkPosterTraceTitle(item.title)) {
+      const afterPoster = itemPosterUrl(item);
+      if (beforePoster !== afterPoster || beforeBroken !== Boolean(item.posterBroken)) {
+        console.warn("[poster-overwrite-trace]", {
+          title: item.title,
+          functionName: "applyCastFromEnrichment",
+          itemId: item.id,
+          posterBefore: beforePoster,
+          posterAfter: afterPoster,
+          posterBrokenBefore: beforeBroken,
+          posterBrokenAfter: Boolean(item.posterBroken),
+          updatePayloadKeys: ["leads", "lead"],
+          payloadContainsPoster: false,
+          payloadContainsPosterBroken: false,
+          source: "cast enrichment",
+        });
+      }
+    }
+    return true;
+  }
+
+  async function enrichItemCast(item, details = null) {
+    if (!item || item.leads?.length) return false;
+    const WM = window.WatchlistMetadata;
+    if (!WM?.enrichLeadCastForItem) return false;
+    try {
+      const castResult = await WM.enrichLeadCastForItem(item, details);
+      return applyCastFromEnrichment(item, castResult);
+    } catch (error) {
+      if (isCastEnrichDebugEnabled()) {
+        console.warn("[cast-enrich:save]", {
+          title: item.title,
+          provider: "—",
+          providerId: "—",
+          castSource: "—",
+          namesSaved: [],
+          reason: String(error?.message || error),
+        });
+      }
+      return false;
+    }
+  }
+
+  async function enrichImportedItem(itemId) {
+    const revisionAtStart = getEnrichmentRevision(itemId);
+    const item = state.items.find((entry) => entry.id === itemId);
+    if (!item) return;
+
+    const WM = window.WatchlistMetadata;
+    if (!WM?.getDetailsForPick) {
+      queueItemBadgeEnrichment(itemId);
+      return;
+    }
+
+    let pick = null;
+    const linkedAnilistId = getAnilistId(item);
+    if (item.anilistId || linkedAnilistId) {
+      pick = {
+        source: "anilist",
+        anilistId: item.anilistId || linkedAnilistId,
+        title: item.title,
+        year: item.year || "",
+      };
+    } else if (item.tmdbId) {
+      pick = {
+        source: "tmdb",
+        tmdbId: item.tmdbId,
+        tmdbType: item.contentType === "tvSeries" ? "tv" : "movie",
+        imdbId: item.imdbId || null,
+        title: item.title,
+        year: item.year || "",
+      };
+    } else if (item.imdbId) {
+      pick = {
+        source: "imdb",
+        imdbId: item.imdbId,
+        title: item.title,
+        year: item.year || "",
+        type: item.contentType === "tvSeries" ? "series" : "movie",
+      };
+    }
+
+    if (!pick) {
+      queueItemBadgeEnrichment(itemId);
+      return;
+    }
+
+    try {
+      const details = await WM.getDetailsForPick(pick, {
+        searchQuery: item.title,
+        preferAnime: item.contentType === "anime",
+      });
+      const live = state.items.find((entry) => entry.id === itemId);
+      if (!live) return;
+      if (isEnrichmentStale(itemId, revisionAtStart)) {
+        await enrichItemCast(live, null);
+        queueItemBadgeEnrichment(itemId);
+        return;
+      }
+
+      if (!details) {
+        const castChanged = await enrichItemCast(live, null);
+        if (castChanged) {
+          persistEnrichmentSave(itemId);
+          syncListCard(itemId);
+        }
+        queueItemBadgeEnrichment(itemId);
+        return;
+      }
+
+      if (details.plot && !live.summary) live.summary = details.plot;
+      await WM.mergeAndApplyItemGenres?.(live, details, {
+        contentType: live.contentType,
+        standardGenres: STANDARD_GENRES,
+        debugLabel: live.title,
+      });
+      applyRatingsFromDetails(details, live);
+      if (live.contentType === "anime" && !live.imdbRating) {
+        const anilistId = getAnilistId(live) || details.anilistId;
+        if (anilistId) {
+          const linked = await window.WatchlistSeriesMetadata?.resolveLinkedImdbId?.(
+            { anilistId: Number(anilistId) },
+            live,
+            {
+              title: live.title,
+              altTitle: live.altTitle,
+              year: live.year,
+              skipAnilist: window.WatchlistSeriesMetadata?.isAnilistRateLimited?.(),
+            }
+          );
+          if (linked) {
+            live.imdbId = linked;
+            live.imdbLink = `https://www.imdb.com/title/${linked}/`;
+            if (window.WatchlistMetadata?.hasOmdbKey?.()) {
+              const imdbMeta = await window.WatchlistMetadata.getMetadata(linked);
+              if (imdbMeta?.rating) live.imdbRating = imdbMeta.rating;
+            }
+          }
+        }
+      }
+      if (details.poster && shouldApplyEnrichmentPoster(live, details.poster)) {
+        const rawPoster = String(details.poster).trim();
+        if (live.contentType === "anime") {
+          live.poster = rawPoster;
+          live.cardPoster = rawPoster;
+          live.posterBroken = false;
+        } else {
+          const poster =
+            window.WatchlistMetadata?.upgradePosterForStorage?.(details.poster, details) ||
+            details.poster;
+          live.poster = poster;
+          live.cardPoster = poster;
+          live.posterBroken = false;
+        }
+      }
+      preservePosterFieldsOnItem(live, {
+        __source: "metadata backfill",
+        poster: details.poster,
+      });
+      if (details.year && !live.year) live.year = details.year;
+      WM.applyTitleMetaFromDetails?.(details, live, live.contentType);
+      const castChanged = await enrichItemCast(live, details);
+      if (isEnrichmentStale(itemId, revisionAtStart)) {
+        queueItemBadgeEnrichment(itemId);
+        return;
+      }
+      persistEnrichmentSave(itemId);
+      syncListCard(itemId);
+      if (castChanged) {
+        WM.cacheResolvedPreview?.(pick, {
+          ...details,
+          poster: live.poster || details.poster || "",
+          cardPoster: live.cardPoster || live.poster || "",
+        });
+      }
+    } catch (error) {
+      console.warn("[bulk-enrich] failed:", item.title, error);
+    }
+
+    queueItemBadgeEnrichment(itemId);
+    if (!state.items.find((entry) => entry.id === itemId)?.leads?.length) {
+      void enrichItemCast(state.items.find((entry) => entry.id === itemId), null).then(
+        (changed) => {
+          if (!changed) return;
+          const live = state.items.find((entry) => entry.id === itemId);
+          if (!live) return;
+          preservePosterFieldsOnItem(live, { __source: "cast enrichment retry" });
+          persistEnrichmentSave(itemId);
+          syncListCard(itemId);
+        }
+      );
+    }
+  }
+
+  async function drainBulkEnrichmentQueue() {
+    if (bulkEnrichmentRunning) return;
+    bulkEnrichmentRunning = true;
+    while (bulkEnrichmentQueue.length) {
+      const itemId = bulkEnrichmentQueue.shift();
+      await enrichImportedItem(itemId);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    bulkEnrichmentRunning = false;
   }
 
   async function backfillEpisodeTotals() {
@@ -4117,7 +5076,1054 @@
   }
 
   function cardDisplayPoster(item) {
-    return item?.cardPoster || item?.poster || "";
+    const raw = item?.cardPoster || item?.poster || "";
+    if (!raw) return "";
+    if (item?.contentType === "anime" || String(raw).includes("anilist")) return raw;
+    const WM = window.WatchlistMetadata;
+    if (!WM?.upgradePosterForStorage) return raw;
+    return WM.upgradePosterForStorage(raw, item);
+  }
+
+  function itemNeedsBadgeEnrichment(item) {
+    if (!item) return false;
+    if (item.contentType === "movies") {
+      return !item.ageRating || !item.runtime;
+    }
+    if (item.contentType === "tvSeries") {
+      const seasons = parseInt(String(item.seasonCount || "").trim(), 10);
+      const episodes = parseInt(String(item.episodeCount || "").trim(), 10);
+      return (
+        !item.ageRating ||
+        !item.runtime ||
+        !Number.isFinite(seasons) ||
+        seasons <= 0 ||
+        !Number.isFinite(episodes) ||
+        episodes <= 0
+      );
+    }
+    if (item.contentType === "anime") {
+      const episodes = parseInt(String(item.episodeCount || "").trim(), 10);
+      if (!Number.isFinite(episodes) || episodes <= 0) return true;
+      if (!item.ageRating) return true;
+      if (!item.runtime) return true;
+      if (!item.imdbRating && (getImdbId(item) || getAnilistId(item))) return true;
+      return false;
+    }
+    return false;
+  }
+
+  function itemPosterNeedsHeal(item) {
+    if (!item) return false;
+    if (item.contentType === "anime") return false;
+    if (item.posterBroken) return true;
+    const poster = item.cardPoster || item.poster || "";
+    return poster.includes("/extraLarge/");
+  }
+
+  function animePosterShouldUseAnilist(item) {
+    if (item?.contentType !== "anime") return false;
+    const anilistId = item.anilistId || getAnilistId(item);
+    if (!anilistId) return false;
+    const url = String(item.cardPoster || item.poster || "").trim();
+    if (!url) return true;
+    return !url.includes("anilist.co");
+  }
+
+  function itemAnimePosterNeedsRepair(item) {
+    if (item?.contentType !== "anime") return false;
+    if (item.posterBroken) return true;
+    if (animePosterShouldUseAnilist(item)) return true;
+    const SM = window.WatchlistSeriesMetadata;
+    const url = item?.cardPoster || item?.poster || "";
+    return !SM?.isUsableAnimePosterUrl?.(url);
+  }
+
+  function repairAnimePosterFromSeasons(item, seasons, options = {}) {
+    const SM = window.WatchlistSeriesMetadata;
+    const WM = window.WatchlistMetadata;
+    if (!item || !SM?.pickAnimeMainPosterFallback) return false;
+    if (!itemAnimePosterNeedsRepair(item) && !options.force) return false;
+
+    const wasBroken = Boolean(item.posterBroken);
+    const currentPoster = item.cardPoster || item.poster || "";
+    const seasonPostersFound = (seasons || [])
+      .filter((s) => s?.poster)
+      .map((s) => ({ seasonNumber: s.seasonNumber, poster: s.poster }));
+
+    const fallback = SM.pickAnimeMainPosterFallback(item, seasons, options);
+    if (!fallback?.poster) {
+      console.warn("[anime-poster-repair]", {
+        title: item.title,
+        currentPoster,
+        posterBroken: wasBroken,
+        seasonPostersFound,
+        selectedFallbackPoster: null,
+        savedTo: null,
+        cardRefreshed: false,
+        reason: "no_usable_fallback",
+      });
+      return false;
+    }
+
+    item.poster = fallback.poster;
+    item.cardPoster = fallback.poster;
+    item.posterBroken = false;
+
+    const savedTo = ["watchlist"];
+    if (item.anilistId && WM?.cacheResolvedPreview) {
+      WM.cacheResolvedPreview(
+        { source: "anilist", anilistId: item.anilistId },
+        { poster: fallback.poster, anilistId: item.anilistId, source: "anilist" }
+      );
+      savedTo.push("provider_cache");
+    }
+
+    const persist = options.persist !== false;
+    if (persist) saveData();
+    const refreshCard = options.refreshCard !== false;
+    if (refreshCard) syncListCard(item.id);
+
+    console.warn("[anime-poster-repair]", {
+      title: item.title,
+      currentPoster,
+      posterBroken: wasBroken,
+      seasonPostersFound,
+      selectedFallbackPoster: fallback.poster,
+      fallbackSource: fallback.source,
+      savedTo: savedTo.join("+"),
+      cardRefreshed: refreshCard,
+    });
+    return true;
+  }
+
+  async function pickVerifiedAnimePoster(candidates) {
+    const SM = window.WatchlistSeriesMetadata;
+    const WM = window.WatchlistMetadata;
+    for (const cand of candidates || []) {
+      const url = WM?.upgradePosterForStorage?.(cand.url, {}) || cand.url;
+      if (!url || !SM?.isUsableAnimePosterUrl?.(url)) continue;
+      if (await testPosterUrlLoads(url)) {
+        return { url, source: cand.source || "verified" };
+      }
+    }
+    return null;
+  }
+
+  function testPosterUrlLoads(url, timeoutMs = 8000) {
+    return new Promise((resolve) => {
+      const trimmed = String(url || "").trim();
+      if (!trimmed) {
+        resolve(false);
+        return;
+      }
+      const img = new Image();
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        resolve(ok);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      img.onload = () => {
+        clearTimeout(timer);
+        finish(true);
+      };
+      img.onerror = () => {
+        clearTimeout(timer);
+        finish(false);
+      };
+      img.src = trimmed;
+    });
+  }
+
+  async function repairAnimePosterForItem(item, options = {}) {
+    if (!options.force && !itemAnimePosterNeedsRepair(item)) return false;
+
+    const SM = window.WatchlistSeriesMetadata;
+    const WM = window.WatchlistMetadata;
+    const locale = window.WatchlistI18n?.getLang?.() || "en";
+    const currentPoster = item?.cardPoster || item?.poster || "";
+    const wasBroken = Boolean(item.posterBroken);
+
+    const resolved = await SM?.resolveWatchlistItemAnilistId?.(item, {
+      persist: options.persist !== false,
+      allowLive: options.allowLive !== false,
+      allowOffline: true,
+    });
+    const anilistId = resolved?.anilistId;
+    if (!anilistId) {
+      console.warn("[anime-poster-repair]", {
+        title: item?.title,
+        resolvedAnilistId: null,
+        rootAnilistId: null,
+        currentPoster,
+        posterBroken: wasBroken,
+        seasonPostersFound: [],
+        chosenFallbackPoster: null,
+        saveResult: "skipped_no_anilist_id",
+        cardRefreshed: false,
+      });
+      return false;
+    }
+
+    const group = await SM?.resolveAnimeSeriesGroup?.(item, {
+      persist: false,
+      allowLive: false,
+      groupingOnly: true,
+      includeChain: true,
+    });
+    const groupSeasons = (group?.members || [])
+      .filter((member) => {
+        const format = String(member.format || "").toUpperCase();
+        return format === "TV" || format === "TV_SHORT" || format === "ONA";
+      })
+      .map((member) => ({
+        seasonNumber: member.seasonNumber,
+        poster: member.poster,
+        name: member.title,
+        episodeCount: member.episodes,
+        isSpecials: false,
+        isRelated: false,
+      }));
+    const seasonPostersFound = groupSeasons
+      .filter((season) => season?.poster)
+      .map((season) => ({ seasonNumber: season.seasonNumber, poster: season.poster }));
+
+    async function saveVerifiedPoster(poster, sourceLabel, seasonList = seasonPostersFound) {
+      const verified = await pickVerifiedAnimePoster([
+        { url: poster, source: sourceLabel },
+        ...seasonList.map((s) => ({ url: s.poster, source: `season_${s.seasonNumber}` })),
+        ...(group?.members || []).map((m) => ({
+          url: m.poster,
+          source: `franchise_member_${m.anilistId}`,
+        })),
+      ]);
+      if (!verified?.url) {
+        animePosterRepairFailed.add(item.id);
+        console.warn("[anime-poster-repair]", {
+          title: item.title,
+          resolvedAnilistId: anilistId,
+          rootAnilistId: group?.rootAnilistId ?? anilistId,
+          currentPoster,
+          imageError: true,
+          posterBroken: wasBroken,
+          seasonPostersFound: seasonList,
+          chosenPosterUrl: null,
+          saveResult: "no_verified_poster",
+          cardRefreshed: false,
+        });
+        return false;
+      }
+      item.poster = verified.url;
+      item.cardPoster = verified.url;
+      item.posterBroken = false;
+      SM?.persistResolvedAnilistIdOnItem?.(item, anilistId, resolved?.source || "repair");
+      if (options.persist !== false) saveData();
+      if (options.refreshCard !== false) syncListCard(item.id);
+      if (WM?.cacheResolvedPreview) {
+        WM.cacheResolvedPreview(
+          { source: "anilist", anilistId: Number(anilistId) },
+          { poster: verified.url, anilistId: Number(anilistId), source: "anilist" }
+        );
+      }
+      console.warn("[anime-poster-repair]", {
+        title: item.title,
+        resolvedAnilistId: anilistId,
+        rootAnilistId: group?.rootAnilistId ?? anilistId,
+        currentPoster,
+        imageError: wasBroken,
+        posterBroken: wasBroken,
+        seasonPostersFound: seasonList,
+        chosenPosterUrl: verified.url,
+        fallbackSource: verified.source,
+        saveResult: "saved",
+        cardRefreshed: options.refreshCard !== false,
+      });
+      return true;
+    }
+
+    async function applyDirectAnilistPoster(sourceLabel) {
+      const details = await WM?.fetchAnilistById?.(Number(anilistId));
+      const poster = WM?.upgradePosterForStorage?.(details?.poster, details) || details?.poster;
+      if (!poster || !SM?.isUsableAnimePosterUrl?.(poster)) return false;
+      return saveVerifiedPoster(poster, sourceLabel);
+    }
+
+    if (groupSeasons.length) {
+      const fallback = SM.pickAnimeMainPosterFallback(item, groupSeasons, {
+        seriesPoster: groupSeasons[0]?.poster || "",
+        force: true,
+      });
+      if (fallback?.poster) {
+        const saved = await saveVerifiedPoster(fallback.poster, fallback.source || "grouped_season_chain");
+        if (saved) return true;
+      }
+    }
+
+    try {
+      const result = await SM.fetchSeriesMetadata(
+        { anilistId: Number(anilistId), source: "anilist" },
+        locale,
+        item.poster || ""
+      );
+      if (result?.seasons?.length) {
+        const repaired = repairAnimePosterFromSeasons(item, result.seasons, {
+          seriesPoster: result.series?.poster,
+          force: options.force,
+          persist: options.persist,
+          refreshCard: options.refreshCard,
+        });
+        if (repaired) {
+          SM?.persistResolvedAnilistIdOnItem?.(item, anilistId, resolved?.source || "repair");
+          console.warn("[anime-poster-repair]", {
+            title: item.title,
+            resolvedAnilistId: anilistId,
+            rootAnilistId: group?.rootAnilistId ?? anilistId,
+            currentPoster,
+            posterBroken: wasBroken,
+            seasonPostersFound: (result.seasons || [])
+              .filter((s) => s?.poster)
+              .map((s) => ({ seasonNumber: s.seasonNumber, poster: s.poster })),
+            chosenFallbackPoster: item.cardPoster || item.poster,
+            fallbackSource: "fetch_series_metadata",
+            saveResult: "saved",
+            cardRefreshed: options.refreshCard !== false,
+          });
+          return true;
+        }
+      }
+      return applyDirectAnilistPoster("direct_anilist");
+    } catch (error) {
+      console.warn("[anime-poster-repair] fetch failed:", item.title, error);
+      try {
+        return await applyDirectAnilistPoster("direct_anilist_fallback");
+      } catch (fallbackError) {
+        console.warn("[anime-poster-repair]", {
+          title: item.title,
+          resolvedAnilistId: anilistId,
+          rootAnilistId: group?.rootAnilistId ?? anilistId,
+          currentPoster,
+          posterBroken: wasBroken,
+          seasonPostersFound,
+          chosenFallbackPoster: null,
+          saveResult: `failed:${String(fallbackError?.message || fallbackError)}`,
+          cardRefreshed: false,
+        });
+        return false;
+      }
+    }
+  }
+
+  const animePosterRepairQueued = new Set();
+
+  function queueAnimePosterRepair(itemId, options = {}) {
+    if (!itemId || animePosterRepairQueued.has(itemId)) return;
+    const item = state.items.find((entry) => entry.id === itemId);
+    if (!options.force && !itemAnimePosterNeedsRepair(item)) return;
+    animePosterRepairQueued.add(itemId);
+    void repairAnimePosterForItem(item, options).finally(() => {
+      animePosterRepairQueued.delete(itemId);
+    });
+  }
+
+  function queueAnimePosterRepairsForList() {
+    for (const item of state.items) {
+      if (item.contentType === "anime" && itemAnimePosterNeedsRepair(item)) {
+        queueAnimePosterRepair(item.id);
+      }
+    }
+  }
+
+  const ANIME_GROUP_REPAIR_VERSION = 8;
+  const ANIME_GROUP_REPAIR_MAX_MERGES = 24;
+  const ANIME_GROUP_REPAIR_AUTO_RUN = false;
+  const ANIME_MAINTENANCE_DEFER_MS = 30_000;
+
+  function scheduleDeferredAnimeMaintenance() {
+    if (!ANIME_GROUP_REPAIR_AUTO_RUN) return;
+    window.setTimeout(() => {
+      void repairAnimeGroupedDuplicates(
+        state.activeListId || window.WatchlistAuth?.getProfile()
+      );
+    }, ANIME_MAINTENANCE_DEFER_MS);
+  }
+
+  async function restoreWatchlistFromLocalCache() {
+    const listId = state.activeListId || window.WatchlistAuth?.getProfile();
+    if (!listId) return { ok: false, reason: "no-list" };
+    const restored = await loadWatchlistCacheFirst(listId);
+    if (!restored) return { ok: false, reason: "no-cache" };
+    saveData();
+    saveWatched();
+    updateGenreOptions();
+    updateStats();
+    render();
+    if (window.WatchlistSync?.isConfigured()) {
+      const result = await window.WatchlistSync.pushSnapshot(
+        listId,
+        state.data,
+        state.watched,
+        listSyncMeta(listId),
+        buildCloudPushOptions(listId)
+      );
+      if (result?.ok) {
+        recordCloudPushSuccess(listId);
+        state.syncStatus = "saved";
+        updateStats();
+      }
+    }
+    return { ok: true, count: state.items.length };
+  }
+
+  async function probeWatchlistCacheRecovery(listId = state.activeListId) {
+    if (!listId || !window.WatchlistIdb || !window.WatchlistDialog?.confirm) {
+      return { offered: false };
+    }
+    try {
+      const cached = await window.WatchlistIdb.getWatchlistCache(listId);
+      const cachedCount =
+        cached?.itemCount ?? window.WatchlistIdb.countNestedItems?.(cached?.data) ?? 0;
+      const current = state.items.length;
+      if (!cachedCount || cachedCount < current + 3) {
+        return { offered: false, cachedCount, current };
+      }
+      const gap = cachedCount - current;
+      const confirmed = await window.WatchlistDialog.confirm(
+        t("sync.cacheRecoveryPrompt", { cached: cachedCount, current, gap }),
+        { title: t("sync.cacheRecoveryTitle") }
+      );
+      if (!confirmed) {
+        return { offered: true, declined: true, cachedCount, current };
+      }
+      const result = await restoreWatchlistFromLocalCache();
+      return {
+        offered: true,
+        restored: result.ok,
+        count: result.count,
+        cachedCount,
+        current,
+      };
+    } catch (err) {
+      console.warn("[sync] cache recovery probe failed:", err);
+      return { offered: false, error: err };
+    }
+  }
+
+  async function diagnoseWatchlistIntegrity() {
+    const listId = state.activeListId || window.WatchlistAuth?.getProfile();
+    let lsCount = state.items.length;
+    try {
+      lsCount = flattenWatchlist(loadWatchlist()).length;
+    } catch {
+      /* use in-memory count */
+    }
+    const meta = readSyncMeta(listId);
+    const cached = await window.WatchlistIdb?.getWatchlistCache?.(listId);
+    let remoteTitleCount = null;
+    let remoteUpdated = null;
+    if (window.WatchlistSync?.isConfigured?.() && listId) {
+      const stats = await window.WatchlistSync.fetchListStats(listId);
+      remoteTitleCount = stats?.title_count ?? null;
+      remoteUpdated = stats?.updated_at ?? null;
+    }
+    const report = {
+      listId,
+      inMemory: state.items.length,
+      localStorage: lsCount,
+      idbCacheCount: cached?.itemCount ?? null,
+      idbSavedAt: cached?.savedAt ? new Date(cached.savedAt).toISOString() : null,
+      syncMeta: meta,
+      remoteTitleCount,
+      remoteUpdated,
+    };
+    console.info("[watchlist-diagnose]", report);
+    return report;
+  }
+
+  function animeGroupRepairStorageKey(listId) {
+    return `watchlist-anime-group-repair:${listId}`;
+  }
+
+  function loadAnimeGroupRepairState(listId) {
+    const raw = localStorage.getItem(animeGroupRepairStorageKey(listId));
+    if (!raw) return null;
+    if (/^\d+$/.test(raw)) {
+      return { version: Number(raw), completed: true };
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  function saveAnimeGroupRepairState(listId, report) {
+    localStorage.setItem(animeGroupRepairStorageKey(listId), JSON.stringify(report));
+  }
+
+  function watchlistItemHasUserData(item) {
+    if (!item) return false;
+    const entry = state.watched[item.id];
+    if (!entry) return false;
+    if (entry.rating != null && entry.rating !== "") return true;
+    if (entry.note && String(entry.note).trim()) return true;
+    if (entry.watched || entry.inProgress) return true;
+    if (Array.isArray(entry.progress?.episodes) && entry.progress.episodes.length) {
+      return true;
+    }
+    return false;
+  }
+
+  function migrateChildWatchDataToParent(child, parent) {
+    const childEntry = state.watched[child.id];
+    if (!childEntry) return { ok: true, migrated: false };
+
+    if (Array.isArray(childEntry.progress?.episodes) && childEntry.progress.episodes.length) {
+      return { ok: false, migrated: false, reason: "episode_progress" };
+    }
+
+    let parentEntry = state.watched[parent.id];
+    if (!parentEntry || typeof parentEntry !== "object") {
+      parentEntry = {};
+    } else {
+      parentEntry = { ...parentEntry };
+    }
+
+    let migrated = false;
+    if (childEntry.rating != null && childEntry.rating !== "" && parentEntry.rating == null) {
+      parentEntry.rating = childEntry.rating;
+      migrated = true;
+    }
+    if (childEntry.note?.trim() && !String(parentEntry.note || "").trim()) {
+      parentEntry.note = childEntry.note;
+      migrated = true;
+    }
+
+    if (migrated) {
+      state.watched[parent.id] = parentEntry;
+      saveWatched();
+    }
+    delete state.watched[child.id];
+    saveWatched();
+    return { ok: true, migrated };
+  }
+
+  function countSplitDebugFranchiseFamiliesOnList() {
+    const debugItems = state.items.filter(itemMatchesAnimeGroupDebug);
+    const families = [
+      (title) => /naruto|shippuden|boruto/i.test(title),
+      (title) => /fairy tail|100 years quest/i.test(title),
+    ];
+    let splitFamilies = 0;
+    for (const matchFamily of families) {
+      const cards = debugItems.filter((item) => matchFamily(String(item.title || "")));
+      if (cards.length > 1) splitFamilies += 1;
+    }
+    return splitFamilies;
+  }
+
+  function buildAnimeGroupingRepairDiagnostics(animeItems, idToRoot, rootMapResult) {
+    const debugTitles = ANIME_GROUP_DEBUG_TITLES;
+    const rows = [];
+    for (const item of animeItems) {
+      const hay = String(item.title || "").toLowerCase();
+      if (!debugTitles.some((needle) => hay.includes(needle))) continue;
+      rows.push({
+        title: item.title,
+        watchlistItemId: item.id,
+        anilistId: item.anilistId,
+        rootAnilistId: idToRoot?.get?.(item.anilistId) ?? null,
+        cachedChain: window.WatchlistSeriesMetadata?.readCachedChainIdsFromSeriesMetadata?.(
+          item.anilistId
+        ),
+      });
+    }
+    return {
+      animeItemCount: animeItems.length,
+      rootMapSize: idToRoot?.size ?? 0,
+      unresolvedIds: rootMapResult?.unresolvedIds || [],
+      splitDebugFamilies: countSplitDebugFranchiseFamiliesOnList(),
+      debugRows: rows,
+    };
+  }
+
+  function countVisibleAnimeFranchiseDuplicateCards(animeItems, idToRoot) {
+    const byRoot = new Map();
+    for (const item of animeItems) {
+      const rootId = idToRoot?.get?.(item.anilistId);
+      if (!rootId) continue;
+      const key = String(rootId);
+      if (!byRoot.has(key)) byRoot.set(key, []);
+      byRoot.get(key).push(item);
+    }
+    let duplicateCards = 0;
+    for (const members of byRoot.values()) {
+      if (members.length > 1) duplicateCards += members.length - 1;
+    }
+    return duplicateCards;
+  }
+
+  function buildAnimeGroupFromRootMap(anilistId, rootAnilistId, chainIds = []) {
+    const id = Number(anilistId);
+    const rootId = Number(rootAnilistId);
+    const isRoot = id === rootId;
+    const childIndex = chainIds.indexOf(id);
+    let seasonNumber = null;
+    if (childIndex > 0) {
+      seasonNumber = childIndex + 1;
+    } else if (childIndex === 0) {
+      seasonNumber = 1;
+    } else if (!isRoot) {
+      seasonNumber = chainIds.length + 1;
+    }
+    const grouping = window.WatchlistSeriesMetadata?.computeAnimeGroupingDecision?.({
+      ok: true,
+      isRoot,
+      isFranchiseChild: !isRoot,
+    }) || {
+      shouldMerge: !isRoot,
+      groupRole: isRoot ? "root" : "child",
+      groupingDecision: isRoot ? "keep_as_parent" : "merge_into_root",
+      standaloneReason: isRoot ? "franchise_root_card" : "",
+    };
+    return {
+      ok: true,
+      anilistId: id,
+      rootAnilistId: rootId,
+      isRoot,
+      isFranchiseChild: !isRoot,
+      seasonNumber,
+      chainIds,
+      relationPath: chainIds,
+      relationType: "sequel_chain",
+      shouldMerge: grouping.shouldMerge,
+      groupRole: grouping.groupRole,
+      groupingDecision: grouping.groupingDecision,
+      standaloneReason: grouping.standaloneReason,
+    };
+  }
+
+  async function repairAnimeGroupedDuplicates(listId, options = {}) {
+    const SM = window.WatchlistSeriesMetadata;
+    const force = Boolean(options.force);
+    const empty = {
+      inspected: 0,
+      merged: 0,
+      skipped: 0,
+      needsReview: 0,
+      failed: 0,
+      candidateChildren: 0,
+      completed: false,
+      pairs: [],
+    };
+    if (!listId || !SM?.buildAnimeFranchiseRootMap) return empty;
+    if (!force && !ANIME_GROUP_REPAIR_AUTO_RUN) {
+      return { ...empty, disabled: true };
+    }
+
+    const prior = loadAnimeGroupRepairState(listId);
+    if (
+      !force &&
+      prior?.version === ANIME_GROUP_REPAIR_VERSION &&
+      prior?.completed === true
+    ) {
+      return { ...empty, skippedRun: true, prior };
+    }
+
+    if (options.debug) {
+      await debugAnimeGroupState();
+    }
+
+    if (SM.isAnilistRateLimited?.()) {
+      const rateLimited = {
+        ...empty,
+        rateLimited: true,
+        completed: false,
+        resumeAt: SM.getAnilistRateLimitResumeAt?.() || null,
+      };
+      if (!force) {
+        saveAnimeGroupRepairState(listId, {
+          version: ANIME_GROUP_REPAIR_VERSION,
+          completed: false,
+          at: Date.now(),
+          ...rateLimited,
+        });
+      }
+      console.warn("[anime-group-repair] paused — AniList rate limited", rateLimited);
+      return rateLimited;
+    }
+
+    const result = {
+      inspected: 0,
+      merged: 0,
+      skipped: 0,
+      needsReview: 0,
+      failed: 0,
+      candidateChildren: 0,
+      completed: false,
+      pairs: [],
+      franchiseClusters: [],
+    };
+
+    const resolveOpts = {
+      persist: false,
+      allowLive: false,
+      allowOffline: true,
+    };
+    const animeItems = [];
+    for (const item of state.items) {
+      if (item.contentType !== "anime") continue;
+      const syncId = SM?.resolveWatchlistItemAnilistIdSync?.(item);
+      const resolved = syncId
+        ? { anilistId: syncId, source: "stored" }
+        : await SM?.resolveWatchlistItemAnilistId?.(item, resolveOpts);
+      if (resolved?.anilistId) {
+        animeItems.push({ ...item, anilistId: Number(resolved.anilistId) });
+      } else if (itemMatchesAnimeGroupDebug(item)) {
+        result.failed += 1;
+        console.warn("[anime-group-repair]", {
+          action: "failed",
+          childTitle: item.title,
+          childWatchlistItemId: item.id,
+          reason: "anilist_id_unresolved",
+        });
+      }
+    }
+    if (resolveOpts.persist) saveData();
+
+    if (animeItems.length < 2) {
+      const splitFamilies = countSplitDebugFranchiseFamiliesOnList();
+      result.completed = splitFamilies === 0;
+      result.diagnostics = buildAnimeGroupingRepairDiagnostics(animeItems, new Map(), null);
+      if (!force) {
+        saveAnimeGroupRepairState(listId, {
+          version: ANIME_GROUP_REPAIR_VERSION,
+          completed: result.completed,
+          at: Date.now(),
+          ...result,
+        });
+      }
+      return result;
+    }
+
+    const rootMapResult = await SM.buildAnimeFranchiseRootMap(
+      animeItems.map((entry) => entry.anilistId),
+      { throttle: true }
+    );
+    if (rootMapResult.rateLimited) {
+      result.rateLimited = true;
+      result.completed = false;
+      result.unresolvedIds = rootMapResult.unresolvedIds || [];
+      if (!force) {
+        saveAnimeGroupRepairState(listId, {
+          version: ANIME_GROUP_REPAIR_VERSION,
+          completed: false,
+          at: Date.now(),
+          ...result,
+        });
+      }
+      console.warn("[anime-group-repair] paused mid-run — AniList rate limited", result);
+      return result;
+    }
+
+    const idToRoot = rootMapResult.idToRoot;
+    result.diagnostics = buildAnimeGroupingRepairDiagnostics(animeItems, idToRoot, rootMapResult);
+    if (result.diagnostics.splitDebugFamilies > 0 && result.diagnostics.debugRows.length) {
+      console.warn("[anime-group-repair] root map preview", result.diagnostics);
+    }
+
+    const franchiseGroups = new Map();
+    for (const item of animeItems) {
+      const rootAnilistId = idToRoot.get(item.anilistId);
+      if (!rootAnilistId) {
+        if (itemMatchesAnimeGroupDebug(item)) {
+          console.warn("[anime-group-repair]", {
+            action: "failed",
+            childTitle: item.title,
+            childAnilistId: item.anilistId,
+            reason: "franchise_root_unresolved",
+          });
+          result.failed += 1;
+        }
+        continue;
+      }
+      const chainIds = SM.readCachedChainIdsFromSeriesMetadata?.(rootAnilistId) || [];
+      const group = buildAnimeGroupFromRootMap(item.anilistId, rootAnilistId, chainIds);
+      const key = String(rootAnilistId);
+      if (!franchiseGroups.has(key)) {
+        const cachedRoot = SM.readFranchiseRootCacheEntry?.(rootAnilistId);
+        franchiseGroups.set(key, {
+          rootAnilistId,
+          rootTitle: cachedRoot?.rootTitle || "",
+          members: [],
+        });
+      }
+      franchiseGroups.get(key).members.push({
+        item,
+        anilistId: item.anilistId,
+        group,
+      });
+    }
+
+    const removedIds = [];
+
+    for (const franchiseGroup of franchiseGroups.values()) {
+      if (franchiseGroup.members.length < 2) continue;
+
+      result.franchiseClusters.push({
+        rootAnilistId: franchiseGroup.rootAnilistId,
+        rootTitle: franchiseGroup.rootTitle,
+        memberCount: franchiseGroup.members.length,
+        titles: franchiseGroup.members.map((m) => m.item.title),
+        watchlistItemIds: franchiseGroup.members.map((m) => m.item.id),
+      });
+
+      let primary =
+        franchiseGroup.members.find(
+          (member) => member.anilistId === franchiseGroup.rootAnilistId
+        ) || null;
+      if (!primary) {
+        franchiseGroup.members.sort(
+          (a, b) => (a.item.year ?? 9999) - (b.item.year ?? 9999)
+        );
+        primary = franchiseGroup.members[0];
+      }
+
+      for (const member of franchiseGroup.members) {
+        const child = member.item;
+        if (child.id === primary.item.id) continue;
+        if (removedIds.includes(child.id)) continue;
+
+        result.inspected += 1;
+        result.candidateChildren += 1;
+
+        const parent = primary.item;
+        const logBase = {
+          parentTitle: parent.title,
+          parentWatchlistItemId: parent.id,
+          parentAnilistId: franchiseGroup.rootAnilistId,
+          childTitle: child.title,
+          childWatchlistItemId: child.id,
+          childAnilistId: member.anilistId,
+          relationType: member.group?.relationType || "sequel_chain",
+          relationPath: member.group?.relationPath || [],
+        };
+
+        const hadUserData = watchlistItemHasUserData(child);
+        if (hadUserData) {
+          const migration = migrateChildWatchDataToParent(child, parent);
+          if (!migration.ok) {
+            child.groupedDuplicateReview = true;
+            result.needsReview += 1;
+            const pair = {
+              ...logBase,
+              action: "needs_review",
+              reason: migration.reason || "user_data",
+            };
+            result.pairs.push(pair);
+            console.warn("[anime-group-repair]", pair);
+            continue;
+          }
+        }
+
+        try {
+          deleteItem(child.id);
+          removedIds.push(child.id);
+          removeCardFromDom(child.id);
+          result.merged += 1;
+          const pair = {
+            ...logBase,
+            action: "merged",
+            reason: hadUserData ? "migrated_user_data" : "no_user_data",
+          };
+          result.pairs.push(pair);
+          console.warn("[anime-group-repair]", pair);
+          queueAnimePosterRepair(parent.id, { force: true });
+        } catch (error) {
+          result.failed += 1;
+          const pair = {
+            ...logBase,
+            action: "failed",
+            reason: String(error?.message || error),
+          };
+          result.pairs.push(pair);
+          console.warn("[anime-group-repair]", pair);
+        }
+
+        if (result.merged >= ANIME_GROUP_REPAIR_MAX_MERGES) {
+          console.warn("[anime-group-repair] stopped at safety cap", {
+            max: ANIME_GROUP_REPAIR_MAX_MERGES,
+            merged: result.merged,
+          });
+          break;
+        }
+      }
+      if (result.merged >= ANIME_GROUP_REPAIR_MAX_MERGES) break;
+    }
+
+    if (result.merged > 0) {
+      state.data = itemsToNested(state.items);
+      saveData();
+      updateGenreOptions();
+      updateStats();
+      render();
+    }
+
+    const pendingFranchiseCards = result.franchiseClusters.reduce((sum, cluster) => {
+      const mergedInCluster = result.pairs.filter(
+        (pair) =>
+          pair.parentAnilistId === cluster.rootAnilistId && pair.action === "merged"
+      ).length;
+      const needsReviewInCluster = result.pairs.filter(
+        (pair) =>
+          pair.parentAnilistId === cluster.rootAnilistId && pair.action === "needs_review"
+      ).length;
+      const handled = mergedInCluster + needsReviewInCluster + result.failed;
+      const expected = Math.max(0, cluster.memberCount - 1);
+      return sum + Math.max(0, expected - handled);
+    }, 0);
+
+    const visibleDuplicateCards = countVisibleAnimeFranchiseDuplicateCards(
+      animeItems.filter((entry) => !removedIds.includes(entry.id)),
+      idToRoot
+    );
+    const splitDebugFamilies = countSplitDebugFranchiseFamiliesOnList();
+
+    const allCandidatesHandled =
+      result.candidateChildren === 0 ||
+      result.merged + result.needsReview + result.failed >= result.candidateChildren;
+    const unresolvedCandidates =
+      result.candidateChildren > 0 && result.merged === 0 && result.needsReview === 0 && result.failed === 0;
+    const shouldComplete =
+      allCandidatesHandled &&
+      !unresolvedCandidates &&
+      pendingFranchiseCards === 0 &&
+      visibleDuplicateCards === 0 &&
+      splitDebugFamilies === 0 &&
+      !result.rateLimited &&
+      !(rootMapResult.unresolvedIds?.length > 0 && splitDebugFamilies > 0);
+
+    result.completed = shouldComplete;
+    if (result.completed && result.merged === 0 && splitDebugFamilies > 0) {
+      result.completed = false;
+    }
+
+    if (!force) {
+      saveAnimeGroupRepairState(listId, {
+        version: ANIME_GROUP_REPAIR_VERSION,
+        completed: result.completed,
+        at: Date.now(),
+        ...result,
+      });
+    }
+
+    if (result.candidateChildren > 0 && result.merged === 0) {
+      console.warn("[anime-group-repair] candidates found but nothing merged", result);
+    }
+    if (visibleDuplicateCards > 0 && result.merged === 0) {
+      console.warn("[anime-group-repair] franchise duplicate cards remain on list", {
+        visibleDuplicateCards,
+        unresolvedIds: rootMapResult.unresolvedIds || [],
+        franchiseClusters: result.franchiseClusters,
+        diagnostics: result.diagnostics,
+      });
+    }
+    if (splitDebugFamilies > 0 && result.merged === 0) {
+      console.warn("[anime-group-repair] known franchise families still split on list", {
+        splitDebugFamilies,
+        diagnostics: result.diagnostics,
+      });
+    }
+
+    return result;
+  }
+
+  async function runAnimeGroupingRepairNow(options = {}) {
+    const listId = state.activeListId || window.WatchlistAuth?.getProfile();
+    return repairAnimeGroupedDuplicates(listId, { ...options, force: true });
+  }
+
+  function healItemPosterUrl(item, { persist = false } = {}) {
+    if (!item) return false;
+    if (item.contentType === "anime") return false;
+    const WM = window.WatchlistMetadata;
+    let changed = false;
+
+    for (const field of ["poster", "cardPoster"]) {
+      const raw = item[field];
+      if (!raw) continue;
+      const healed = WM?.upgradePosterForStorage?.(raw, item) || raw;
+      if (healed && healed !== raw) {
+        const prev = raw;
+        item[field] = healed;
+        if (field === "poster" && item.cardPoster === prev) item.cardPoster = healed;
+        changed = true;
+      }
+    }
+
+    if (item.posterBroken && (item.poster || item.cardPoster)) {
+      const display = item.cardPoster || item.poster || "";
+      if (display && !display.includes("/extraLarge/")) {
+        item.posterBroken = false;
+        changed = true;
+      }
+    }
+
+    if (changed && persist) persistWatchlistLocalOnly();
+    return changed;
+  }
+
+  function healAllPosterUrls({ persist = false } = {}) {
+    let any = false;
+    for (const item of state.items) {
+      if (!itemPosterNeedsHeal(item)) continue;
+      if (healItemPosterUrl(item)) any = true;
+    }
+    if (any && persist) persistWatchlistLocalOnly();
+    return any;
+  }
+
+  function upgradeItemPosterInPlace(item, { persist = true } = {}) {
+    if (!item?.poster || item.contentType === "anime") return false;
+    const WM = window.WatchlistMetadata;
+    if (!WM?.isLowResPosterUrl?.(item.poster)) return false;
+    const upgraded = WM.upgradePosterForStorage(item.poster, item);
+    if (!upgraded || upgraded === item.poster) return false;
+    const prev = item.poster;
+    item.poster = upgraded;
+    if (item.cardPoster && item.cardPoster === prev) item.cardPoster = upgraded;
+    if (persist) persistWatchlistLocalOnly();
+    return true;
+  }
+
+  let posterUpgradeObserver = null;
+
+  function ensurePosterUpgradeObserver() {
+    if (posterUpgradeObserver || typeof IntersectionObserver === "undefined") return;
+    posterUpgradeObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const card = entry.target;
+          const item = state.items.find((row) => row.id === card.dataset.id);
+          if (!item) continue;
+          if (upgradeItemPosterInPlace(item)) {
+            setCardPoster(card, cardDisplayPoster(item));
+          }
+          posterUpgradeObserver.unobserve(card);
+        }
+      },
+      { rootMargin: "120px 0px", threshold: 0.05 }
+    );
+  }
+
+  function observeCardPosterUpgrade(card) {
+    if (!card) return;
+    ensurePosterUpgradeObserver();
+    if (!posterUpgradeObserver) return;
+    const item = state.items.find((row) => row.id === card.dataset.id);
+    if (!item?.poster || !window.WatchlistMetadata?.isLowResPosterUrl?.(item.poster)) return;
+    posterUpgradeObserver.observe(card);
   }
 
   function cardDisplayTitle(item) {
@@ -4175,7 +6181,31 @@
 
   function markCardPosterBroken(card, item) {
     if (!card) return;
-    if (item) item.posterBroken = true;
+    if (item) {
+      if (itemHasTrustedPoster(item)) {
+        if (isPosterOverwriteDebugEnabled() && isBulkPosterTraceTitle(item.title)) {
+          console.warn("[poster-overwrite-trace]", {
+            title: item.title,
+            functionName: "markCardPosterBroken",
+            itemId: item.id,
+            posterBefore: itemPosterUrl(item),
+            posterAfter: itemPosterUrl(item),
+            posterBrokenBefore: Boolean(item.posterBroken),
+            posterBrokenAfter: true,
+            updatePayloadKeys: ["posterBroken"],
+            payloadContainsPoster: false,
+            payloadContainsPosterBroken: true,
+            source: "card renderer image error",
+          });
+        }
+        return;
+      }
+      item.posterBroken = true;
+      saveData();
+      if (item.contentType === "anime" && !animePosterRepairFailed.has(item.id)) {
+        queueAnimePosterRepair(item.id, { force: true });
+      }
+    }
 
     const target = card.querySelector(
       ".card__poster, [data-poster-slot], .card__poster--broken"
@@ -4226,8 +6256,10 @@
       if (meta) {
         window.WatchlistMetadata?.applyTitleMetaFromDetails(meta, item, item.contentType);
         if (meta.poster) {
-          item.poster = meta.poster;
-          setCardPoster(card, meta.poster);
+          item.poster =
+            window.WatchlistMetadata?.upgradePosterForStorage?.(meta.poster, meta) ||
+            meta.poster;
+          setCardPoster(card, cardDisplayPoster(item));
         } else {
           markCardPosterBroken(card, item);
         }
@@ -4245,6 +6277,7 @@
     applyCardLayout();
     bindPosterErrorHandlers();
     if (shouldHydratePosters()) {
+      els.main.querySelectorAll(".card").forEach(observeCardPosterUpgrade);
       hydratePosters();
     }
   }
@@ -4364,7 +6397,7 @@
 
     const posterBlock = hasLink
       ? `<div class="card__media">${
-          item.posterBroken
+          item.posterBroken && !cardDisplayPoster(item)
             ? posterPlaceholderMarkup(true)
             : cardDisplayPoster(item)
               ? `<img class="card__poster" src="${escapeHtml(cardDisplayPoster(item))}" alt="" loading="lazy" />`
@@ -4508,6 +6541,7 @@
   }
 
   function render() {
+    healAllPosterUrls({ persist: true });
     updateClearFiltersButton();
     updateFilterFieldHighlights();
     updateGenreOptions();
@@ -4778,13 +6812,22 @@
 
   function searchPickFromButton(button) {
     if (!button) return null;
-    return {
+    const pick = {
       source: button.dataset.pickSource || "omdb",
       imdbId: button.dataset.imdbId || null,
       anilistId: button.dataset.anilistId ? Number(button.dataset.anilistId) : null,
       tmdbType: button.dataset.tmdbType || null,
       tmdbId: button.dataset.tmdbId ? Number(button.dataset.tmdbId) : null,
     };
+    const result = searchResultFromPick(pick);
+    if (result?.title) pick.title = result.title;
+    if (result?.year) pick.year = result.year;
+    if (result?.poster) pick.poster = result.poster;
+    if (result?.displayType) pick.displayType = result.displayType;
+    if (result?.originalLanguage) pick.originalLanguage = result.originalLanguage;
+    if (result?.originCountry) pick.originCountry = result.originCountry;
+    if (result?.genreIds) pick.genreIds = result.genreIds;
+    return pick;
   }
 
   function hasLookupId(pick) {
@@ -4880,7 +6923,11 @@
           result.title,
           "title-search__poster"
         );
-        const meta = [result.year, formatSearchResultType(result.type)]
+        const meta = [result.year, formatSearchResultType(
+          result.displayType ||
+            window.WatchlistMetadata?.displayTypeForSearchResult?.(result) ||
+            result.type
+        )]
           .filter(Boolean)
           .join(" · ");
         const pickLabel = isAdded
@@ -5088,7 +7135,10 @@
     const searchTabAnime = els.titleSearchType?.value === "anime";
     const defaultType =
       (searchTabAnime ? "anime" : null) ||
-      details.contentType ||
+      (details.anilistId ? "anime" : null) ||
+      window.WatchlistMetadata?.resolveContentTypeForWatchlistAdd?.(null, details, {
+        searchTypeFilter: els.titleSearchType?.value,
+      }) ||
       (state.type !== "all" ? state.type : "movies");
     const contentType = normalizeContentType(defaultType);
 
@@ -5205,7 +7255,10 @@
     const seen = new Set();
     state.searchResults = merged.filter((entry) => {
       if (!entry?.title) return false;
-      const key = entry.resultKey || `${entry.title}::${entry.year || ""}`;
+      const key =
+        entry.resultKey ||
+        window.WatchlistMetadata?.resultProviderIdentityKey?.(entry) ||
+        `${entry.title}::${entry.year || ""}::${entry.source || ""}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -5264,16 +7317,27 @@
     setTitleSearchStatus(t("search.loadingDetails"));
     try {
       const preferAnime = els.titleSearchType?.value === "anime";
-      let details = await window.WatchlistMetadata.getDetailsForPick(pick, {
-        searchQuery: state.searchQuery,
-        preferAnime,
-      });
-      if (preferAnime && details) {
-        details = await window.WatchlistMetadata.ensureAnimeDetails(details, {
-          pick,
-          preferAnime: true,
-          forceAnime: true,
+      let details = await window.WatchlistMetadata.resolveDetailsForWatchlistAdd?.(
+        { ...pick, title: searchResultFromPick(pick)?.title || pick.title },
+        preferAnime ? "anime" : null,
+        {
+          searchQuery: state.searchQuery,
+          searchTypeFilter: els.titleSearchType?.value,
+          pipeline: "search-pick",
+        }
+      );
+      if (!details?.title) {
+        details = await window.WatchlistMetadata.getDetailsForPick(pick, {
+          searchQuery: state.searchQuery,
+          preferAnime,
         });
+        if (preferAnime && details) {
+          details = await window.WatchlistMetadata.ensureAnimeDetails(details, {
+            pick,
+            preferAnime: true,
+            forceAnime: true,
+          });
+        }
       }
       if (!details?.title) {
         setTitleSearchStatus(t("search.loadFailed"), { error: true });
@@ -5323,18 +7387,31 @@
     renderTitleSearchResults();
 
     let details = null;
+    const searchResult = searchResultFromPick(pick);
     try {
       const preferAnime = els.titleSearchType?.value === "anime";
-      details = await window.WatchlistMetadata.getDetailsForPick(pick, {
-        searchQuery: state.searchQuery,
-        preferAnime,
-      });
-      if (preferAnime && details) {
-        details = await window.WatchlistMetadata.ensureAnimeDetails(details, {
-          pick,
-          preferAnime: true,
-          forceAnime: true,
+      details = await window.WatchlistMetadata.resolveDetailsForWatchlistAdd?.(
+        { ...pick, title: searchResult?.title },
+        preferAnime ? "anime" : null,
+        {
+          searchQuery: state.searchQuery,
+          searchTypeFilter: els.titleSearchType?.value,
+          pipeline: "search-direct",
+          posterRequired: preferAnime,
+        }
+      );
+      if (!details?.title) {
+        details = await window.WatchlistMetadata.getDetailsForPick(pick, {
+          searchQuery: state.searchQuery,
+          preferAnime,
         });
+        if (preferAnime && details) {
+          details = await window.WatchlistMetadata.ensureAnimeDetails(details, {
+            pick,
+            preferAnime: true,
+            forceAnime: true,
+          });
+        }
       }
     } catch (_) {}
 
@@ -5347,7 +7424,6 @@
 
     // Preserve the localized title from the search result (e.g. Arabic title)
     // instead of the English title returned by the details fetch.
-    const searchResult = searchResultFromPick(pick);
     if (searchResult?.title) {
       details = {
         ...details,
@@ -5359,10 +7435,15 @@
       };
     }
 
-    // Determine content type from TMDB / current filter
-    const rawType = details.contentType ||
-      (pick.tmdbType === "movie" ? "movies" : pick.type === "movie" ? "movies" : "tvSeries");
-    const contentType = normalizeContentType(rawType);
+    const WM = window.WatchlistMetadata;
+    const contentType =
+      WM?.resolveContentTypeForWatchlistAdd?.(pick, details, {
+        searchTypeFilter: els.titleSearchType?.value,
+      }) ||
+      normalizeContentType(
+        details.contentType ||
+          (pick.tmdbType === "movie" ? "movies" : pick.type === "movie" ? "movies" : "tvSeries")
+      );
 
     const suggested = window.WatchlistMetadata?.suggestGenres(
       details.genres,
@@ -5378,6 +7459,14 @@
       contentType,
       genre,
       secondaryGenres: suggested.slice(1),
+    });
+    WM?.logBulkVsSearchBuild?.("search-saved", {
+      title: item.title,
+      builtPoster: details.poster || "",
+      finalSavedPoster: item.poster || "",
+      anilistId: item.anilistId || details.anilistId || null,
+      link: item.link || "",
+      posterBroken: Boolean(item.posterBroken),
     });
 
     state.searchAddingKeys.delete(resultKey);
@@ -5411,33 +7500,52 @@
   }
 
   function applyRatingsFromDetails(details, item) {
-    if (details.anilistRating || details.source === "anilist" || details.anilistId) {
+    const fromAnilist =
+      details.anilistRating ||
+      details.source === "anilist" ||
+      details.anilistId;
+
+    if (fromAnilist) {
       if (details.anilistRating) {
         item.anilistRating = details.anilistRating;
-      } else if (details.rating) {
+      } else if (details.rating && !details.imdbId) {
         const score = parseScoreValue(details.rating);
         if (score != null) {
           item.anilistRating =
             score <= 10 ? String(Math.round(score * 10)) : String(Math.round(score));
         }
       }
-      return;
+    } else if (details.rating) {
+      item.imdbRating = details.rating;
     }
-    if (details.rating) item.imdbRating = details.rating;
+
+    if (!item.imdbRating && details.imdbId) {
+      const imdbRating = details.imdbRating || details.rating;
+      if (imdbRating) item.imdbRating = imdbRating;
+    }
+
+    if (details.imdbId) {
+      const id = String(details.imdbId).toLowerCase();
+      if (id.startsWith("tt")) {
+        item.imdbId = id;
+        if (!item.imdbLink) {
+          item.imdbLink = `https://www.imdb.com/title/${id}/`;
+        }
+      }
+    }
   }
 
   function buildItemFromSearchDetails(details, options) {
     const contentType = options.contentType;
-    const genre = normalizeGenre(options.genre);
-    const suggested = window.WatchlistMetadata?.suggestGenres(
-      details.genres,
-      STANDARD_GENRES,
-      contentType
-    );
+    const WM = window.WatchlistMetadata;
+    const suggested =
+      details.mergedGenres ||
+      WM?.suggestGenres(details.genres, STANDARD_GENRES, contentType) ||
+      [];
+    const genre = normalizeGenre(options.genre || suggested[0] || WM?.defaultGenreForContentType?.(contentType));
     const secondaryGenres = normalizeSecondaryGenres(
       genre,
-      options.secondaryGenres ??
-        suggested.filter((entry) => entry !== genre)
+      options.secondaryGenres ?? suggested.filter((entry) => entry !== genre)
     );
     const leads =
       details.actors?.length > 0
@@ -5465,7 +7573,23 @@
       item.imdbLink = `https://www.imdb.com/title/${details.imdbId}/`;
     }
 
-    if (details.poster) item.poster = details.poster;
+    if (details.poster) {
+      if (contentType === "anime" && details.anilistId) {
+        item.poster = String(details.poster).trim();
+        item.cardPoster = item.poster;
+        item.posterBroken = false;
+      } else {
+        item.poster =
+          window.WatchlistMetadata?.upgradePosterForStorage?.(details.poster, details) ||
+          details.poster;
+        item.posterBroken = false;
+      }
+    }
+    if (contentType === "anime" && details.anilistId) {
+      item.provider = "anilist";
+      item.providerId = String(details.anilistId);
+      item.posterBroken = false;
+    }
     applyRatingsFromDetails(details, item);
     if (details.year) item.year = details.year;
     window.WatchlistMetadata?.applyTitleMetaFromDetails(details, item, contentType);
@@ -5497,15 +7621,27 @@
 
     let resolvedDetails = details;
     if (contentType === "anime") {
-      resolvedDetails = await window.WatchlistMetadata.ensureAnimeDetails(details, {
+      resolvedDetails = await window.WatchlistMetadata.resolveDetailsForWatchlistAdd?.(
+        { anilistId: details.anilistId, title: details.title, year: details.year, source: "anilist" },
+        "anime",
+        { pipeline: "search-confirm", posterRequired: true }
+      ) || (await window.WatchlistMetadata.ensureAnimeDetails(details, {
         forceAnime: true,
-      });
+      }));
     }
 
     const item = buildItemFromSearchDetails(resolvedDetails, {
       contentType,
       genre,
       secondaryGenres: state.searchConfirmSecondary,
+    });
+    window.WatchlistMetadata?.logBulkVsSearchBuild?.("search-saved", {
+      title: item.title,
+      builtPoster: resolvedDetails?.poster || "",
+      finalSavedPoster: item.poster || "",
+      anilistId: item.anilistId || resolvedDetails?.anilistId || null,
+      link: item.link || "",
+      posterBroken: Boolean(item.posterBroken),
     });
 
     if (!item.title || !item.summary) {
@@ -5573,7 +7709,10 @@
 
     if (isBulk) {
       setBulkPasteError("");
-      els.bulkPasteInput?.focus();
+      resumeImportJobUiIfAny();
+      if (!els.bulkImportPreview || els.bulkImportPreview.hidden) {
+        els.bulkPasteInput?.focus();
+      }
     } else if (isSearch) {
       hideSearchConfirmStep();
       els.titleSearchInput?.focus();
@@ -5618,7 +7757,10 @@
   }
 
   function unlockItemModalBackground() {
-    if (!document.body.classList.contains("item-modal-scroll-lock")) return;
+    const hadLock =
+      document.body.classList.contains("item-modal-scroll-lock") ||
+      document.documentElement.classList.contains("item-modal-scroll-lock");
+    if (!hadLock) return;
     document.documentElement.classList.remove("item-modal-scroll-lock");
     document.body.classList.remove("item-modal-scroll-lock");
     const y = itemModalSavedScrollY;
@@ -5658,7 +7800,13 @@
   }
 
   function onItemModalDocumentTouchMove(event) {
-    if (els.modal.hidden || !isItemModalMobileSheet()) return;
+    if (!els.modal || !isItemModalMobileSheet()) return;
+    if (els.modal.hidden) {
+      unbindItemModalTouchBlock();
+      return;
+    }
+    if (!els.modal.contains(event.target)) return;
+
     const target = event.target;
     if (!target?.closest) return;
 
@@ -5666,28 +7814,96 @@
     if (
       target.closest(
         "#itemModal .title-search__scroll, #itemModal .modal__form, " +
-          "#itemModal .modal__bulk, #itemModal .title-search-confirm"
+          "#itemModal .modal__bulk, #itemModal .title-search-confirm, " +
+          "#itemModal .bulk-import-preview__table-wrap"
       )
     ) {
       return;
     }
 
-    // Block background / backdrop scroll chaining (iOS ignores overflow:hidden).
+    // Block backdrop scroll chaining (iOS ignores overflow:hidden).
     event.preventDefault();
   }
 
   function bindItemModalTouchBlock() {
-    if (itemModalTouchBlockBound) return;
+    if (itemModalTouchBlockBound || !els.modal) return;
     itemModalTouchBlockBound = true;
-    document.addEventListener("touchmove", onItemModalDocumentTouchMove, {
+    els.modal.addEventListener("touchmove", onItemModalDocumentTouchMove, {
       passive: false,
     });
   }
 
   function unbindItemModalTouchBlock() {
-    if (!itemModalTouchBlockBound) return;
+    if (!itemModalTouchBlockBound || !els.modal) return;
     itemModalTouchBlockBound = false;
-    document.removeEventListener("touchmove", onItemModalDocumentTouchMove);
+    els.modal.removeEventListener("touchmove", onItemModalDocumentTouchMove);
+  }
+
+  function modalIsVisible(el) {
+    return Boolean(el && el.hidden === false);
+  }
+
+  function titleDetailLocksPageScroll() {
+    if (window.WatchlistTitleDetail?.isOpen?.() !== true) return false;
+    return window.matchMedia("(max-width: 640px)").matches;
+  }
+
+  function updateBodyScrollLock() {
+    const itemModalOpen = modalIsVisible(els.modal);
+    const anyModalOpen = [
+      els.modal,
+      els.ratingModal,
+      els.bulkCorrectedTsvModal,
+      els.shareModal,
+      els.themeModal,
+      els.creditsModal,
+      els.changeCodeModal,
+      els.importShareModal,
+      els.importNewListModal,
+      els.manageListsModal,
+      els.createListModal,
+      els.moveListModal,
+    ].some(modalIsVisible);
+    const dialogOpen = isAppDialogOpen();
+    const detailLocksPage = titleDetailLocksPageScroll();
+    const detailOpen = window.WatchlistTitleDetail?.isOpen?.() === true;
+    const anyOpen = anyModalOpen || dialogOpen || detailLocksPage;
+
+    if (!itemModalOpen) {
+      unbindItemModalTouchBlock();
+      document.documentElement.classList.remove("item-modal-scroll-lock");
+      document.body.classList.remove("item-modal-scroll-lock");
+    }
+
+    if (!itemModalOpen && !detailOpen) {
+      const savedY = Math.abs(parseInt(document.body.style.top || "0", 10) || 0);
+      document.body.style.position = "";
+      document.body.style.top = "";
+      document.body.style.left = "";
+      document.body.style.right = "";
+      document.body.style.width = "";
+      if (savedY > 0) {
+        window.scrollTo(0, savedY);
+      }
+    }
+
+    if (anyOpen) {
+      document.documentElement.style.overflow = "hidden";
+      document.body.style.overflow = "hidden";
+    } else {
+      document.documentElement.classList.remove(
+        "td-scroll-lock",
+        "td-scroll-lock-desktop",
+        "item-modal-scroll-lock"
+      );
+      document.body.classList.remove(
+        "td-scroll-lock",
+        "td-scroll-lock-desktop",
+        "item-modal-scroll-lock"
+      );
+      document.documentElement.style.overflow = "";
+      document.body.style.overflow = "";
+    }
   }
 
   function bindItemModalViewport() {
@@ -5706,7 +7922,12 @@
     const confirm = document.getElementById("searchConfirmStep");
     if (confirm && !confirm.hidden) return confirm;
     if (els.form && !els.form.hidden) return els.form;
-    if (els.bulkAddPanel && !els.bulkAddPanel.hidden) return els.bulkAddPanel;
+    if (els.bulkAddPanel && !els.bulkAddPanel.hidden) {
+      if (els.bulkImportPreview && !els.bulkImportPreview.hidden) {
+        return els.bulkImportPreview;
+      }
+      return els.bulkAddPanel;
+    }
     return els.modalPanel?.querySelector(".title-search__scroll") || null;
   }
 
@@ -5930,25 +8151,11 @@
     setFormLinkPreview(null);
     resetSearchAddState();
     setBulkPasteError("");
+    hideBulkImportPreview();
     if (els.form) els.form.hidden = true;
     if (els.bulkAddPanel) els.bulkAddPanel.hidden = true;
     if (els.searchAddPanel) els.searchAddPanel.hidden = true;
     els.form.reset();
-  }
-
-  function updateBodyScrollLock() {
-    const anyOpen =
-      !els.modal.hidden ||
-      !els.ratingModal?.hidden ||
-      !els.shareModal?.hidden ||
-      !els.themeModal?.hidden ||
-      !els.changeCodeModal?.hidden ||
-      !els.importShareModal?.hidden ||
-      !els.importNewListModal?.hidden ||
-      !els.manageListsModal?.hidden ||
-      !els.createListModal?.hidden ||
-      !els.moveListModal?.hidden;
-    document.body.style.overflow = anyOpen ? "hidden" : "";
   }
 
   function setChangeCodeError(message) {
@@ -6082,6 +8289,37 @@
   function closeThemeModal() {
     if (!els.themeModal) return;
     els.themeModal.hidden = true;
+    updateBodyScrollLock();
+  }
+
+  async function openCreditsModal() {
+    if (!els.creditsModal) return;
+    els.creditsModal.hidden = false;
+    updateBodyScrollLock();
+    if (els.creditsDatasetMeta) {
+      els.creditsDatasetMeta.hidden = true;
+      els.creditsDatasetMeta.textContent = "";
+      try {
+        const meta = await window.WatchlistMetadata?.fetchAnimeIndexMeta?.();
+        const row = meta?.meta;
+        if (row?.active_version) {
+          els.creditsDatasetMeta.hidden = false;
+          els.creditsDatasetMeta.textContent = t("credits.indexVersion", {
+            version: row.active_version,
+            count: row.accepted_rows || "—",
+            updated: row.upstream_last_update || "—",
+          });
+        }
+      } catch {
+        /* offline or not configured */
+      }
+    }
+    els.creditsModal.querySelector(".btn--primary")?.focus();
+  }
+
+  function closeCreditsModal() {
+    if (!els.creditsModal) return;
+    els.creditsModal.hidden = true;
     updateBodyScrollLock();
   }
 
@@ -6737,12 +8975,110 @@
   }
 
   function findDuplicate(item, excludeId) {
+    const titleKey = normalizeTitleKey(item.title);
     return state.items.find(
       (i) =>
         i.contentType === item.contentType &&
-        i.title === item.title &&
+        normalizeTitleKey(i.title) === titleKey &&
         i.id !== excludeId
     );
+  }
+
+  function isTitleOnWatchlist(contentType, title) {
+    const titleKey = normalizeTitleKey(title);
+    return state.items.some(
+      (item) => item.contentType === contentType && normalizeTitleKey(item.title) === titleKey
+    );
+  }
+
+  function persistWatchlistLocalOnly() {
+    if (!canPersistActiveList()) return;
+    const { data } = storageKeys();
+    state.data = itemsToNested(state.items);
+    try {
+      localStorage.setItem(data, JSON.stringify(state.data));
+    } catch (err) {
+      console.warn("[app] local save failed:", err);
+    }
+    persistWatchlistCache();
+  }
+
+  function queueItemCloudUpsert(itemId) {
+    const listId = state.activeListId;
+    if (!listId || !itemId || !canPersistActiveList(listId)) return;
+    if (bulkImportCommitBusy) return;
+    if (!window.WatchlistSync?.isConfigured()) return;
+    if (window.WatchlistLifecycle && !window.WatchlistLifecycle.canWriteCloud()) return;
+
+    const prev = enrichmentUpsertTimers.get(itemId);
+    if (prev) clearTimeout(prev);
+    enrichmentUpsertTimers.set(
+      itemId,
+      setTimeout(async () => {
+        enrichmentUpsertTimers.delete(itemId);
+        if (window.WatchlistAuth?.getProfile() !== listId) return;
+        if (bulkImportCommitBusy) return;
+        state.data = itemsToNested(state.items);
+        const result = await window.WatchlistSync.pushRowsUpsert(
+          listId,
+          state.data,
+          state.watched,
+          [itemId],
+          listSyncMeta(listId)
+        );
+        if (result?.ok) {
+          writeSyncMeta(listId, { syncedAt: Date.now() });
+          state.syncStatus = "saved";
+          updateStats();
+        }
+      }, ENRICHMENT_UPSERT_DEBOUNCE_MS)
+    );
+  }
+
+  function persistEnrichmentSave(itemId) {
+    if (!canPersistActiveList()) return;
+    state.data = itemsToNested(state.items);
+    persistWatchlistLocalOnly();
+    queueItemCloudUpsert(itemId);
+  }
+
+  function setBulkCommitButtonLoading(loading, { current = 0, total = 0 } = {}) {
+    const btn = els.bulkImportConfirm;
+    if (!btn) return;
+    bulkImportCommitBusy = loading;
+    if (loading) {
+      btn.disabled = true;
+      btn.classList.add("btn--loading");
+      btn.setAttribute("aria-busy", "true");
+      btn.textContent =
+        total > 0
+          ? t("bulk.addingProgress", { current, total })
+          : t("btn.adding");
+    } else {
+      btn.classList.remove("btn--loading");
+      btn.removeAttribute("aria-busy");
+    }
+  }
+
+  function setBulkActionButtonLoading(button, loading, labelKey) {
+    if (!button) return;
+    if (loading) {
+      if (!button.dataset.defaultLabel) {
+        button.dataset.defaultLabel = button.textContent.trim();
+      }
+      button.disabled = true;
+      button.classList.add("btn--loading");
+      button.setAttribute("aria-busy", "true");
+      if (labelKey) button.textContent = t(labelKey);
+    } else {
+      button.disabled = false;
+      button.classList.remove("btn--loading");
+      button.removeAttribute("aria-busy");
+      if (button.dataset.defaultLabel) {
+        button.textContent = button.dataset.defaultLabel;
+        delete button.dataset.defaultLabel;
+      }
+    }
   }
 
   function saveItem(item) {
@@ -6771,6 +9107,7 @@
   }
 
   function deleteItem(id) {
+    cloudShrinkPushAllowed = true;
     state.items = state.items.filter((i) => i.id !== id);
     delete state.watched[id];
     saveWatched();
@@ -6802,7 +9139,7 @@
   }
 
   async function copyBulkTemplate() {
-    const template = window.WatchlistBulkTitles?.buildTemplate(STANDARD_GENRES);
+    const template = window.WatchlistBulkTitles?.buildTemplate();
     if (!template) return;
 
     try {
@@ -6817,84 +9154,1798 @@
     }
   }
 
-  async function handleBulkAdd() {
-    setBulkPasteError("");
+  let bulkProgressTimer = null;
 
-    const raw = els.bulkPasteInput?.value || "";
-    const parsed = window.WatchlistBulkTitles?.parseBulkPaste(raw, {
-      normalizeGenre,
-      resolveGenre: resolveBulkGenre,
-      normalizeKind,
-      parseLeads,
-      normalizeLink,
-      standardGenres: STANDARD_GENRES,
-    });
+  function formatImportRetryClock(retryAt) {
+    if (!retryAt) return "";
+    try {
+      return new Date(retryAt).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  }
 
-    if (!parsed?.ok) {
-      setBulkPasteError(parsed?.error || "Could not read that paste.");
+  function bulkImportPersistenceMessage(listId, job) {
+    const storeMsg =
+      window.WatchlistImportJobStore?.getPersistenceFailure?.(listId)?.userMessage || "";
+    if (storeMsg) return storeMsg;
+    if (job?.persistenceError) return job.persistenceError;
+    return "";
+  }
+
+  function updateBulkImportProgressLine(job, items) {
+    if (!els.bulkImportProgress) return;
+    const IJ = window.WatchlistImportJob;
+    const listId = state.activeListId || job?.listId;
+    const persistenceMessage = bulkImportPersistenceMessage(listId, job);
+    if (persistenceMessage || IJ?.isImportPersistenceBlocked?.(listId)) {
+      els.bulkImportProgress.hidden = false;
+      els.bulkImportProgress.textContent =
+        persistenceMessage || t("bulk.persistenceFailed");
+      return;
+    }
+    const stats = job?.stats || IJ?.recomputeStats(items);
+    const hasWaiting = (stats.waiting || 0) > 0;
+    const processing = job?.status === "processing" || IJ?.isWorkerActive?.();
+    const paused = job?.status === "paused" || job?.paused;
+    const showProgress = processing || paused || hasWaiting || job?.retryProgress;
+    els.bulkImportProgress.hidden = !showProgress;
+    if (!showProgress) return;
+
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      els.bulkImportProgress.textContent = t("bulk.queueOffline");
       return;
     }
 
-    let added = 0;
-    let skipped = 0;
-    const batchStart = Date.now();
-
-    for (const entry of parsed.items) {
-      const item = stampItemAddedAt(
-        {
-          ...entry,
-          id: makeId(entry.contentType, entry.genre, entry.title),
-        },
-        { at: batchStart + added }
+    if (paused) {
+      const persistenceMessage = bulkImportPersistenceMessage(
+        state.activeListId || job?.listId,
+        job
       );
+      els.bulkImportProgress.textContent =
+        persistenceMessage || t("bulk.jobPaused");
+      return;
+    }
 
-      if (findDuplicate(item, null)) {
-        skipped += 1;
+    const queueStatus = IJ?.formatQueueStatusLine?.(items, job);
+    const progress = queueStatus?.progress || IJ?.formatQueueProgress?.(items) || {
+      resolved: 0,
+      submitted: 0,
+      due: 0,
+    };
+
+    if (queueStatus?.kind === "anilist_paused") {
+      els.bulkImportProgress.textContent = t("bulk.anilistPaused", {
+        time: formatImportRetryClock(queueStatus.resumeAt),
+        matched: progress.matched ?? progress.resolved,
+        total: progress.submitted,
+        remaining: progress.remainingAnime ?? 0,
+      });
+      return;
+    }
+
+    if (job?.retryProgress) {
+      els.bulkImportProgress.textContent = t("bulk.retryProgress", {
+        label: job.retryProgress.label,
+        current: job.retryProgress.current,
+        total: job.retryProgress.total,
+      });
+      return;
+    }
+
+    if (job?.workerLabel) {
+      els.bulkImportProgress.textContent = job.workerLabel;
+      return;
+    }
+
+    if (queueStatus?.kind === "waiting" && queueStatus.detail) {
+      const { detail } = queueStatus;
+      els.bulkImportProgress.textContent = t("bulk.waitingRetryIn", {
+        provider: detail.provider || "provider",
+        seconds: detail.countdown || "…",
+        time: formatImportRetryClock(detail.nextRetryAt),
+        resolved: progress.resolved,
+        total: progress.submitted,
+      });
+      return;
+    }
+
+    if (queueStatus?.kind === "stalled" && progress.due > 0) {
+      els.bulkImportProgress.textContent = t("bulk.queueStalled", {
+        due: progress.due,
+        resolved: progress.resolved,
+        total: progress.submitted,
+      });
+      return;
+    }
+
+    if (processing || hasWaiting) {
+      if ((progress.remainingAnime ?? 0) > 0) {
+        els.bulkImportProgress.textContent = t("bulk.matchProgress", {
+          matched: progress.matched ?? progress.resolved,
+          total: progress.submitted,
+          remaining: progress.remainingAnime,
+        });
+      } else {
+        els.bulkImportProgress.textContent = t("bulk.queueResolved", {
+          resolved: progress.matched ?? progress.resolved,
+          total: progress.submitted,
+        });
+      }
+      return;
+    }
+
+    els.bulkImportProgress.textContent = "";
+  }
+
+  function ensureBulkProgressTicker() {
+    if (bulkProgressTimer) return;
+    bulkProgressTimer = window.setInterval(() => {
+      if (!els.bulkImportPreview || els.bulkImportPreview.hidden) {
+        window.clearInterval(bulkProgressTimer);
+        bulkProgressTimer = null;
+        return;
+      }
+      const listId = state.activeListId;
+      const IJ = window.WatchlistImportJob;
+      if (!listId || !IJ?.loadJob) return;
+      updateBulkImportProgressLine(IJ.loadJob(listId), IJ.loadItems(listId));
+    }, 1000);
+  }
+
+  function stopBulkProgressTicker() {
+    if (!bulkProgressTimer) return;
+    window.clearInterval(bulkProgressTimer);
+    bulkProgressTimer = null;
+  }
+
+  function bulkImportTypeLabel(contentType) {
+    if (contentType === "movies") return t("bulk.type.movies");
+    if (contentType === "tvSeries") return t("bulk.type.tvSeries");
+    if (contentType === "anime") return t("bulk.type.anime");
+    return "";
+  }
+
+  function bulkImportRowStatusLabel(row) {
+    const IJ = window.WatchlistImportJob;
+    if (IJ?.isTypeCorrectedFromAnime?.(row)) {
+      return t("bulk.status.corrected");
+    }
+    if (row?.franchiseMember && row.duplicateSourceTitle) {
+      if (row.groupedUnderWatchlistId) {
+        return t("bulk.willBeAddedInside", { parent: row.duplicateSourceTitle });
+      }
+      return t("bulk.groupedUnderParent", { parent: row.duplicateSourceTitle });
+    }
+    return bulkImportJobStatusLabel(row.status);
+  }
+
+  function bulkImportJobStatusLabel(status) {
+    const S = window.WatchlistImportJob?.STATUS;
+    if (!S) return status;
+    const map = {
+      [S.pending]: "bulk.status.pending",
+      [S.processing]: "bulk.status.processing",
+      [S.exact_match]: "bulk.status.exact",
+      [S.possible_match]: "bulk.status.possible",
+      [S.duplicate]: "bulk.status.duplicate",
+      [S.grouped]: "bulk.status.grouped",
+      [S.not_found]: "bulk.status.notFound",
+      [S.invalid]: "bulk.status.invalid",
+      [S.failed]: "bulk.status.failed",
+      [S.ready_to_add]: "bulk.status.ready",
+      [S.added]: "bulk.status.added",
+      [S.cancelled]: "bulk.status.cancelled",
+      [S.waiting_retry]: "bulk.status.waiting",
+      [S.ready]: "bulk.status.ready",
+      [S.needs_attention]: "bulk.status.failed",
+    };
+    return t(map[status] || "bulk.status.pending");
+  }
+
+  function bulkImportJobStatusClass(status, row) {
+    const S = window.WatchlistImportJob?.STATUS;
+    if (row && window.WatchlistImportJob?.isTypeCorrectedFromAnime?.(row)) {
+      return "bulk-import-preview__status--failed";
+    }
+    if (status === S?.ready_to_add || status === S?.exact_match) {
+      return "bulk-import-preview__status--ready";
+    }
+    if (status === S?.failed) return "bulk-import-preview__status--failed";
+    if (status === S?.not_found) return "bulk-import-preview__status--not-found";
+    if (status === S?.possible_match || status === S?.processing || status === S?.pending) {
+      return "bulk-import-preview__status--pending";
+    }
+    if (status === S?.duplicate || status === S?.grouped) {
+      return "bulk-import-preview__status--duplicate";
+    }
+    if (status === S?.invalid) {
+      return "bulk-import-preview__status--invalid";
+    }
+    if (status === S?.added) return "bulk-import-preview__status--added";
+    return "bulk-import-preview__status--pending";
+  }
+
+  function bulkImportRowClass(row) {
+    const S = window.WatchlistImportJob?.STATUS;
+    const parts = ["bulk-import-preview__row"];
+    if (row.id === bulkImportExpandedRowId) parts.push("is-expanded");
+    if (row.status === S?.failed) parts.push("bulk-import-preview__row--failed");
+    if (row.status === S?.not_found) parts.push("bulk-import-preview__row--not-found");
+    return parts.join(" ");
+  }
+
+  function bulkImportFilterLabel(filter) {
+    const map = {
+      all: "bulk.filter.all",
+      submitted: "bulk.jobSubmitted",
+      ready: "bulk.jobReady",
+      needs_attention: "bulk.jobNeedsAttention",
+      duplicates: "bulk.jobDuplicates",
+      processing: "bulk.jobProcessing",
+      waiting: "bulk.jobWaiting",
+      grouped: "bulk.jobGrouped",
+      corrected: "bulk.jobCorrected",
+      other: "bulk.jobOther",
+      added: "bulk.jobAdded",
+    };
+    return t(map[filter] || "bulk.filter.all");
+  }
+
+  function renderBulkImportStatBoxes(stats, activeFilter) {
+    const boxes = [
+      { filter: "submitted", label: "bulk.jobSubmitted", count: stats.submitted },
+      { filter: "ready", label: "bulk.jobReady", count: stats.ready },
+      {
+        filter: "needs_attention",
+        label: "bulk.jobNeedsAttention",
+        count: stats.needsAttention || 0,
+      },
+      {
+        filter: "grouped",
+        label: "bulk.jobGrouped",
+        count: stats.grouped || 0,
+      },
+      {
+        filter: "duplicates",
+        label: "bulk.jobDuplicates",
+        count: stats.duplicates || 0,
+      },
+      { filter: "added", label: "bulk.jobAdded", count: stats.added },
+    ];
+    if (stats.processing) {
+      boxes.push({
+        filter: "processing",
+        label: "bulk.jobProcessing",
+        count: stats.processing,
+      });
+    }
+    if (stats.waiting) {
+      boxes.push({
+        filter: "waiting",
+        label: "bulk.jobWaiting",
+        count: stats.waiting,
+      });
+    }
+    if (stats.other) {
+      boxes.push({
+        filter: "other",
+        label: "bulk.jobOther",
+        count: stats.other,
+      });
+    }
+    if (stats.corrected) {
+      boxes.push({
+        filter: "corrected",
+        label: "bulk.jobCorrected",
+        count: stats.corrected,
+      });
+    }
+    return boxes
+      .map(({ filter, label, count }) => {
+        const isActive =
+          activeFilter === filter ||
+          (filter === "submitted" && activeFilter === "all" && false);
+        return `
+      <button
+        type="button"
+        class="bulk-import-preview__stat${isActive ? " is-active" : ""}"
+        data-import-filter="${filter}"
+        aria-pressed="${isActive ? "true" : "false"}"
+      >
+        <span class="bulk-import-preview__stat-label">${escapeHtml(t(label))}</span>
+        <span class="bulk-import-preview__stat-value">${count}</span>
+      </button>`;
+      })
+      .join("");
+  }
+
+  function renderImportTypeCell(row, IJ) {
+    const needsAttention = IJ?.isPermanentUnresolved?.(row);
+    const typeNote = IJ?.formatTypeCorrectionNote?.(row) || "";
+    const label = bulkImportTypeLabel(row.contentType);
+    const isEditing = bulkImportTypeEditId === row.id;
+
+    if (isEditing && needsAttention) {
+      return `<td class="bulk-import-preview__cell-type" data-import-type-cell="${escapeHtml(row.id)}">
+        <div class="bulk-import-preview__type-edit">
+          <select class="bulk-import-preview__type-select" data-import-change-type="${escapeHtml(row.id)}" aria-label="${escapeHtml(t("bulk.changeType"))}">
+            <option value="movies"${row.contentType === "movies" ? " selected" : ""}>${escapeHtml(t("bulk.type.movies"))}</option>
+            <option value="tvSeries"${row.contentType === "tvSeries" ? " selected" : ""}>${escapeHtml(t("bulk.type.tvSeries"))}</option>
+            <option value="anime"${row.contentType === "anime" ? " selected" : ""}>${escapeHtml(t("bulk.type.anime"))}</option>
+          </select>
+          <div class="bulk-import-preview__type-edit-actions">
+            <button type="button" class="btn btn--ghost btn--sm" data-import-apply-type="${escapeHtml(row.id)}">${escapeHtml(t("bulk.changeTypeApply"))}</button>
+            <button type="button" class="btn btn--ghost btn--sm" data-import-cancel-type="${escapeHtml(row.id)}">${escapeHtml(t("btn.cancel"))}</button>
+          </div>
+        </div>
+      </td>`;
+    }
+
+    const typeBtn = needsAttention
+      ? `<button type="button" class="bulk-import-preview__type-btn" data-import-type-toggle="${escapeHtml(row.id)}">${escapeHtml(label)}</button>`
+      : `<span>${escapeHtml(label)}</span>`;
+    const note = typeNote
+      ? `<span class="bulk-import-preview__type-note">${escapeHtml(typeNote)}</span>`
+      : "";
+    return `<td class="bulk-import-preview__cell-type" data-import-type-cell="${escapeHtml(row.id)}">${typeBtn}${note}</td>`;
+  }
+
+  function replaceImportTypeCell(rowId, item) {
+    if (!els.bulkImportTableBody || !item || !rowId) return;
+    const IJ = window.WatchlistImportJob;
+    const row = els.bulkImportTableBody.querySelector(
+      `[data-import-row="${CSS.escape(rowId)}"]`
+    );
+    if (!row) return;
+    const typeCell = row.querySelector(".bulk-import-preview__cell-type");
+    if (!typeCell) return;
+    const tpl = document.createElement("template");
+    tpl.innerHTML = renderImportTypeCell(item, IJ).trim();
+    const newCell = tpl.content.firstElementChild;
+    if (newCell) typeCell.replaceWith(newCell);
+  }
+
+  function openImportTypeEditor(itemId) {
+    if (!itemId) return;
+    bulkImportTypeEditId = itemId;
+    const listId = state.activeListId;
+    const IJ = window.WatchlistImportJob;
+    if (!listId || !IJ) return;
+    const item = IJ.loadItems(listId)?.[itemId];
+    if (!item) return;
+    replaceImportTypeCell(itemId, item);
+    const select = els.bulkImportTableBody?.querySelector(
+      `[data-import-change-type="${CSS.escape(itemId)}"]`
+    );
+    select?.focus?.();
+  }
+
+  function closeImportTypeEditor(itemId) {
+    bulkImportTypeEditId = null;
+    const listId = state.activeListId;
+    const IJ = window.WatchlistImportJob;
+    if (!listId || !IJ || !itemId) return;
+    const item = IJ.loadItems(listId)?.[itemId];
+    if (item) replaceImportTypeCell(itemId, item);
+  }
+
+  function restoreImportTypeEditorIfOpen(items) {
+    if (!bulkImportTypeEditId || !items) return;
+    const item = items[bulkImportTypeEditId];
+    if (item) replaceImportTypeCell(bulkImportTypeEditId, item);
+  }
+
+  function renderImportRowExpandedDetail(row, IJ) {
+    const S = IJ?.STATUS;
+    const parts = [];
+    if (IJ?.isDuplicateRow?.(row)) {
+      const dupLabel = IJ.formatDuplicateCategory?.(row.duplicateCategory) || row.error;
+      const onWatchlist = row.duplicateCategory === IJ?.DUPLICATE_CATEGORY?.on_watchlist;
+      parts.push(
+        `<p><strong>${escapeHtml(t("bulk.dupHeading"))}</strong> ${escapeHtml(dupLabel)}</p>`
+      );
+      if (row.duplicateSourceTitle) {
+        parts.push(
+          `<p>${escapeHtml(t("bulk.dupMatchedAgainst"))}: ${escapeHtml(ltr(row.duplicateSourceTitle))}</p>`
+        );
+      }
+      const provider =
+        row.lastProvider || IJ?.providerForItem(row) || row.providerKey || "—";
+      parts.push(
+        `<p>${escapeHtml(t("bulk.dupProvider"))}: ${escapeHtml(provider)}${row.providerKey ? ` · ${escapeHtml(row.providerKey)}` : ""}</p>`
+      );
+      parts.push(
+        `<p>${escapeHtml(t("bulk.dupWatchlistState"))}: ${escapeHtml(
+          onWatchlist ? t("bulk.dupOnWatchlist") : t("bulk.dupImportOnly")
+        )}</p>`
+      );
+    }
+
+    const originalType = row.originalType || row.contentType;
+    const correctedType = row.correctedType;
+    if (originalType || correctedType) {
+      parts.push(
+        `<p>${escapeHtml(t("bulk.typeOriginal"))}: ${escapeHtml(bulkImportTypeLabel(originalType))}` +
+          (correctedType
+            ? ` · ${escapeHtml(t("bulk.typeCorrected"))}: ${escapeHtml(bulkImportTypeLabel(correctedType))}`
+            : "") +
+          `</p>`
+      );
+    }
+
+    if (row.typeConflictAmbiguous || row.typeConflictAnime || row.typeConflictTv) {
+      const conflictLines = [];
+      parts.push(`<p><strong>Imported type:</strong> ${escapeHtml(bulkImportTypeLabel(originalType))}</p>`);
+      if (row.typeConflictAnime) {
+        const a = row.typeConflictAnime;
+        const lookup = a.lookupState || (a.anilistId ? "found" : "not found");
+        conflictLines.push(
+          `<li><strong>Anime candidate:</strong> ${escapeHtml(lookup)}` +
+            ` · ${escapeHtml(a.provider || "AniList")}` +
+            (a.anilistId ? ` · AniList ${escapeHtml(String(a.anilistId))}` : "") +
+            (a.score != null ? ` · score ${escapeHtml(String(a.score))}` : "") +
+            (a.title ? ` · ${escapeHtml(ltr(a.title))}` : "") +
+            `</li>`
+        );
+      } else {
+        conflictLines.push(`<li><strong>Anime candidate:</strong> not found</li>`);
+      }
+      if (row.typeConflictTv) {
+        const tv = row.typeConflictTv;
+        conflictLines.push(
+          `<li><strong>TMDb candidate:</strong> found` +
+            (tv.tmdbId ? ` · TMDb ${escapeHtml(String(tv.tmdbId))}` : "") +
+            (tv.score != null ? ` · score ${escapeHtml(String(tv.score))}` : "") +
+            (tv.title ? ` · ${escapeHtml(ltr(tv.title))}` : "") +
+            `</li>`
+        );
+      }
+      if (conflictLines.length) {
+        const decision =
+          row.typeConflictReason === "anime_lookup_waiting"
+            ? "Retry anime lookup"
+            : "Review needed";
+        parts.push(
+          `<p><strong>Type conflict</strong> · ${escapeHtml(row.typeConflictReason || "anime_tv_type_conflict")}</p>` +
+            `<ul>${conflictLines.join("")}</ul>` +
+            `<p><strong>Decision:</strong> ${escapeHtml(decision)}</p>`
+        );
+      }
+    }
+
+    if (IJ?.isPermanentUnresolved?.(row)) {
+      parts.push(
+        `<p class="bulk-import-preview__type-hint">${escapeHtml(t("bulk.changeTypeHint"))}</p>`
+      );
+    }
+
+    const history = (row.retryHistory || [])
+      .slice(-4)
+      .map(
+        (h) =>
+          `<li>${escapeHtml(h.message || h.kind || "")}${h.retries ? ` (${h.retries})` : ""}</li>`
+      )
+      .join("");
+    if (row.error && !IJ?.isDuplicateRow?.(row)) {
+      parts.push(`<p>${escapeHtml(row.error)}</p>`);
+    }
+    if (history) parts.push(`<ul>${history}</ul>`);
+    return parts.join("");
+  }
+
+  function updateImportPreviewChrome(job, items, stats, allRows) {
+    const IJ = window.WatchlistImportJob;
+    const S = IJ?.STATUS;
+    const processing = job.status === "processing" || IJ?.isWorkerActive?.();
+    const paused = job.status === "paused" || job.paused;
+    const hasWaiting = (stats.waiting || 0) > 0;
+    const needsAttention = stats.needsAttention || 0;
+    const eligibleCount = IJ?.countCommitEligible?.(items) ?? stats.ready ?? 0;
+    const canAdd = eligibleCount > 0 && !bulkImportCommitBusy;
+    const queueProgress = IJ?.formatQueueProgress?.(allRows) || {
+      due: 0,
+      waiting: hasWaiting ? stats.waiting : 0,
+    };
+
+    updateBulkImportProgressLine(job, items);
+    if (hasWaiting || processing) ensureBulkProgressTicker();
+    else stopBulkProgressTicker();
+
+    if (els.bulkImportContinue) {
+      const queued = stats.processing || 0;
+      const showContinue =
+        !paused &&
+        !bulkImportWorkerBusy &&
+        typeof navigator !== "undefined" &&
+        navigator.onLine !== false &&
+        ((queued > 0 && !processing) ||
+          hasWaiting ||
+          queueProgress.due > 0);
+      els.bulkImportContinue.hidden = !showContinue;
+      els.bulkImportContinue.disabled = bulkImportWorkerBusy;
+    }
+
+    if (els.bulkImportToolbar) els.bulkImportToolbar.hidden = true;
+    if (els.bulkImportResolve) {
+      els.bulkImportResolve.hidden = needsAttention === 0;
+      els.bulkImportResolve.disabled = bulkImportWorkerBusy;
+    }
+    if (els.bulkImportAdvanced) {
+      els.bulkImportAdvanced.hidden = needsAttention === 0 && !hasWaiting;
+    }
+
+    if (els.bulkImportConfirm && !bulkImportCommitBusy) {
+      els.bulkImportConfirm.disabled = !canAdd;
+      els.bulkImportConfirm.setAttribute("aria-disabled", String(!canAdd));
+      els.bulkImportConfirm.textContent =
+        eligibleCount > 0
+          ? t("bulk.addVerifiedCount", { count: eligibleCount })
+          : t("bulk.addVerified");
+      els.bulkImportConfirm.title = canAdd ? "" : t("bulk.verifyBeforeAdd");
+    }
+  }
+
+  function renderImportJobPreview(job, items, { preserveTypeEditor = false } = {}) {
+    if (!job || !els.bulkImportSummary || !els.bulkImportTableBody) return;
+    const IJ = window.WatchlistImportJob;
+    IJ._helpers.isOnList = isTitleOnWatchlist;
+    IJ._helpers.getWatchlistAnime = getWatchlistAnimeItems;
+    if (IJ.healDuplicateClassifications?.(items)) {
+      job.stats = IJ.recomputeStats(items, job);
+    }
+    const stats = job.stats || IJ?.recomputeStats(items);
+    const S = IJ?.STATUS;
+    const allRows = Object.values(items || {});
+    let filteredRows = IJ?.filterRowsByPreviewFilter(allRows, bulkImportStatusFilter) || allRows;
+    filteredRows = IJ?.filterRowsBySearch?.(filteredRows, bulkImportSearchQuery) || filteredRows;
+    const rows = IJ?.sortPreviewRows(filteredRows) || filteredRows;
+
+    els.bulkImportSummary.innerHTML = renderBulkImportStatBoxes(
+      stats,
+      bulkImportStatusFilter
+    );
+
+    if (els.bulkImportAccounting) {
+      const accountingLine = IJ?.formatAccountingLine?.(stats) || "";
+      els.bulkImportAccounting.hidden = !accountingLine;
+      els.bulkImportAccounting.textContent = accountingLine;
+    }
+
+    const persistenceMessage = bulkImportPersistenceMessage(
+      state.activeListId || job?.listId,
+      job
+    );
+    if (els.bulkImportPersistenceError) {
+      els.bulkImportPersistenceError.hidden = !persistenceMessage;
+      els.bulkImportPersistenceError.textContent = persistenceMessage || "";
+    }
+
+    const filterLabel = bulkImportFilterLabel(
+      bulkImportStatusFilter === "all" ? "all" : bulkImportStatusFilter
+    );
+    const headingText =
+      bulkImportStatusFilter === "all"
+        ? t("bulk.filter.allCount", { count: rows.length })
+        : t("bulk.filter.statusCount", { status: filterLabel, count: rows.length });
+
+    if (els.bulkImportFilterHeading) {
+      els.bulkImportFilterHeading.textContent = headingText;
+    }
+    if (els.bulkImportSearchClear) {
+      els.bulkImportSearchClear.hidden = !String(bulkImportSearchQuery || "").trim();
+    }
+
+    if (preserveTypeEditor) {
+      updateImportPreviewChrome(job, items, stats, allRows);
+      restoreImportTypeEditorIfOpen(items);
+      return;
+    }
+
+    els.bulkImportTableBody.innerHTML = rows
+      .map((row) => {
+        const statusLabel = bulkImportRowStatusLabel(row);
+        const statusClass = bulkImportJobStatusClass(row.status, row);
+        const matchTitle = row.details?.title
+          ? `<span class="bulk-import-preview__match">${escapeHtml(ltr(row.details.title))}</span>`
+          : "";
+        const reason = IJ?.humanizeFailureReason(row) || row.error || "";
+        const provider =
+          row.lastProvider ||
+          IJ?.providerForItem(row) ||
+          (row.status === S?.ready_to_add || row.status === S?.added
+            ? IJ?.providerForItem(row)
+            : "");
+        const yearText =
+          row.year != null && Number.isFinite(row.year)
+            ? escapeHtml(String(row.year))
+            : escapeHtml(t("bulk.yearUnknown"));
+        const isWaiting = IJ?.isWaitingItem?.(row);
+        const isQueued =
+          row.status === S?.pending && !isWaiting && row.status !== S?.processing;
+        const needsAttention = IJ?.isPermanentUnresolved?.(row);
+        const showReason =
+          needsAttention || isWaiting || isQueued || row.status === S?.invalid;
+        let reasonCell = "—";
+        if (showReason) {
+          if (isQueued && !needsAttention) {
+            reasonCell = escapeHtml(t("bulk.status.matching"));
+          } else if (isWaiting && !needsAttention && IJ?.formatWaitingItemDetail) {
+            const detail = IJ.formatWaitingItemDetail(row);
+            const parts = [
+              t("bulk.waitingRowDetail", {
+                provider: detail.provider || "—",
+                retries: detail.retries,
+                reason: detail.reason || "—",
+              }),
+            ];
+            if (detail.countdown) {
+              parts.push(t("bulk.waitingRowCountdown", { seconds: detail.countdown }));
+            }
+            if (detail.nextRetryAt) {
+              parts.push(formatImportRetryClock(detail.nextRetryAt));
+            }
+            reasonCell = escapeHtml(parts.join(" · "));
+          } else {
+            reasonCell = escapeHtml(reason || "—");
+          }
+        } else if (row.franchiseMember && row.duplicateSourceTitle) {
+          reasonCell = escapeHtml(
+            row.groupedUnderWatchlistId
+              ? t("bulk.willBeAddedInside", { parent: row.duplicateSourceTitle })
+              : t("bulk.groupedUnderParent", { parent: row.duplicateSourceTitle })
+          );
+        } else if (row.details?.title) {
+          reasonCell = escapeHtml(t("bulk.matchedOk"));
+        }
+        const expanded = row.id === bulkImportExpandedRowId;
+        const detailBody = expanded ? renderImportRowExpandedDetail(row, IJ) : "";
+        const detailRow =
+          expanded && detailBody
+            ? `<tr class="bulk-import-preview__row-detail"><td colspan="6"><div class="bulk-import-preview__row-detail-body">${detailBody}</div></td></tr>`
+            : "";
+
+        const typeCorrectionNote = IJ?.formatTypeCorrectionNote?.(row);
+        const titleExtra = typeCorrectionNote
+          ? `<span class="bulk-import-preview__type-note bulk-import-preview__type-note--inline">${escapeHtml(typeCorrectionNote)}</span>`
+          : "";
+
+        return `
+          <tr class="${bulkImportRowClass(row)}" data-import-row="${escapeHtml(row.id)}" tabindex="0" role="button" aria-expanded="${expanded ? "true" : "false"}">
+            <td class="bulk-import-preview__cell-title">${escapeHtml(ltr(row.title || "—"))}${matchTitle}${titleExtra}</td>
+            <td>${yearText}</td>
+            ${renderImportTypeCell(row, IJ)}
+            <td><span class="bulk-import-preview__status ${statusClass}">${escapeHtml(statusLabel)}</span></td>
+            <td>${escapeHtml(provider || "—")}</td>
+            <td class="bulk-import-preview__cell-reason">${reasonCell}</td>
+          </tr>
+          ${detailRow}
+        `;
+      })
+      .join("");
+
+    restoreImportTypeEditorIfOpen(items);
+
+    updateImportPreviewChrome(job, items, stats, allRows);
+  }
+
+  function queueCastBackfillForImportAdds(listId) {
+    const IJ = window.WatchlistImportJob;
+    const items = IJ?.loadItems?.(listId);
+    if (!items) return;
+    const addedStatus = IJ?.STATUS?.added;
+    for (const row of Object.values(items)) {
+      if (row.status !== addedStatus || !row.watchlistItemId) continue;
+      const watchItem = state.items.find((entry) => entry.id === row.watchlistItemId);
+      if (!watchItem || watchItem.leads?.length) continue;
+      if (!watchItem.tmdbId && !watchItem.imdbId && !watchItem.anilistId) continue;
+      queueImportedItemEnrichment(row.watchlistItemId);
+    }
+  }
+
+  function isImportAuditDebugEnabled() {
+    try {
+      return localStorage.getItem("watchlist-debug-import-audit") === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function probePosterImageLoad(url) {
+    return new Promise((resolve) => {
+      const trimmed = String(url || "").trim();
+      if (!trimmed) {
+        resolve({ result: "no_url", url: "", errorUrl: "" });
+        return;
+      }
+      const img = new Image();
+      let settled = false;
+      const finish = (loaded) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        img.onload = null;
+        img.onerror = null;
+        img.src = "";
+        resolve({
+          result: loaded ? "loaded" : "error",
+          url: trimmed,
+          errorUrl: loaded ? "" : trimmed,
+        });
+      };
+      const timer = setTimeout(() => finish(false), 8000);
+      img.onload = () => finish(true);
+      img.onerror = () => finish(false);
+      img.src = trimmed;
+    });
+  }
+
+  async function logBulkPosterRootCause(row, rootCause, item, extra = {}) {
+    if (!isBulkPosterTraceTitle(row?.title || rootCause?.title)) return null;
+    const saved = state.items.find((entry) => entry.id === item?.id) || item;
+    const displayUrl = saved ? cardDisplayPoster(saved) : "";
+    const probe = displayUrl
+      ? await probePosterImageLoad(displayUrl)
+      : { result: "no_url", url: "", errorUrl: "" };
+    let failingStage = rootCause?.failingStage || "";
+    if (!failingStage) {
+      if (!rootCause?.liveCoverFetchRan) failingStage = "A";
+      else if (!rootCause?.rawCoverImageExtraLarge && !rootCause?.rawCoverImageLarge && !rootCause?.rawCoverImageMedium) {
+        failingStage = "B";
+      } else if (!rootCause?.selectedPosterBeforeFinalBuild) failingStage = "G";
+      else if (!item?.poster) failingStage = "C";
+      else if (!saved?.poster) failingStage = "D";
+      else if (displayUrl && saved?.poster && displayUrl !== saved.poster) failingStage = "F";
+      else if (probe.result === "error") failingStage = "G";
+      else if (!displayUrl && saved?.poster) failingStage = "E";
+    }
+    return {
+      title: rootCause?.title || row?.title || "",
+      importedType: rootCause?.importedType || row?.contentType || "",
+      resolvedAnilistId: rootCause?.resolvedAnilistId ?? row?.pick?.anilistId ?? null,
+      providerCacheKey: rootCause?.providerCacheKey || "",
+      providerCachePosterBeforeFetch: rootCause?.providerCachePosterBefore || "",
+      providerCacheCoverExtraLargeBefore: rootCause?.providerCacheCoverExtraLargeBefore || "",
+      providerCacheCoverLargeBefore: rootCause?.providerCacheCoverLargeBefore || "",
+      providerCacheCoverMediumBefore: rootCause?.providerCacheCoverMediumBefore || "",
+      liveCoverFetchRan: rootCause?.liveCoverFetchRan ? "yes" : "no",
+      liveAnilistOperation: rootCause?.liveAnilistOperation || "",
+      liveAnilistRequestUrl: rootCause?.liveAnilistRequestUrl || "",
+      liveAnilistResponseStatus: rootCause?.liveAnilistResponseStatus ?? null,
+      rawCoverImageExtraLarge: rootCause?.rawCoverImageExtraLarge || "",
+      rawCoverImageLarge: rootCause?.rawCoverImageLarge || "",
+      rawCoverImageMedium: rootCause?.rawCoverImageMedium || "",
+      selectedPosterBeforeFinalBuild: rootCause?.selectedPosterBeforeFinalBuild || "",
+      builderFunction: rootCause?.builderFunction || "buildItemFromSearchDetails",
+      finalItemPosterBeforeInsert: item?.poster || rootCause?.finalItemPosterBeforeInsert || "",
+      finalItemPosterBroken: Boolean(item?.posterBroken),
+      rowSavedToLocalStatePoster: saved?.poster || "",
+      rowSavedToSupabasePoster: extra.rowSavedToSupabasePoster ?? saved?.poster ?? "",
+      cardRendererImageSrc: displayUrl || "",
+      imageLoadResult: probe.result,
+      imageLoadFailedUrl: probe.errorUrl || "",
+      failingStage,
+      ...extra,
+    };
+  }
+
+  async function logSearchVsBulkPoster(row, bulkItem, bulkDetails, bulkRootCause) {
+    if (!/fairy tail/i.test(String(row?.title || ""))) return;
+    const WM = window.WatchlistMetadata;
+    const searchDetails = await WM.resolveDetailsForWatchlistAdd(row.pick, "anime", {
+      searchQuery: row.title,
+      pipeline: "search-dry-run",
+      posterRequired: false,
+      verifyPoster: false,
+    });
+    const searchPicked = await WM.selectLoadableAnilistPoster(searchDetails, {
+      skipProbe: false,
+    });
+    const searchPoster =
+      searchPicked.poster ||
+      searchDetails?.poster ||
+      "";
+    const searchItem = buildItemFromSearchDetails(
+      { ...searchDetails, poster: searchPoster },
+      {
+        contentType: "anime",
+        genre: bulkItem?.genre || "Action",
+        secondaryGenres: bulkItem?.secondaryGenres || [],
+      }
+    );
+    console.warn("[search-vs-bulk-poster]", {
+      title: row.title,
+      anilistId: bulkItem?.anilistId || searchItem?.anilistId || null,
+      searchAddPoster: searchItem?.poster || "",
+      bulkAddPoster: bulkItem?.poster || "",
+      searchAddBuilderFunction: "buildItemFromSearchDetails",
+      bulkAddBuilderFunction: bulkRootCause?.builderFunction || "buildItemFromSearchDetails",
+      searchAddCoverExtraLarge: searchDetails?.coverImageExtraLarge || "",
+      searchAddCoverLarge: searchDetails?.coverImageLarge || "",
+      searchAddCoverMedium: searchDetails?.coverImageMedium || "",
+      bulkAddCoverExtraLarge: bulkRootCause?.rawCoverImageExtraLarge || "",
+      bulkAddCoverLarge: bulkRootCause?.rawCoverImageLarge || "",
+      bulkAddCoverMedium: bulkRootCause?.rawCoverImageMedium || "",
+      finalPosterDifference: (searchItem?.poster || "") !== (bulkItem?.poster || ""),
+    });
+  }
+
+  async function applyAddedImportTypeCorrections(listId) {
+    if (!isImportAuditDebugEnabled()) return null;
+    const IJ = window.WatchlistImportJob;
+    const WM = window.WatchlistMetadata;
+    if (!listId || !IJ?.auditAddedWatchlistTypes) return null;
+
+    const audit = await IJ.auditAddedWatchlistTypes(listId, {
+      getWatchlistItem: (id) => state.items.find((entry) => entry.id === id),
+      getWatchedState: () => state.watched,
+    });
+    if (audit?.skipped) return audit;
+
+    const items = IJ.loadItems(listId);
+    if (!items) {
+      IJ.markAddedTypeCorrectionsApplied?.(listId);
+      return audit;
+    }
+
+    if (!audit?.actions?.length) {
+      IJ.markAddedTypeCorrectionsApplied?.(listId);
+      return audit;
+    }
+
+    let changed = false;
+    const correctedIds = [];
+
+    for (const action of audit.actions) {
+      const row = items[action.importRowId];
+      const watchItem = state.items.find((entry) => entry.id === action.watchlistItemId);
+      if (!row || !watchItem) continue;
+
+      if (action.action === "flag") {
+        row.typeReviewRequired = true;
+        row.typeConflictAmbiguous = true;
+        row.typeCorrectionReason = action.reason || "ambiguous_type_evidence";
+        watchItem.typeReviewRequired = true;
+        changed = true;
         continue;
       }
 
-      state.items.push(item);
-      added += 1;
+      if (action.action !== "correct") continue;
+
+      const fromType = watchItem.contentType;
+      const toType = action.toType;
+      const importedType = row.originalType || row.contentType;
+      if (importedType === "anime" && toType !== "anime") continue;
+      if (fromType === "anime" && toType === "tvSeries") continue;
+      const pick = action.pick;
+      const oldId = watchItem.id;
+      const newId = makeId(toType, watchItem.genre, watchItem.title);
+
+      if (newId !== oldId) {
+        const dupe = state.items.find((entry) => entry.id === newId && entry.id !== oldId);
+        if (dupe) {
+          row.typeReviewRequired = true;
+          row.typeConflictAmbiguous = true;
+          row.typeCorrectionReason = "id_collision_after_type_fix";
+          watchItem.typeReviewRequired = true;
+          changed = true;
+          continue;
+        }
+      }
+
+      IJ.recordImportTypeCorrection(row, row.originalType || fromType, toType, {
+        reason: action.reason,
+        provider: action.provider,
+        topScore: action.topScore,
+        pick,
+      });
+
+      watchItem.contentType = toType;
+      watchItem.kind = formKindForItem(toType, watchItem.kind);
+
+      if (pick?.anilistId) {
+        watchItem.anilistId = pick.anilistId;
+        watchItem.link = `https://anilist.co/anime/${pick.anilistId}/`;
+      }
+      if (pick?.tmdbId) {
+        watchItem.tmdbId = pick.tmdbId;
+        const mediaType = toType === "movies" ? "movie" : "tv";
+        watchItem.link =
+          WM?.defaultLinkForDetails?.(
+            {
+              tmdbId: pick.tmdbId,
+              tmdbType: mediaType,
+              imdbId: pick.imdbId || watchItem.imdbId,
+            },
+            toType
+          ) || watchItem.link;
+      }
+      if (pick?.imdbId) watchItem.imdbId = pick.imdbId;
+
+      if (newId !== oldId) {
+        watchItem.id = newId;
+        if (state.watched[oldId]) {
+          state.watched[newId] = state.watched[oldId];
+          delete state.watched[oldId];
+          saveWatched();
+        }
+        row.watchlistItemId = newId;
+      }
+
+      const lightDetails = WM?.buildLightweightDetailsFromSearchResult?.(pick, toType);
+      if (lightDetails) {
+        row.details = { ...(row.details || {}), ...lightDetails };
+      }
+
+      correctedIds.push(watchItem.id);
+      changed = true;
     }
 
-    if (!added) {
+    if (changed) {
+      IJ.saveImportItems?.(listId, items);
+      state.data = itemsToNested(state.items);
+      saveData();
+      render();
+      for (const id of correctedIds) {
+        queueImportedItemEnrichment(id);
+      }
+    }
+
+    IJ.markAddedTypeCorrectionsApplied?.(listId);
+    return audit;
+  }
+
+  function showBulkImportPreview(job, items) {
+    if (!els.bulkAddSteps || !els.bulkImportPreview) return;
+    renderImportJobPreview(job, items);
+    els.bulkAddSteps.hidden = true;
+    els.bulkImportPreview.hidden = false;
+    els.modal?.classList.add("modal--bulk-preview");
+    if (els.bulkAddPasteFooter) els.bulkAddPasteFooter.hidden = true;
+    if (els.bulkImportPreviewFooter) els.bulkImportPreviewFooter.hidden = false;
+    syncItemModalViewport();
+
+    const listId = state.activeListId || window.WatchlistAuth?.getProfile();
+    const IJ = window.WatchlistImportJob;
+    if (listId && IJ?.kickImportQueue && job && !job.paused && job.status !== "cancelled") {
+      IJ.kickImportQueue(listId);
+    }
+    if (listId && IJ?.applyAnimeGrouping) {
+      void (async () => {
+        const fresh = IJ.loadItems(listId) || items;
+        await IJ.applyAnimeGrouping(listId, fresh);
+        IJ.saveImportItems?.(listId, fresh);
+        const latestJob = IJ.loadJob(listId) || job;
+        renderImportJobPreview(latestJob, fresh);
+      })();
+    }
+    if (listId && IJ?.auditMisclassifiedTypes) {
+      void IJ.auditMisclassifiedTypes(listId, { autoRetry: true }).then((audit) => {
+        if (audit?.retried > 0) {
+          renderImportJobPreview(IJ.loadJob(listId), IJ.loadItems(listId));
+        }
+      });
+    }
+    if (listId) {
+      if (isImportAuditDebugEnabled()) {
+        void applyAddedImportTypeCorrections(listId).then((audit) => {
+          if (audit?.corrected > 0 || audit?.flagged > 0) {
+            renderImportJobPreview(IJ.loadJob(listId), IJ.loadItems(listId));
+          }
+          queueCastBackfillForImportAdds(listId);
+        });
+      } else {
+        queueCastBackfillForImportAdds(listId);
+      }
+    }
+  }
+
+  function hideBulkImportPreview() {
+    if (!els.bulkAddSteps || !els.bulkImportPreview) return;
+    stopBulkProgressTicker();
+    els.bulkAddSteps.hidden = false;
+    els.bulkImportPreview.hidden = true;
+    els.modal?.classList.remove("modal--bulk-preview");
+    if (els.bulkAddPasteFooter) els.bulkAddPasteFooter.hidden = false;
+    if (els.bulkImportPreviewFooter) els.bulkImportPreviewFooter.hidden = true;
+    syncItemModalViewport();
+  }
+
+  async function resumeImportJobUiIfAny() {
+    const listId = state.activeListId || window.WatchlistAuth?.getProfile();
+    const IJ = window.WatchlistImportJob;
+    if (!listId || !IJ?.loadJob) return;
+    const hydrated = (await IJ.hydrateJobDataAsync?.(listId)) || IJ.hydrateJobData?.(listId);
+    const job = hydrated?.job || IJ.loadJob(listId);
+    const items = hydrated?.items || IJ.loadItems(listId);
+    if (!job || !items || !Object.keys(items).length) return;
+    if (isImportAuditDebugEnabled()) {
+      void applyAddedImportTypeCorrections(listId);
+    }
+    queueCastBackfillForImportAdds(listId);
+    if (state.addMode === "bulk" && !els.bulkAddPanel?.hidden) {
+      IJ.healTransientFailedItems(items);
+      job.stats = IJ.recomputeStats(items);
+      showBulkImportPreview(job, items);
+      if (!job.paused && job.status !== "cancelled") {
+        IJ.kickImportQueue?.(listId);
+      }
+    }
+  }
+
+  const animePosterRepairFailed = new Set();
+
+  async function buildAnimeWatchlistItemForAdd(row, options = {}) {
+    const WM = window.WatchlistMetadata;
+    const pick = row.pick;
+    const contentType = "anime";
+
+    if (!pick?.anilistId) {
+      return { ok: false, reason: "no_identity" };
+    }
+
+    const { cover, picked, rootCause } = await WM.resolveAnimePosterForBulkCommit(pick, {
+      title: row.title,
+      importedType: row.contentType || contentType,
+    });
+
+    if (!picked.poster) {
+      return {
+        ok: false,
+        reason: "poster_pending",
+        message: "Fetching anime poster",
+        rootCause,
+      };
+    }
+
+    let details = await WM.resolveDetailsForWatchlistAdd(pick, contentType, {
+      searchQuery: row.title,
+      pipeline: options.pipeline || "bulk-commit",
+      posterRequired: false,
+      verifyPoster: false,
+    });
+
+    if (!details?.title) {
+      return { ok: false, reason: "no_identity", rootCause };
+    }
+
+    details = {
+      ...details,
+      poster: picked.poster,
+      posterPending: false,
+      posterBroken: false,
+      posterSource: "anilist_cover_fetch",
+      coverImageExtraLarge:
+        cover?.coverImageExtraLarge || details.coverImageExtraLarge || "",
+      coverImageLarge: cover?.coverImageLarge || details.coverImageLarge || "",
+      coverImageMedium: cover?.coverImageMedium || details.coverImageMedium || "",
+      anilistId: details.anilistId || pick.anilistId,
+    };
+    row.details = details;
+
+    const suggested =
+      details.mergedGenres ||
+      WM?.suggestGenres(details.genres, STANDARD_GENRES, contentType) ||
+      [];
+    const genre =
+      suggested[0] || WM?.defaultGenreForContentType?.(contentType) || "Drama";
+    const item = buildItemFromSearchDetails(details, {
+      contentType,
+      genre,
+      secondaryGenres: suggested.slice(1),
+    });
+
+    rootCause.finalItemPosterBeforeInsert = item.poster || "";
+    rootCause.finalItemPosterBroken = Boolean(item.posterBroken);
+
+    if (!item.poster) {
+      rootCause.failingStage = rootCause.failingStage || "C";
+      return {
+        ok: false,
+        reason: "poster_pending",
+        message: "Fetching anime poster",
+        rootCause,
+      };
+    }
+
+    return { ok: true, item, details, rootCause };
+  }
+
+  async function addImportRowToWatchlist(row) {
+    const IJ = window.WatchlistImportJob;
+    if (row.status === IJ?.STATUS?.added) {
+      return { ok: false, reason: "already_added" };
+    }
+
+    const WM = window.WatchlistMetadata;
+    const contentType = row.contentType;
+
+    if (row.franchiseMember) {
+      return { ok: false, reason: "grouped_member" };
+    }
+
+    let details = null;
+    let item = null;
+    let rootCause = null;
+
+    if (contentType === "anime") {
+      const built = await buildAnimeWatchlistItemForAdd(row, { pipeline: "bulk-commit" });
+      rootCause = built.rootCause;
+      if (!built.ok) {
+        return {
+          ok: false,
+          reason: built.reason,
+          message: built.message || "Fetching anime poster",
+          rootCause,
+        };
+      }
+      details = built.details;
+      item = built.item;
+    } else {
+      details = row.details;
+      if (row.pick) {
+        const resolved = await WM?.resolveDetailsForWatchlistAdd?.(row.pick, contentType, {
+          searchQuery: row.title,
+          pipeline: "bulk-commit",
+        });
+        if (resolved?.title) {
+          details = resolved;
+          row.details = details;
+        }
+      }
+      if (!details?.title) return { ok: false, reason: "no_identity" };
+
+      details = (await WM?.enrichDetailsGenres?.(details, {
+        contentType,
+        standardGenres: STANDARD_GENRES,
+        debugLabel: row.title,
+      })) || details;
+      row.details = details;
+
+      const suggested =
+        details.mergedGenres ||
+        WM?.suggestGenres(details.genres, STANDARD_GENRES, contentType) ||
+        [];
+      const genre =
+        suggested[0] || WM?.defaultGenreForContentType?.(contentType) || "Drama";
+      item = buildItemFromSearchDetails(details, {
+        contentType,
+        genre,
+        secondaryGenres: suggested.slice(1),
+      });
+    }
+
+    if (!item?.title) return { ok: false, reason: "no_identity", rootCause };
+
+    const anilistId = details.anilistId || row.pick?.anilistId;
+    if (contentType === "anime" && anilistId) {
+      const grouped = await IJ?.isAnimeGroupedChild?.(anilistId);
+      if (grouped?.parent) {
+        return {
+          ok: false,
+          reason: "grouped_under_parent",
+          parentTitle: grouped.parent.title,
+          rootCause,
+        };
+      }
+    }
+
+    if (findDuplicate(item, null)) return { ok: false, reason: "duplicate", rootCause };
+
+    if (contentType === "anime") {
+      await logSearchVsBulkPoster(row, item, details, rootCause);
+    }
+
+    stampItemAddedAt(item);
+    state.items.push(item);
+    if (itemHasTrustedPoster(item)) bumpItemMutation(item.id);
+    queueImportedItemEnrichment(item.id);
+    return { ok: true, itemId: item.id, rootCause, row };
+  }
+
+  async function handleBulkImportCommit() {
+    const listId = state.activeListId || window.WatchlistAuth?.getProfile();
+    const IJ = window.WatchlistImportJob;
+    if (!listId || !IJ?.commitReadyItems || bulkImportCommitBusy) return;
+
+    const items = IJ.loadItems(listId);
+    const eligibleCount = IJ.countCommitEligible(items);
+    if (!eligibleCount) {
+      await window.WatchlistDialog.alert(t("bulk.verifyBeforeAdd"), {
+        title: t("bulk.addVerified"),
+      });
+      return;
+    }
+
+    setBulkCommitButtonLoading(true, { current: 0, total: eligibleCount });
+
+    try {
+      const addedItemIds = [];
+      const posterTraceCommits = [];
+      const result = await IJ.commitReadyItems(
+        listId,
+        async (row) => {
+          const addResult = await addImportRowToWatchlist(row);
+          if (addResult?.ok && addResult.itemId) {
+            addedItemIds.push(addResult.itemId);
+            if (addResult.rootCause && addResult.row) {
+              posterTraceCommits.push({
+                row: addResult.row,
+                rootCause: addResult.rootCause,
+                itemId: addResult.itemId,
+              });
+            }
+          }
+          return addResult;
+        },
+        {
+          onProgress: ({ current, total }) => {
+            setBulkCommitButtonLoading(true, { current, total });
+          },
+        }
+      );
+
+      if (result.blocked) {
+        const message =
+          result.reason === "incomplete_accounting"
+            ? t("bulk.importStatusIncomplete")
+            : result.errors?.[0] || t("bulk.verifyBeforeAdd");
+        await window.WatchlistDialog.alert(message, {
+          title: t("bulk.addVerified"),
+        });
+        return;
+      }
+
+      if (result.added > 0) {
+        persistWatchlistLocalOnly();
+        window.WatchlistSync?.cancelScheduledPush?.();
+        for (const id of addedItemIds) {
+          const prev = enrichmentUpsertTimers.get(id);
+          if (prev) clearTimeout(prev);
+          enrichmentUpsertTimers.delete(id);
+        }
+        for (const id of addedItemIds) {
+          queueImportedItemEnrichment(id);
+        }
+        const syncMeta = listSyncMeta(listId);
+        if (
+          addedItemIds.length &&
+          window.WatchlistSync?.pushRowsUpsert &&
+          (!window.WatchlistLifecycle || window.WatchlistLifecycle.canWriteCloud())
+        ) {
+          await window.WatchlistSync.pushRowsUpsert(
+            listId,
+            state.data,
+            state.watched,
+            addedItemIds,
+            syncMeta
+          );
+        }
+        updateGenreOptions();
+        render();
+
+        if (posterTraceCommits.length) {
+          const rootCauseRows = [];
+          for (const entry of posterTraceCommits) {
+            const item = state.items.find((row) => row.id === entry.itemId);
+            const rowData = await logBulkPosterRootCause(entry.row, entry.rootCause, item, {
+              rowSavedToSupabasePoster: item?.poster || "",
+            });
+            if (rowData) rootCauseRows.push(rowData);
+          }
+          if (rootCauseRows.length) {
+            console.warn("[bulk-poster-root-cause]");
+            console.table(rootCauseRows);
+          }
+        }
+      }
+
+      const job = IJ.loadJob(listId);
+      const freshItems = IJ.loadItems(listId);
+      setBulkCommitButtonLoading(false);
+      renderImportJobPreview(job, freshItems);
+
+      await window.WatchlistDialog.alert(
+        t("bulk.commitResult", {
+          added: result.added,
+          alreadyPresent: result.alreadyPresent,
+          grouped: result.grouped,
+          failed: result.failed,
+          stillReady: result.stillReady,
+        }),
+        { title: t("alert.bulkAddedTitle") }
+      );
+    } catch (error) {
+      console.warn("[bulk-import:commit]", error);
+      setBulkCommitButtonLoading(false);
+      const job = IJ.loadJob(listId);
+      renderImportJobPreview(job, IJ.loadItems(listId));
+      await window.WatchlistDialog.alert(t("bulk.commitFailed"), {
+        title: t("bulk.addVerified"),
+      });
+    }
+  }
+
+  async function startBulkImportFromText(raw) {
+    setBulkPasteError("");
+    const WT = window.WatchlistBulkTitles;
+    const IJ = window.WatchlistImportJob;
+    if (!WT?.parseBulkImport || !IJ?.createJobFromParse) {
+      setBulkPasteError(t("bulk.readFailed"));
+      return;
+    }
+
+    IJ._helpers.isOnList = isTitleOnWatchlist;
+    IJ._helpers.getWatchlistAnime = getWatchlistAnimeItems;
+
+    const parsed = WT.parseBulkImport(raw, { isOnList: IJ._helpers.isOnList });
+
+    if (!parsed?.ok) {
       setBulkPasteError(
-        skipped
-          ? "Every title was already on your list."
-          : "No titles could be added."
+        parsed.error ? parsed.error : t(parsed.errorKey || "bulk.readFailed")
       );
       return;
     }
 
-    state.data = itemsToNested(state.items);
-    saveData();
-    updateGenreOptions();
-    closeModal();
-    render();
+    const threshold = WT.LARGE_IMPORT_THRESHOLD || 50;
+    if (parsed.stats.total > threshold) {
+      const confirmed = await window.WatchlistDialog.confirm(
+        t("bulk.largeImportWarning", { count: parsed.stats.total }),
+        {
+          title: t("bulk.largeImportTitle"),
+          confirmLabel: t("bulk.reviewImport"),
+          cancelLabel: t("btn.cancel"),
+        }
+      );
+      if (!confirmed) return;
+    }
 
-    const warning =
-      parsed.errors?.length || skipped
-        ? `\n\n${window.WatchlistBulkTitles?.formatBulkErrors(
-            [
-              ...(skipped
-                ? [
-                    skipped === 1
-                      ? t("bulk.duplicatesSkipped", { count: skipped })
-                      : t("bulk.duplicatesSkippedPlural", { count: skipped }),
-                  ]
-                : []),
-              ...(parsed.errors || []),
-            ],
-            { maxShown: 8 }
-          )}`
-        : "";
+    const listId = state.activeListId || window.WatchlistAuth?.getProfile() || "";
+    const existingJob = IJ.loadJob(listId);
+    const existingItems = IJ.loadItems(listId);
+    const hasProgress =
+      existingJob &&
+      existingItems &&
+      Object.values(existingItems).some(
+        (it) =>
+          it.status === IJ.STATUS.added ||
+          it.status === IJ.STATUS.ready_to_add ||
+          it.status === IJ.STATUS.ready ||
+          it.status === IJ.STATUS.failed ||
+          it.status === IJ.STATUS.not_found ||
+          it.status === IJ.STATUS.pending ||
+          it.status === IJ.STATUS.processing
+      );
 
+    if (hasProgress && Object.keys(existingItems).length > 0) {
+      const confirmed = await window.WatchlistDialog.confirm(
+        t("bulk.replaceJobWarning", { count: Object.keys(existingItems).length }),
+        {
+          title: t("bulk.replaceJobTitle"),
+          confirmLabel: t("bulk.replaceJobConfirm"),
+          cancelLabel: t("btn.cancel"),
+          danger: true,
+        }
+      );
+      if (!confirmed) {
+        IJ.healTransientFailedItems(existingItems);
+        existingJob.stats = IJ.recomputeStats(existingItems);
+        showBulkImportPreview(existingJob, existingItems);
+        if (!existingJob.paused && existingJob.status !== "cancelled") {
+          IJ.kickImportQueue?.(listId);
+        }
+        return;
+      }
+    }
+
+    const { job, items } = IJ.createJobFromParse(listId, parsed);
+    WT.saveBulkImportDraft(WT.buildDraft(listId, parsed));
+    showBulkImportPreview(job, items);
+  }
+
+  async function handleBulkAdd() {
+    await startBulkImportFromText(els.bulkPasteInput?.value || "");
+  }
+
+  async function handleBulkFileUpload(event) {
+    const file = event.target?.files?.[0];
+    if (!file) return;
+    const name = String(file.name || "").toLowerCase();
+    const allowedExt = name.endsWith(".txt") || name.endsWith(".tsv");
+    const allowedType =
+      !file.type || file.type === "text/plain" || file.type.includes("tab-separated");
+    if (!allowedExt && !allowedType) {
+      setBulkPasteError(t("bulk.fileWrongType"));
+      if (els.bulkFileInput) els.bulkFileInput.value = "";
+      return;
+    }
+    try {
+      const text = await file.text();
+      if (els.bulkPasteInput) els.bulkPasteInput.value = text;
+      await startBulkImportFromText(text);
+    } catch {
+      setBulkPasteError(t("bulk.fileReadFailed"));
+    } finally {
+      if (els.bulkFileInput) els.bulkFileInput.value = "";
+    }
+  }
+
+  function handleBulkImportBack() {
+    hideBulkImportPreview();
+    els.bulkPasteInput?.focus();
+  }
+
+  function setBulkImportFilter(filter) {
+    if (filter === bulkImportStatusFilter) {
+      bulkImportStatusFilter = "all";
+    } else {
+      bulkImportStatusFilter = filter || "all";
+    }
+    bulkImportExpandedRowId = null;
+    const listId = state.activeListId;
+    const IJ = window.WatchlistImportJob;
+    if (listId && IJ?.loadJob) {
+      renderImportJobPreview(IJ.loadJob(listId), IJ.loadItems(listId));
+    }
+  }
+
+  async function handleBulkImportResolve() {
+    const listId = state.activeListId;
+    const IJ = window.WatchlistImportJob;
+    if (!listId || !IJ?.resolveRemaining || bulkImportWorkerBusy) return;
+    if (IJ.isWorkerActive?.()) {
+      await window.WatchlistDialog.alert(t("bulk.workerBusy"), {
+        title: t("bulk.resolveRemaining"),
+      });
+      return;
+    }
+    bulkImportWorkerBusy = true;
+    setBulkActionButtonLoading(els.bulkImportResolve, true, "bulk.resolving");
+    try {
+      IJ.healTransientFailedItems(IJ.loadItems(listId));
+      const count = IJ.resolveRemaining(listId);
+      if (!count) {
+        await window.WatchlistDialog.alert(t("bulk.resolveNothing"), {
+          title: t("bulk.resolveRemaining"),
+        });
+      } else {
+        const kick = IJ.kickImportQueue?.(listId);
+        if (kick && !kick.started) {
+          await window.WatchlistDialog.alert(t("bulk.workerBusy"), {
+            title: t("bulk.resolveRemaining"),
+          });
+        }
+      }
+    } finally {
+      bulkImportWorkerBusy = false;
+      setBulkActionButtonLoading(els.bulkImportResolve, false);
+    }
+  }
+
+  function handleBulkImportContinue() {
+    const listId = state.activeListId;
+    const IJ = window.WatchlistImportJob;
+    if (!listId || !IJ?.kickImportQueue || bulkImportWorkerBusy) return;
+    bulkImportWorkerBusy = true;
+    setBulkActionButtonLoading(els.bulkImportContinue, true, "bulk.continuing");
+    const kick = IJ.kickImportQueue(listId);
+    if (!kick?.started) {
+      bulkImportWorkerBusy = false;
+      setBulkActionButtonLoading(els.bulkImportContinue, false);
+      void window.WatchlistDialog.alert(
+        t(kick?.reason === "worker_busy" ? "bulk.workerBusy" : "bulk.continueFailed"),
+        { title: t("bulk.continueProcessing") }
+      );
+      return;
+    }
+    const poll = setInterval(() => {
+      if (!IJ.isWorkerActive?.()) {
+        clearInterval(poll);
+        bulkImportWorkerBusy = false;
+        setBulkActionButtonLoading(els.bulkImportContinue, false);
+        const job = IJ.loadJob(listId);
+        renderImportJobPreview(job, IJ.loadItems(listId));
+      }
+    }, 500);
+  }
+
+  function wakeImportQueueIfNeeded() {
+    const listId = state.activeListId;
+    const IJ = window.WatchlistImportJob;
+    if (!listId || !IJ?.kickImportQueue) return;
+    if (!els.bulkImportPreview || els.bulkImportPreview.hidden) return;
+    IJ.kickImportQueue(listId);
+  }
+
+  async function handleBulkImportCopyUnresolved() {
+    const listId = state.activeListId;
+    const IJ = window.WatchlistImportJob;
+    if (!listId || !IJ?.copyUnresolvedTsv) return;
+    const items = IJ.loadItems(listId);
+    try {
+      const ok = await IJ.copyUnresolvedTsv(items, { statusFilter: "unresolved" });
+      if (!ok) {
+        await window.WatchlistDialog.alert(t("bulk.copyUnresolvedEmpty"), {
+          title: t("bulk.copyUnresolvedTitle"),
+        });
+        return;
+      }
+      flashBulkImportCopyUnresolvedSuccess();
+    } catch {
+      await window.WatchlistDialog.alert(t("alert.bulkCopyFailed"), {
+        title: t("bulk.copyUnresolvedTitle"),
+      });
+    }
+  }
+
+  function flashBulkImportCopyUnresolvedSuccess() {
+    const btn = els.bulkImportCopyUnresolved;
+    if (!btn) return;
+    if (bulkImportCopyUnresolvedResetTimer) {
+      clearTimeout(bulkImportCopyUnresolvedResetTimer);
+      bulkImportCopyUnresolvedResetTimer = null;
+    }
+    btn.classList.add("is-copied");
+    btn.textContent = t("bulk.copyUnresolvedCopied");
+    btn.setAttribute("aria-live", "polite");
+    bulkImportCopyUnresolvedResetTimer = setTimeout(() => {
+      bulkImportCopyUnresolvedResetTimer = null;
+      btn.classList.remove("is-copied");
+      btn.textContent = t("bulk.copyUnresolved");
+      btn.removeAttribute("aria-live");
+    }, 2000);
+  }
+
+  function openBulkCorrectedTsvModal() {
+    if (!els.bulkCorrectedTsvModal) return;
+    if (els.bulkCorrectedTsvInput) els.bulkCorrectedTsvInput.value = "";
+    els.bulkCorrectedTsvModal.hidden = false;
+    updateBodyScrollLock();
+    if (els.bulkCorrectedTsvPaste) {
+      els.bulkCorrectedTsvPaste.hidden = !navigator.clipboard?.readText;
+    }
+    els.bulkCorrectedTsvInput?.focus();
+  }
+
+  function closeBulkCorrectedTsvModal() {
+    if (!els.bulkCorrectedTsvModal) return;
+    els.bulkCorrectedTsvModal.hidden = true;
+    updateBodyScrollLock();
+  }
+
+  async function applyBulkCorrectedTsvText(raw) {
+    const listId = state.activeListId;
+    const IJ = window.WatchlistImportJob;
+    if (!listId || !IJ?.applyCorrectedTsv) return;
+
+    const result = IJ.applyCorrectedTsv(listId, raw);
+    if (result.error) {
+      await window.WatchlistDialog.alert(t("bulk.correctedImportFailed"), {
+        title: t("bulk.correctedImportTitle"),
+      });
+      return;
+    }
+    closeBulkCorrectedTsvModal();
+    const job = IJ.loadJob(listId);
+    const items = IJ.loadItems(listId);
+    renderImportJobPreview(job, items);
     await window.WatchlistDialog.alert(
-      added === 1
-        ? t("alert.bulkAddedOne", { extra: warning })
-        : t("alert.bulkAddedMany", { added, extra: warning }),
-      { title: t("alert.bulkAddedTitle") }
+      t("bulk.correctedImportDone", {
+        updated: result.updated,
+        skipped: result.skipped,
+        ambiguous: result.ambiguous,
+      }),
+      { title: t("bulk.correctedImportTitle") }
     );
+  }
+
+  async function handleBulkImportCorrectedTsv(event) {
+    const file = event.target?.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      await applyBulkCorrectedTsvText(text);
+    } catch {
+      await window.WatchlistDialog.alert(t("bulk.fileReadFailed"), {
+        title: t("bulk.correctedImportTitle"),
+      });
+    } finally {
+      if (els.bulkImportCorrectedTsv) els.bulkImportCorrectedTsv.value = "";
+    }
+  }
+
+  async function handleBulkImportCorrectedTsvApply() {
+    const text = els.bulkCorrectedTsvInput?.value || "";
+    if (!text.trim()) {
+      await window.WatchlistDialog.alert(t("bulk.correctedPasteEmpty"), {
+        title: t("bulk.correctedImportTitle"),
+      });
+      return;
+    }
+    await applyBulkCorrectedTsvText(text);
+  }
+
+  async function handleBulkImportCorrectedTsvPaste() {
+    if (!navigator.clipboard?.readText) return;
+    try {
+      const text = await navigator.clipboard.readText();
+      if (els.bulkCorrectedTsvInput) els.bulkCorrectedTsvInput.value = text;
+      els.bulkCorrectedTsvInput?.focus();
+    } catch {
+      await window.WatchlistDialog.alert(t("bulk.correctedPasteFailed"), {
+        title: t("bulk.correctedImportTitle"),
+      });
+    }
+  }
+
+  function bindImportPreviewTypeInteractions() {
+    if (!els.bulkImportPreview || els.bulkImportPreview.dataset.typeInteractionsBound === "true") {
+      return;
+    }
+    els.bulkImportPreview.dataset.typeInteractionsBound = "true";
+
+    const typeInteractionSelector =
+      ".bulk-import-preview__cell-type, .bulk-import-preview__type-edit, [data-import-type-toggle], [data-import-apply-type], [data-import-cancel-type], [data-import-change-type]";
+
+    els.bulkImportPreview.addEventListener(
+      "mousedown",
+      (event) => {
+        if (event.target.closest(typeInteractionSelector)) {
+          event.stopPropagation();
+        }
+      },
+      true
+    );
+
+    els.bulkImportPreview.addEventListener("click", (event) => {
+      if (els.bulkImportPreview.hidden) return;
+      const IJ = window.WatchlistImportJob;
+      const listId = state.activeListId;
+      if (!IJ || !listId) return;
+
+      if (event.target.closest(".bulk-import-preview__type-edit, [data-import-change-type], option")) {
+        event.stopPropagation();
+      }
+
+      const cancelType = event.target.closest("[data-import-cancel-type]");
+      if (cancelType) {
+        event.stopPropagation();
+        closeImportTypeEditor(cancelType.dataset.importCancelType);
+        return;
+      }
+
+      const toggleType = event.target.closest("[data-import-type-toggle]");
+      if (toggleType) {
+        event.stopPropagation();
+        openImportTypeEditor(toggleType.dataset.importTypeToggle);
+        return;
+      }
+
+      const typeCell = event.target.closest("[data-import-type-cell]");
+      if (
+        typeCell &&
+        !event.target.closest(".bulk-import-preview__type-edit") &&
+        typeCell.querySelector("[data-import-type-toggle]")
+      ) {
+        event.stopPropagation();
+        openImportTypeEditor(typeCell.dataset.importTypeCell);
+        return;
+      }
+
+      const applyType = event.target.closest("[data-import-apply-type]");
+      if (applyType) {
+        event.stopPropagation();
+        const itemId = applyType.dataset.importApplyType;
+        const select = els.bulkImportTableBody?.querySelector(
+          `[data-import-change-type="${CSS.escape(itemId)}"]`
+        );
+        const newType = select?.value;
+        if (!newType || !IJ.changeItemType) return;
+        bulkImportTypeEditId = null;
+        bulkImportWorkerBusy = true;
+        void IJ.changeItemType(listId, itemId, newType).then((res) => {
+          bulkImportWorkerBusy = false;
+          if (!res?.ok) {
+            void window.WatchlistDialog.alert(t("bulk.changeTypeFailed"), {
+              title: t("bulk.changeType"),
+            });
+          }
+          renderImportJobPreview(IJ.loadJob(listId), IJ.loadItems(listId));
+        });
+        return;
+      }
+
+      const row = event.target.closest("[data-import-row]");
+      if (!row) return;
+      if (event.target.closest(typeInteractionSelector)) return;
+      if (bulkImportTypeEditId) return;
+      const id = row.dataset.importRow;
+      bulkImportExpandedRowId = bulkImportExpandedRowId === id ? null : id;
+      renderImportJobPreview(IJ.loadJob(listId), IJ.loadItems(listId));
+    });
+  }
+
+  function bindImportJobUi() {
+    const IJ = window.WatchlistImportJob;
+    if (!IJ) return;
+
+    bindImportPreviewTypeInteractions();
+
+    if (els.bulkImportToolbar?.dataset.bound === "true") return;
+    if (els.bulkImportToolbar) els.bulkImportToolbar.dataset.bound = "true";
+
+    IJ.setChangeHandler(({ listId, job, items }) => {
+      if (listId !== state.activeListId) return;
+      if (!els.bulkImportPreview || els.bulkImportPreview.hidden) return;
+      if (bulkImportWorkerBusy && !IJ.isWorkerActive?.()) {
+        bulkImportWorkerBusy = false;
+        setBulkActionButtonLoading(els.bulkImportContinue, false);
+        setBulkActionButtonLoading(els.bulkImportResolve, false);
+      }
+      renderImportJobPreview(job, items, { preserveTypeEditor: Boolean(bulkImportTypeEditId) });
+    });
+
+    els.bulkImportSummary?.addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-import-filter]");
+      if (!btn) return;
+      setBulkImportFilter(btn.dataset.importFilter);
+    });
+
+    els.bulkImportSearch?.addEventListener("input", (event) => {
+      bulkImportSearchQuery = event.target.value || "";
+      const listId = state.activeListId;
+      if (listId) {
+        renderImportJobPreview(IJ.loadJob(listId), IJ.loadItems(listId));
+      }
+    });
+
+    els.bulkImportSearchClear?.addEventListener("click", () => {
+      bulkImportSearchQuery = "";
+      if (els.bulkImportSearch) els.bulkImportSearch.value = "";
+      const listId = state.activeListId;
+      if (listId) {
+        renderImportJobPreview(IJ.loadJob(listId), IJ.loadItems(listId));
+      }
+    });
+
+    els.bulkImportResolve?.addEventListener("click", () => {
+      void handleBulkImportResolve();
+    });
+    els.bulkImportContinue?.addEventListener("click", () => {
+      handleBulkImportContinue();
+    });
+
+    if (!window.__bulkImportQueueWakeBound) {
+      window.__bulkImportQueueWakeBound = true;
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") wakeImportQueueIfNeeded();
+      });
+      window.addEventListener("focus", wakeImportQueueIfNeeded);
+      window.addEventListener("online", wakeImportQueueIfNeeded);
+    }
+
+    els.bulkImportCopyUnresolved?.addEventListener("click", () => {
+      void handleBulkImportCopyUnresolved();
+    });
+    els.bulkImportPasteCorrected?.addEventListener("click", openBulkCorrectedTsvModal);
+    els.bulkCorrectedTsvApply?.addEventListener("click", () => {
+      void handleBulkImportCorrectedTsvApply();
+    });
+    els.bulkCorrectedTsvPaste?.addEventListener("click", () => {
+      void handleBulkImportCorrectedTsvPaste();
+    });
+    els.bulkCorrectedTsvModal?.addEventListener("click", (event) => {
+      if (event.target.closest("[data-action='close-bulk-corrected']")) {
+        closeBulkCorrectedTsvModal();
+      }
+    });
+
+    els.bulkImportCorrectedTsv?.addEventListener("change", handleBulkImportCorrectedTsv);
+
+    els.bulkFileInput?.addEventListener("change", handleBulkFileUpload);
   }
 
   function handleFormSubmit(event) {
@@ -6903,16 +10954,10 @@
 
     const item = formToItem();
 
-    if (!item.genre || !item.title || !item.leads.length || !item.summary) {
-      if (!item.leads.length) {
-        window.WatchlistDialog.alert(t("alert.leadRequired"), {
-          title: t("alert.missingActorTitle"),
-        });
-      } else {
-        window.WatchlistDialog.alert(t("alert.incomplete"), {
-          title: t("alert.incompleteTitle"),
-        });
-      }
+    if (!item.genre || !item.title || !item.summary) {
+      window.WatchlistDialog.alert(t("alert.incomplete"), {
+        title: t("alert.incompleteTitle"),
+      });
       return;
     }
 
@@ -7756,6 +11801,28 @@
         return;
       }
 
+      if (action === "open-credits") {
+        await openCreditsModal();
+        return;
+      }
+
+      if (action === "restore-cloud") {
+        closeAccountMenu();
+        const result = await restoreListFromCloud();
+        if (!result.ok) {
+          await window.WatchlistDialog.alert(t("sync.cloudRestoreFailed"), {
+            title: t("sync.cloudRestoreTitle"),
+          });
+        }
+        return;
+      }
+
+      if (action === "storage-diagnostics") {
+        closeAccountMenu();
+        await window.WatchlistStorageDiagnostics?.renderDiagnosticsModal?.();
+        return;
+      }
+
       if (action === "manage-lists") {
         openManageListsModal();
         return;
@@ -7819,6 +11886,11 @@
         const theme = event.target.closest("[data-action='set-theme']")?.dataset.theme;
         if (theme) window.WatchlistThemes?.setTheme(theme);
       }
+    });
+
+    els.creditsModal?.addEventListener("click", (event) => {
+      const action = event.target.closest("[data-action]")?.dataset.action;
+      if (action === "close-credits-modal") closeCreditsModal();
     });
 
     els.importInput?.addEventListener("change", () => {
@@ -8110,6 +12182,10 @@
 
     els.copyBulkTemplate?.addEventListener("click", copyBulkTemplate);
     els.bulkAddConfirm?.addEventListener("click", handleBulkAdd);
+    els.bulkImportBack?.addEventListener("click", handleBulkImportBack);
+    els.bulkImportConfirm?.addEventListener("click", () => {
+      void handleBulkImportCommit();
+    });
     els.deleteBtn.addEventListener("click", handleDelete);
 
     els.ratingPicker?.addEventListener("click", (event) => {
@@ -8244,6 +12320,10 @@
         closeThemeModal();
         return;
       }
+      if (!els.creditsModal?.hidden) {
+        closeCreditsModal();
+        return;
+      }
       if (!els.ratingModal?.hidden) {
         dismissRatingModal();
         return;
@@ -8265,6 +12345,13 @@
 
     document.addEventListener("scroll", hideLinkPreviewPopover, true);
     window.addEventListener("resize", hideLinkPreviewPopover);
+    window.addEventListener(
+      "resize",
+      () => {
+        updateBodyScrollLock();
+      },
+      { passive: true }
+    );
 
     els.main.addEventListener("mouseover", (event) => {
       if (state.cardLayout !== "hover") return;
@@ -8444,6 +12531,7 @@
   }
 
   async function init() {
+    try {
     if (!window.WatchlistAuth?.isAuthenticated()) {
       const shareId = new URLSearchParams(window.location.search).get("share")?.trim();
       window.location.replace(
@@ -8452,6 +12540,10 @@
       return;
     }
 
+    window.WatchlistLifecycle?.reset?.();
+    window.WatchlistImportJobStore?.purgeLegacyLocalStorage?.();
+    window.WatchlistStorageDiagnostics?.maybeOpenFromQuery?.();
+
     updateHeaderTitle();
 
     state.watched = loadWatchedState();
@@ -8459,32 +12551,59 @@
     applyCardLayout();
     syncLayoutToggles();
     state.activeListId = window.WatchlistAuth.getProfile();
-    state.data = loadWatchlist();
-    state.items = flattenWatchlist(state.data);
-    state.data = itemsToNested(state.items);
+    const listId = state.activeListId;
+
+    void window.WatchlistImportJobStore?.migrateLegacyLocalStorage?.(listId);
+    void window.WatchlistImportJobStore?.hydrate?.(listId);
+
+    let hasLocal = false;
+    try {
+      state.data = loadWatchlist();
+      state.items = flattenWatchlist(state.data);
+      state.data = itemsToNested(state.items);
+      hasLocal = state.data && !window.WatchlistAuth.isWatchlistEmpty(state.data);
+    } catch (loadError) {
+      console.error("[app] local watchlist load failed:", loadError);
+      state.data = emptyWatchlist();
+      state.items = [];
+    }
+
+    if (!hasLocal) {
+      hasLocal = await loadWatchlistCacheFirst(listId);
+    }
+
+    window.WatchlistLifecycle?.markLocalReady(state.items.length);
 
     const cloudConfigured = window.WatchlistSync?.isConfigured();
-    const hasLocal =
-      state.data && !window.WatchlistAuth.isWatchlistEmpty(state.data);
 
     if (cloudConfigured) {
       state.syncStatus = "pending";
       if (!hasLocal) {
         showLoadingSkeleton();
+        window.WatchlistLifecycle?.showRestoreBanner(true);
+        window.WatchlistLifecycle?.setPhase(window.WatchlistLifecycle.PHASE.loading_cloud);
+        updateCloudRestoreBanner();
         updateStats();
         try {
-          await syncAccountLists();
-          await reconcileWithCloud();
+          await withTimeout(cloudBootstrap(listId, false), INIT_CLOUD_SYNC_TIMEOUT_MS, "Initial cloud sync");
         } catch (error) {
-          console.warn("[sync] reconcile failed:", error);
+          console.warn("[sync] initial cloud bootstrap failed:", error);
+          window.WatchlistLifecycle?.setPhase(window.WatchlistLifecycle.PHASE.cloud_retrying);
           state.syncStatus = resolveSyncFailureStatus();
         }
       }
     }
 
+    hasLocal = state.data && !window.WatchlistAuth.isWatchlistEmpty(state.data);
+
     const { data, watched } = storageKeys();
-    localStorage.setItem(data, JSON.stringify(state.data));
-    localStorage.setItem(watched, JSON.stringify(state.watched));
+    try {
+      localStorage.setItem(data, JSON.stringify(state.data));
+      localStorage.setItem(watched, JSON.stringify(state.watched));
+    } catch (err) {
+      console.warn("[app] could not persist local snapshot:", err);
+    }
+    persistWatchlistCache(listId);
 
     if (state.syncStatus === "pending" && !cloudConfigured) {
       state.syncStatus = "local";
@@ -8513,6 +12632,8 @@
     });
     resetSessionFilters({ renderNow: false });
     bindEvents();
+    updateBodyScrollLock();
+    bindImportJobUi();
     bindOfflineSyncListeners();
     document.documentElement.classList.add("app-ready");
     window.WatchlistPullRefresh?.init?.();
@@ -8525,6 +12646,10 @@
     updateStats();
     updateAppBanners();
     render();
+    scheduleDeferredAnimeMaintenance();
+    window.WatchlistLifecycle?.setPhase(window.WatchlistLifecycle.PHASE.synced);
+    window.WatchlistLifecycle?.showRestoreBanner(false);
+    updateCloudRestoreBanner();
     watchTrace()?.log("app-init-ready", {
       scriptVersions: {
         watchTrace: window.WATCHLIST_WATCH_TRACE_VERSION ?? null,
@@ -8580,6 +12705,58 @@
       if (status === "saving") state.syncStatus = "pending";
       updateStats();
     });
+
+    window.addEventListener("watchlist-lifecycle", () => {
+      updateCloudRestoreBanner();
+    });
+
+    window.addEventListener("watchlist-sync-progress", (event) => {
+      const label = event.detail?.label;
+      if (!label || !els.stats) return;
+      const syncChip = els.stats.querySelector(".header__stat-chip--sync");
+      if (syncChip) syncChip.textContent = label;
+    });
+
+    const debugStorage =
+      new URLSearchParams(window.location.search).get("debug") === "storage" ||
+      localStorage.getItem("watchlist-debug-storage") === "1";
+    const storageMenu = document.getElementById("storageDiagnosticsMenuItem");
+    if (storageMenu && debugStorage) storageMenu.hidden = false;
+    } catch (error) {
+      console.error("[app] init failed:", error);
+      state.syncStatus = resolveSyncFailureStatus();
+      if (!state.data) {
+        state.data = emptyWatchlist();
+        state.items = [];
+      }
+    } finally {
+      if (
+        window.WatchlistAuth?.isAuthenticated() &&
+        !document.documentElement.classList.contains("app-ready")
+      ) {
+        hideLoadingSkeleton();
+        if (!state.data) {
+          els.main.innerHTML = `
+            <div class="empty-state">
+              <p class="empty-state__title">${escapeHtml(t("error.loadWatchlistFailed"))}</p>
+              <p>${escapeHtml(t("error.loadWatchlistHint"))}</p>
+            </div>
+          `;
+        } else {
+          purgeLegacyFilterPrefsStorage();
+          updateHeaderTitle();
+          bindEvents();
+          updateBodyScrollLock();
+          bindImportJobUi();
+          bindOfflineSyncListeners();
+          document.documentElement.classList.add("app-ready");
+          resetSessionFilters({ renderNow: false });
+          renderListSwitcher();
+          updateStats();
+          render();
+        }
+      }
+    }
   }
 
   window.WatchlistApp = {
@@ -8591,6 +12768,7 @@
     markItemWatched,
     isCloudSavePending: () =>
       state.syncStatus === "pending" || Boolean(window.WatchlistSync?.isSyncing?.()),
+    isLocalInitComplete: () => window.WatchlistLifecycle?.isLocalInitComplete?.() ?? true,
     // Exposed for title-detail.js
     findItem: (id) => state.items.find((i) => i.id === id) ?? null,
     isWatched: isItemWatched,
@@ -8623,7 +12801,9 @@
       if (!id || !fields || typeof fields !== "object") return;
       const item = state.items.find((i) => i.id === id);
       if (!item) return;
-      Object.assign(item, fields);
+      const safe = stripProtectedEnrichmentFields(fields, item);
+      Object.assign(item, safe);
+      preservePosterFieldsOnItem(item, { ...fields, __source: "patchItem" });
       // Keep nested data object in sync so saveData persists the patch
       const nested = state.data?.[item.contentType]?.[item.genre];
       if (Array.isArray(nested)) {
@@ -8637,6 +12817,24 @@
     queueItemBadgeEnrichment,
     cardDisplayPoster,
     cardDisplayTitle,
+    itemAnimePosterNeedsRepair,
+    repairAnimePosterFromSeasons,
+    repairAnimeGroupedDuplicates,
+    runAnimeGroupingRepairNow,
+    restoreWatchlistFromLocalCache,
+    probeWatchlistCacheRecovery,
+    diagnoseWatchlistIntegrity,
+    debugAnimeGroupState,
+    runImportAddedTypeAudit: (listId) => {
+      try {
+        localStorage.setItem("watchlist-debug-import-audit", "1");
+      } catch {
+        /* ignore */
+      }
+      return applyAddedImportTypeCorrections(
+        listId || state.activeListId || window.WatchlistAuth?.getProfile()
+      );
+    },
     normalizeGenre,
     openAddTitleConfirm,
     isTitleOnList,
@@ -8645,9 +12843,13 @@
     canPullToRefresh,
     isPullToRefreshActive,
     pullToRefreshFromCloud,
+    restoreListFromCloud,
+    updateBodyScrollLock,
   };
 
   if (document.getElementById("mainContent")) {
-    init();
+    void init().catch((error) => {
+      console.error("[app] init unhandled:", error);
+    });
   }
 })();
