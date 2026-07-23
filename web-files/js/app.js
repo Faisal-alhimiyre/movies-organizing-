@@ -1740,6 +1740,10 @@
     }
     persistWatchlistCache();
     queueCloudSync();
+    // Keep the anime duplicate-detection lookups fresh so a second add in the
+    // same session never sees a stale (pre-save) watchlist snapshot.
+    invalidateWatchlistFranchiseLookupCache();
+    invalidateWatchlistTitleLookupCache();
   }
 
   function normalizeGenre(genre) {
@@ -9215,17 +9219,34 @@
 
   function findDuplicate(item, excludeId) {
     const titleKey = normalizeTitleKey(item.title);
-    return state.items.find(
+    const titleMatch = state.items.find(
       (i) =>
         i.contentType === item.contentType &&
         normalizeTitleKey(i.title) === titleKey &&
         i.id !== excludeId
     );
+    if (titleMatch) return titleMatch;
+
+    // Anime seasons/sequels are separate AniList media ids, so a title-string
+    // match alone misses e.g. "Show Season 4" when "Show" (season 1) is
+    // already on the list. Centralizing this here (rather than per add
+    // feature) means every add/edit path — search, confirm, manual form,
+    // bulk import, and any future feature — is protected by one rule.
+    if (item.contentType === "anime") {
+      const franchiseMatch = findWatchlistFranchiseDuplicateForImport(item);
+      if (franchiseMatch && franchiseMatch.id !== excludeId) return franchiseMatch;
+    }
+
+    return null;
   }
 
   function findWatchlistFranchiseDuplicateForImport(item) {
     const lookup = getWatchlistFranchiseLookupForImport();
-    return lookup?.find?.(item) || null;
+    const result = lookup?.find?.(item) || null;
+    // #region agent log
+    fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',hypothesisId:'H5',location:'app.js:findWatchlistFranchiseDuplicateForImport',message:'cache-only gate check',data:{itemTitle:item?.title,pickAnilistId:item?.pick?.anilistId,detailsAnilistId:item?.details?.anilistId,itemAnilistId:item?.anilistId,resultTitle:result?.title||null,found:Boolean(result)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion agent log
+    return result;
   }
 
   let watchlistFranchiseLookupCache = null;
