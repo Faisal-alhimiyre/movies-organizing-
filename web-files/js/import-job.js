@@ -1,10 +1,6 @@
 (function () {
   "use strict";
 
-  // #region agent log
-  try{fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'import-job.js:init',message:'import-job build loaded',data:{build:'v207'},hypothesisId:'H15',timestamp:Date.now()})}).catch(()=>{});}catch(_e){}
-  // #endregion
-
   const LEGACY_IMPORT_JOBS_KEY = "import_jobs";
   const LEGACY_IMPORT_ITEMS_KEY = "import_items";
   const JOB_VERSION = 1;
@@ -957,16 +953,7 @@
   }
 
   function isCommitEligible(item) {
-    // #region agent log
-    const __dbgWatch = item?.status === STATUS.ready_to_add && /boruto/i.test(String(item?.title || ""));
-    const __dbgFail = (reason) => {
-      if (__dbgWatch) {
-        fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'import-job.js:isCommitEligible',message:'excluded from commit',data:{title:item?.title,reason,status:item?.status,matchStatus:item?.matchStatus,franchiseMember:Boolean(item?.franchiseMember),commitClaimed:Boolean(item?.commitClaimed),hasProviderId:hasProviderId(item),poster:item?.details?.poster||null,posterPending:Boolean(item?.details?.posterPending),enrichmentPending:Boolean(item?.enrichmentPending)},hypothesisId:'H13',timestamp:Date.now()})}).catch(()=>{});
-      }
-      return false;
-    };
-    // #endregion
-    if (!isMatchVerified(item)) return __dbgWatch ? __dbgFail("not_match_verified") : false;
+    if (!isMatchVerified(item)) return false;
     if (
       item.status === STATUS.added ||
       item.status === STATUS.duplicate ||
@@ -974,32 +961,27 @@
     ) {
       return false;
     }
-    if (item.franchiseMember) return __dbgWatch ? __dbgFail("franchise_member") : false;
-    if (item.commitClaimed) return __dbgWatch ? __dbgFail("commit_claimed") : false;
+    if (item.franchiseMember) return false;
+    if (item.commitClaimed) return false;
     // Franchise-duplicate check still pending (live AniList walk was rate
     // limited). Hold the row briefly; expireFranchiseCheckHolds fails open.
     if (
       item.franchiseCheckPendingAt &&
       Date.now() - item.franchiseCheckPendingAt < FRANCHISE_CHECK_HOLD_MS
     ) {
-      return __dbgWatch ? __dbgFail("franchise_check_pending") : false;
+      return false;
     }
-    if (!hasProviderId(item)) return __dbgWatch ? __dbgFail("no_provider_id") : false;
-    if (hasCommitTypeBlock(item)) return __dbgWatch ? __dbgFail("commit_type_block") : false;
+    if (!hasProviderId(item)) return false;
+    if (hasCommitTypeBlock(item)) return false;
     if (item.contentType === "anime") {
       const poster = item.details?.poster;
-      if (!poster || item.details?.posterPending) return __dbgWatch ? __dbgFail("missing_poster") : false;
+      if (!poster || item.details?.posterPending) return false;
     }
-    const eligible =
+    return (
       item.status === STATUS.ready_to_add ||
       item.status === STATUS.ready ||
-      item.status === STATUS.exact_match;
-    // #region agent log
-    if (__dbgWatch && eligible) {
-      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'import-job.js:isCommitEligible',message:'IS eligible',data:{title:item?.title,status:item?.status},hypothesisId:'H13',timestamp:Date.now()})}).catch(()=>{});
-    }
-    // #endregion
-    return eligible;
+      item.status === STATUS.exact_match
+    );
   }
 
   function countCommitEligible(items) {
@@ -4722,9 +4704,6 @@
           markWatchlistFranchiseDuplicate(item, { title: cand.title });
           changed = true;
           chainMatched = true;
-          // #region agent log
-          fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'import-job.js:applyLiveFranchiseDupSweep',message:'chain franchise dup marked',data:{title:item.title,parentTitle:cand.title,childId,candidateId:cand.anilistId},hypothesisId:'H12',timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           break;
         }
       }
@@ -4761,9 +4740,6 @@
           markWatchlistFranchiseDuplicate(item, { title: cand.title });
           changed = true;
           matched = true;
-          // #region agent log
-          fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'import-job.js:applyLiveFranchiseDupSweep',message:'live franchise dup marked',data:{title:item.title,parentTitle:cand.title,childId,candidateId:cand.anilistId,sharedRoot:childRoot},hypothesisId:'H12',timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           break;
         }
       }

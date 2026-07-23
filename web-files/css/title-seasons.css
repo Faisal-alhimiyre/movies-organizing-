@@ -1186,20 +1186,22 @@ html[data-theme="pink"] .tds-season-mark-btn--complete { border-color: #fff; col
 
 .tds-series-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.35rem;
   padding: 0.75rem 1.25rem 0.35rem;
 }
 
 .tds-series-tab {
-  flex: 1 1 0;
+  flex: 1 1 calc(25% - 0.35rem);
+  min-width: 4.5rem;
   min-height: 2.35rem;
-  padding: 0.45rem 0.75rem;
+  padding: 0.45rem 0.55rem;
   border: 1px solid var(--border, #363636);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.03);
   color: var(--text-muted, #a8a8a8);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
@@ -1329,6 +1331,25 @@ html[data-theme="pink"] .tds-season-mark-btn--complete { border-color: #fff; col
   margin: 0;
   font-size: 0.76rem;
   color: var(--text-muted, #a8a8a8);
+}
+
+.tds-movie-card__meta--badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.tds-movie-card__meta--badges .card__score {
+  font-size: 0.72rem;
+}
+
+.tds-movie-card__meta--badges .card__score-logo--imdb {
+  height: 0.8rem;
+}
+
+.tds-movie-card__meta--badges .card__score-logo--anilist {
+  height: 0.9rem;
 }
 
 .tds-movie-card__summary {

@@ -48,7 +48,7 @@
       href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="css/styles.css?v=172" />
+    <link rel="stylesheet" href="css/styles.css?v=183" />
     <link rel="stylesheet" href="css/theme.css?v=155" />
     <link rel="stylesheet" href="css/theme-light.css?v=154" />
     <link rel="stylesheet" href="css/theme-purple.css?v=154" />
@@ -58,14 +58,14 @@
     <link rel="stylesheet" href="css/typography.css?v=154" />
     <link rel="stylesheet" href="css/reduced-motion.css?v=155" />
     <link rel="stylesheet" href="css/accessibility.css?v=154" />
-    <link rel="stylesheet" href="css/rtl.css?v=154" />
+    <link rel="stylesheet" href="css/rtl.css?v=155" />
     <link rel="stylesheet" href="css/title-detail.css?v=156" />
-    <link rel="stylesheet" href="css/title-seasons.css?v=154" />
+    <link rel="stylesheet" href="css/title-seasons.css?v=156" />
     <script src="js/build-version.js?v=154"></script>
     <script src="js/themes.js?v=154"></script>
     <link
       rel="stylesheet"
-      href="css/mobile.css?v=158"
+      href="css/mobile.css?v=164"
       media="(max-width: 640px)"
     />
     <link rel="stylesheet" href="css/pull-to-refresh.css?v=157" />
@@ -205,12 +205,6 @@
                     </button>
                   </div>
                 </div>
-                <button type="button" class="account-menu__item" role="menuitem" data-action="open-credits">
-                  Credits &amp; data sources
-                </button>
-                <button type="button" class="account-menu__item" role="menuitem" data-action="restore-cloud">
-                  Restore list from cloud
-                </button>
                 <button type="button" class="account-menu__item" role="menuitem" data-action="storage-diagnostics" hidden id="storageDiagnosticsMenuItem">
                   Storage diagnostics
                 </button>
@@ -855,15 +849,6 @@
             class="add-mode-tab"
             role="tab"
             aria-selected="false"
-            data-add-mode="manual"
-          >
-            Manual
-          </button>
-          <button
-            type="button"
-            class="add-mode-tab"
-            role="tab"
-            aria-selected="false"
             data-add-mode="bulk"
           >
             Import list
@@ -872,15 +857,10 @@
 
         <div class="modal__search" id="searchAddPanel" hidden>
           <div class="title-search" id="searchAddStep">
-            <!-- Sticky controls: hint + search + type filter + status -->
             <div class="title-search__controls">
-              <p class="add-panel-hint">
-                <strong>Can't find your title?</strong> Tap <strong>Manual</strong> at the top and add it yourself.
-              </p>
-              <label class="form-field form-field--full">
-                <span class="form-field__label">Search movies &amp; shows</span>
-                <span class="search title-search__query">
-                  <span class="search__icon" aria-hidden="true">
+              <div class="title-search__hero">
+                <label class="title-search__field" for="titleSearchInput">
+                  <span class="title-search__field-icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false">
                       <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2" />
                       <path d="M16 16l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
@@ -889,13 +869,14 @@
                   <input
                     type="search"
                     id="titleSearchInput"
-                    class="search__input"
-                    placeholder="e.g. Avengers, Demon Slayer…"
+                    class="title-search__input"
+                    placeholder="Search titles…"
                     autocomplete="off"
+                    enterkeyhint="search"
                   />
                   <button
                     type="button"
-                    class="search__clear"
+                    class="title-search__clear"
                     id="titleSearchClearBtn"
                     hidden
                     data-i18n-aria="search.clearQuery"
@@ -904,18 +885,24 @@
                       <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                     </svg>
                   </button>
-                </span>
-              </label>
-              <div class="title-search__filters">
-                <label class="title-search__filter">
-                  <span class="title-search__filter-label">Type</span>
-                  <select id="titleSearchType" class="select">
-                    <option value="all">All</option>
-                    <option value="movie">Movies</option>
-                    <option value="series">TV Series</option>
-                    <option value="anime">Anime</option>
-                  </select>
                 </label>
+                <div
+                  class="title-search__type-pills"
+                  id="titleSearchTypePills"
+                  role="radiogroup"
+                  aria-label="Type"
+                >
+                  <button type="button" class="title-search__type-pill title-search__type-pill--active" data-search-type="all" aria-pressed="true">All</button>
+                  <button type="button" class="title-search__type-pill" data-search-type="movie" aria-pressed="false">Movies</button>
+                  <button type="button" class="title-search__type-pill" data-search-type="series" aria-pressed="false">TV</button>
+                  <button type="button" class="title-search__type-pill" data-search-type="anime" aria-pressed="false">Anime</button>
+                </div>
+                <select id="titleSearchType" class="title-search__type-select" hidden aria-hidden="true" tabindex="-1">
+                  <option value="all">All</option>
+                  <option value="movie">Movies</option>
+                  <option value="series">TV Series</option>
+                  <option value="anime">Anime</option>
+                </select>
               </div>
               <p class="title-search__status" id="titleSearchStatus" aria-live="polite"></p>
             </div>
@@ -961,7 +948,7 @@
             </div>
             <footer class="modal__footer title-search-confirm__footer">
               <button type="button" class="btn btn--ghost btn--back title-search-confirm__back" id="searchConfirmBack">
-                Back to search
+                Back
               </button>
               <button type="button" class="btn btn--primary title-search-confirm__add" id="searchConfirmAdd">
                 Add title
@@ -971,9 +958,6 @@
         </div>
 
         <form class="modal__form" id="itemForm" novalidate hidden>
-          <p class="add-panel-hint add-panel-hint--manual">
-            <strong>Step 1: Paste your link.</strong> IMDb, AniList, or MyAnimeList. We'll fill in the details for you.
-          </p>
           <div class="form-grid">
             <label class="form-field form-field--full">
               <span class="form-field__label">Link</span>
@@ -1062,7 +1046,6 @@
                 id="formSummary"
                 class="form-textarea"
                 rows="2"
-                required
               ></textarea>
             </label>
           </div>
@@ -1087,47 +1070,42 @@
 
         <div class="modal__bulk" id="bulkAddPanel" hidden>
           <div class="bulk-add__steps" id="bulkAddSteps">
-            <p class="bulk-add__headline">Add a whole list at once</p>
-            <ol class="bulk-add__step-list">
-              <li class="bulk-add__step">
-                <span class="bulk-add__step-num" aria-hidden="true">1</span>
-                <div class="bulk-add__step-body">
-                  <strong class="bulk-add__step-title">Copy the AI prompt</strong>
-                  <p>Tap below to copy a short message for ChatGPT, Claude, or any chatbot.</p>
-                  <button type="button" class="btn btn--ghost bulk-add__copy" id="copyBulkTemplate">
-                    Copy prompt
-                  </button>
-                </div>
-              </li>
-              <li class="bulk-add__step">
-                <span class="bulk-add__step-num" aria-hidden="true">2</span>
-                <div class="bulk-add__step-body">
-                  <strong class="bulk-add__step-title">Paste into your AI</strong>
-                  <p>Paste the prompt into your chatbot, then tell it which titles you want. For example:</p>
-                  <p class="bulk-add__example">“Here are my titles: Breaking Bad, Interstellar, Attack on Titan…”</p>
-                </div>
-              </li>
-              <li class="bulk-add__step">
-                <span class="bulk-add__step-num" aria-hidden="true">3</span>
-                <div class="bulk-add__step-body">
-                  <strong class="bulk-add__step-title">Paste or upload your list</strong>
-                  <p>Paste what your AI sent you in the box below, or upload a file with the exact same list. Only plain text files work (.txt or .tsv) — not PDF, Word, Excel, or images.</p>
-                  <textarea
-                    id="bulkPasteInput"
-                    class="form-textarea bulk-add__textarea"
-                    rows="4"
-                    placeholder="Paste your list here…"
-                    aria-label="List from your AI"
-                  ></textarea>
-                  <label class="bulk-add__file">
-                    <span class="bulk-add__file-label" id="bulkFileLabel">Upload list file (.txt or .tsv)</span>
-                    <input type="file" id="bulkFileInput" accept=".txt,.tsv,text/plain" hidden />
-                  </label>
-                  <p class="bulk-add__file-hint" id="bulkFileHint">Same list as above — plain text only.</p>
-                  <p class="backup-modal__hint" id="bulkPasteError" hidden></p>
-                </div>
-              </li>
-            </ol>
+            <p class="bulk-add__headline" id="bulkHeadline">Import a list</p>
+            <p class="bulk-add__lead" id="bulkLead">Copy the prompt for your AI, then paste the list below — or insert a .txt / .tsv file.</p>
+            <div class="bulk-add__actions-row">
+              <button type="button" class="btn btn--ghost bulk-add__copy" id="copyBulkTemplate">
+                <span class="bulk-add__copy-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                </span>
+                <span id="copyBulkTemplateLabel">Copy prompt</span>
+              </button>
+              <span class="bulk-add__or" id="bulkActionsOr">or</span>
+              <label class="bulk-add__file bulk-add__file--inline" title="Insert a .txt or .tsv file">
+                <span class="bulk-add__file-btn" id="bulkFileLabel">
+                  <span class="bulk-add__file-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <path d="M14 2v6h6"></path>
+                      <path d="M12 18v-6"></path>
+                      <path d="M9 15l3-3 3 3"></path>
+                    </svg>
+                  </span>
+                  <span class="visually-hidden" id="bulkFileLabelText">Insert file</span>
+                </span>
+                <input type="file" id="bulkFileInput" accept=".txt,.tsv,text/plain" hidden />
+              </label>
+            </div>
+            <textarea
+              id="bulkPasteInput"
+              class="form-textarea bulk-add__textarea"
+              rows="8"
+              placeholder="Paste your list here…"
+              aria-label="List of titles"
+            ></textarea>
+            <p class="backup-modal__hint" id="bulkPasteError" hidden></p>
           </div>
 
           <div class="bulk-import-preview" id="bulkImportPreview" hidden>
@@ -1407,27 +1385,27 @@
     <script src="js/watchlist-lifecycle.js?v=165"></script>
     <script src="js/import-job-store.js?v=179"></script>
     <script src="js/storage-diagnostics.js?v=165"></script>
-    <script src="js/i18n.js?v=183"></script>
+    <script src="js/i18n.js?v=189"></script>
     <script src="js/accessibility.js?v=154"></script>
     <script src="js/dialog.js?v=154"></script>
     <script src="js/watch-progress.js?v=154"></script>
     <script src="js/metadata.js?v=198"></script>
     <script src="js/tvdb-service.js?v=154"></script>
-    <script src="js/tmdb-service.js?v=155"></script>
+    <script src="js/tmdb-service.js?v=156"></script>
     <script src="js/anifiller.js?v=154"></script>
-    <script src="js/series-metadata.js?v=194"></script>
+    <script src="js/series-metadata.js?v=201"></script>
     <script src="js/auth.js?v=165"></script>
     <script src="js/sync.js?v=179"></script>
     <script src="js/genres.js?v=154"></script>
     <script src="js/bulk-titles.js?v=166"></script>
-    <script src="js/import-job.js?v=207"></script>
+    <script src="js/import-job.js?v=208"></script>
     <script src="js/data.js?v=154"></script>
     <script src="js/mobile.js?v=154"></script>
     <script src="js/pull-to-refresh.js?v=160"></script>
     <script src="js/watch-trace.js?v=155"></script>
-    <script src="js/title-detail.js?v=157"></script>
-    <script src="js/title-seasons.js?v=175"></script>
-    <script src="js/app.js?v=229"></script>
+    <script src="js/title-detail.js?v=162"></script>
+    <script src="js/title-seasons.js?v=179"></script>
+    <script src="js/app.js?v=245"></script>
     <script src="js/pwa.js?v=154"></script>
   </body>
 </html>

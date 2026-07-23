@@ -1338,23 +1338,54 @@
     }
   }
 
+  /** OMDb often indexes anime under simplified romaji (Busou → Buso). */
+  function omdbTitleVariants(title) {
+    const raw = String(title || "").trim();
+    if (raw.length < 2) return [];
+    const out = [raw];
+    const simplified = raw.replace(/ou/gi, "o").replace(/uu/gi, "u");
+    if (simplified !== raw && simplified.length >= 2) out.push(simplified);
+    return out;
+  }
+
+  async function omdbPayloadForImdbId(imdbId, options = {}) {
+    const id = String(imdbId || "").toLowerCase();
+    if (!/^tt\d{7,10}$/.test(id)) return null;
+    const WM = window.WatchlistMetadata;
+    if (!WM?.getMetadata) return null;
+    try {
+      return (await WM.getMetadata(id, options)) || null;
+    } catch {
+      return null;
+    }
+  }
+
   async function searchOmdbImdbByTitle(title, year = null, options = {}) {
-    const q = String(title || "").trim();
-    if (q.length < 2) return null;
+    const variants = omdbTitleVariants(title);
+    if (!variants.length) return null;
 
     const types = options.types || ["series", "movie"];
     if (getOmdbKey()) {
-      for (const omdbType of types) {
-        const found = await searchOmdbImdbByTitleTyped(q, year, omdbType);
-        if (found) return found;
+      for (const q of variants) {
+        for (const omdbType of types) {
+          const found = await searchOmdbImdbByTitleTyped(q, year, omdbType);
+          if (found) return found;
+        }
       }
     }
+
+    if (options.omdbOnly) return null;
 
     // Fallback: IMDb's own suggestion engine matches alternate titles (AKAs)
     // that OMDb's literal title search misses — e.g. English anime titles vs
     // IMDb's romaji naming ("Yamada and the Seven Witches" →
     // "Yamada-kun to 7-nin no Majo"), or "seven" → Se7en.
-    return searchImdbSuggestImdbId(q, year, types);
+    // Only accept suggestions OMDb can resolve (filters bad AKA matches).
+    for (const q of variants) {
+      const found = await searchImdbSuggestImdbId(q, year, types);
+      if (found) return found;
+    }
+    return null;
   }
 
   async function searchImdbSuggestImdbId(q, year, types) {
@@ -1362,7 +1393,7 @@
     if (!window.WatchlistTmdb.isAvailable?.()) return null;
 
     const typesKey = [...types].sort().join(",");
-    const cacheKey = `metadata:v1:resolve:imdb:suggest:${q.toLowerCase()}:${year || ""}:${typesKey}`;
+    const cacheKey = `metadata:v2:resolve:imdb:suggest:${q.toLowerCase()}:${year || ""}:${typesKey}`;
     const cached = readCached(cacheKey, TTL_RESOLVE);
     if (cached?.imdbId) return cached.imdbId;
     if (cached?.miss) return null;
@@ -1378,21 +1409,28 @@
     // Suggestion rows carry type "movie" | "series" (mapped from IMDb qids).
     const wantTypes = new Set(types);
     const wantYear = year != null ? Number(year) : null;
-    let best = null;
+    let fallbackId = null;
     for (const row of res.results || []) {
       if (!wantTypes.has(row.type)) continue;
       if (wantYear != null && Number.isFinite(wantYear)) {
         const rowYear = parseInt(row.year, 10);
         if (Number.isFinite(rowYear) && Math.abs(rowYear - wantYear) > 1) continue;
       }
-      // Results are relevance-ranked by IMDb; first type/year-compatible wins.
-      best = row;
-      break;
+      const candidate = String(row.imdbId || "").toLowerCase();
+      if (!/^tt\d{7,10}$/.test(candidate)) continue;
+      const meta = await omdbPayloadForImdbId(candidate);
+      if (!meta) continue;
+      // Prefer an id that already has an IMDb score in OMDb.
+      if (meta.rating) {
+        writeSeriesCacheEntry(cacheKey, { imdbId: candidate }, TTL_RESOLVE);
+        return candidate;
+      }
+      if (!fallbackId) fallbackId = candidate;
     }
 
-    if (best?.imdbId) {
-      writeSeriesCacheEntry(cacheKey, { imdbId: best.imdbId }, TTL_RESOLVE);
-      return best.imdbId;
+    if (fallbackId) {
+      writeSeriesCacheEntry(cacheKey, { imdbId: fallbackId }, TTL_RESOLVE);
+      return fallbackId;
     }
     writeSeriesCacheEntry(cacheKey, { miss: true }, TTL_RESOLVE);
     return null;
@@ -1467,23 +1505,30 @@
     return null;
   }
 
-  async function searchOmdbImdbCandidates(itemOrHints, year = null) {
+  async function searchOmdbImdbCandidates(itemOrHints, year = null, options = {}) {
     const title = String(itemOrHints?.title || itemOrHints || "").trim();
     const altTitle = String(itemOrHints?.altTitle || "").trim();
     const yearHint = itemOrHints?.year ?? year ?? null;
     const titles = [];
-    if (title.length >= 2) titles.push(title);
-    if (altTitle.length >= 2 && altTitle !== title) titles.push(altTitle);
+    const seen = new Set();
+    for (const base of [title, altTitle]) {
+      for (const variant of omdbTitleVariants(base)) {
+        const key = variant.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        titles.push(variant);
+      }
+    }
 
     if (!titles.length) return null;
 
     for (const candidate of titles) {
-      const withYear = await searchOmdbImdbByTitle(candidate, yearHint);
+      const withYear = await searchOmdbImdbByTitle(candidate, yearHint, options);
       if (withYear) return withYear;
     }
     if (yearHint != null && yearHint !== "") {
       for (const candidate of titles) {
-        const loose = await searchOmdbImdbByTitle(candidate, null);
+        const loose = await searchOmdbImdbByTitle(candidate, null, options);
         if (loose) return loose;
       }
     }
@@ -1874,13 +1919,19 @@
     const fromLink = WM?.extractImdbId?.(item?.link);
     if (fromLink) return fromLink;
 
-    const fromOmdbEarly = await searchOmdbImdbCandidates(searchHints, yearHint);
-    if (fromOmdbEarly) {
-      if (anilistId) {
-        const cacheKey = `metadata:v11:resolve:imdb:anilist:${anilistId}`;
-        writeSeriesCacheEntry(cacheKey, { imdbId: fromOmdbEarly }, TTL_RESOLVE);
+    // When we have an AniList id, skip English-title suggest here and let
+    // resolveImdbFromAnilistMedia try romaji/OMDb-validated candidates.
+    if (!anilistId || skipAnilist) {
+      const fromOmdbEarly = await searchOmdbImdbCandidates(searchHints, yearHint, {
+        omdbOnly: Boolean(anilistId),
+      });
+      if (fromOmdbEarly) {
+        if (anilistId) {
+          const cacheKey = `metadata:v12:resolve:imdb:anilist:${anilistId}`;
+          writeSeriesCacheEntry(cacheKey, { imdbId: fromOmdbEarly }, TTL_RESOLVE);
+        }
+        return fromOmdbEarly;
       }
-      return fromOmdbEarly;
     }
 
     if (!anilistId || skipAnilist) return null;
@@ -1892,6 +1943,8 @@
     }, {
       allowFranchiseFallback: !seasonScoped,
       skipAnilist,
+      requireRating: hints.requireRating === true,
+      forceRefresh: hints.forceRefresh === true,
     });
   }
 
@@ -1899,24 +1952,35 @@
     const allowFranchiseFallback = opts.allowFranchiseFallback !== false;
     const skipAnilist = opts.skipAnilist === true || hints.skipAnilist === true;
     const WM = window.WatchlistMetadata;
-    const cacheKey = `metadata:v11:resolve:imdb:anilist:${anilistId}`;
+    // v12: do not trust AniList/suggest IMDb ids that OMDb cannot resolve
+    // (e.g. Arms Alchemy → wrong tt11916660 instead of Buso Renkin tt0877507).
+    const cacheKey = `metadata:v12:resolve:imdb:anilist:${anilistId}`;
     const cached = readCached(cacheKey, TTL_RESOLVE);
-    if (cached?.imdbId) return cached.imdbId;
+    if (cached?.imdbId && !opts.forceRefresh) {
+      if (!opts.requireRating) return cached.imdbId;
+      const cachedMeta = await omdbPayloadForImdbId(cached.imdbId);
+      if (cachedMeta?.rating) return cached.imdbId;
+    }
 
     const titleHint = String(hints.title || "").trim();
     const yearHint = hints.year ?? null;
+    // Literal OMDb only here — IMDb suggest on English anime titles often
+    // returns an unrelated tt id that still resolves in OMDb.
     const fromOmdbHint = await searchOmdbImdbCandidates(
       { title: titleHint, altTitle: hints.altTitle || "", year: yearHint },
-      yearHint
+      yearHint,
+      { omdbOnly: true }
     );
-    if (fromOmdbHint) {
+    if (fromOmdbHint && skipAnilist) {
       writeSeriesCacheEntry(cacheKey, { imdbId: fromOmdbHint }, TTL_RESOLVE);
       return fromOmdbHint;
     }
 
-    if (skipAnilist) return null;
-    if (isAnilistRateLimited()) return null;
-    if (window.WatchlistMetadata?.getAnilistQueueStatus?.()?.paused) return null;
+    if (skipAnilist) return fromOmdbHint || null;
+    if (isAnilistRateLimited()) return fromOmdbHint || null;
+    if (window.WatchlistMetadata?.getAnilistQueueStatus?.()?.paused) {
+      return fromOmdbHint || null;
+    }
 
     try {
       const data = await anilistQuery(
@@ -1930,36 +1994,80 @@
         { id: Number(anilistId) }
       );
       const media = data?.Media;
-      if (!media) return null;
+      if (!media) return fromOmdbHint || null;
 
-      for (const link of media.externalLinks || []) {
-        const fromUrl = WM?.extractImdbId?.(link?.url);
-        if (fromUrl) {
-          writeSeriesCacheEntry(cacheKey, { imdbId: fromUrl }, TTL_RESOLVE);
-          return fromUrl;
-        }
-      }
-
-      const title =
-        hints.title ||
-        media.title?.english ||
-        media.title?.romaji ||
-        media.title?.native ||
-        "";
       const year =
         hints.year ??
         media.startDate?.year ??
         null;
 
-      const fromOmdb = await searchOmdbImdbByTitle(title, year);
-      if (fromOmdb) {
-        writeSeriesCacheEntry(cacheKey, { imdbId: fromOmdb }, TTL_RESOLVE);
-        return fromOmdb;
+      // Prefer OMDb title search across English/romaji/native before trusting
+      // AniList's IMDb external link (often missing or wrong for anime).
+      const mediaTitles = [
+        hints.title,
+        hints.altTitle,
+        media.title?.english,
+        media.title?.romaji,
+        media.title?.native,
+      ];
+      const titlePasses = [];
+      const seenPass = new Set();
+      for (const t of mediaTitles) {
+        for (const v of omdbTitleVariants(t)) {
+          const key = v.toLowerCase();
+          if (seenPass.has(key)) continue;
+          seenPass.add(key);
+          titlePasses.push(v);
+        }
+      }
+      let bestRated = null;
+      let bestAny = null;
+      // Pass 1: OMDb literal search only (romaji/Buso variants) — avoids English
+      // AKA suggest hits that point at the wrong title.
+      for (const passTitle of titlePasses) {
+        const found = await searchOmdbImdbByTitle(passTitle, year, { omdbOnly: true });
+        if (!found) continue;
+        const meta = await omdbPayloadForImdbId(found);
+        if (!meta) continue;
+        if (meta.rating) {
+          bestRated = found;
+          break;
+        }
+        if (!bestAny) bestAny = found;
+      }
+      // Pass 2: allow IMDb suggest only if OMDb literal search missed.
+      if (!bestRated) {
+        for (const passTitle of titlePasses) {
+          const found = await searchOmdbImdbByTitle(passTitle, year);
+          if (!found) continue;
+          const meta = await omdbPayloadForImdbId(found);
+          if (!meta) continue;
+          if (meta.rating) {
+            bestRated = found;
+            break;
+          }
+          if (!bestAny) bestAny = found;
+        }
+      }
+      const fromMediaTitles = bestRated || (!opts.requireRating ? bestAny : null);
+      if (fromMediaTitles) {
+        writeSeriesCacheEntry(cacheKey, { imdbId: fromMediaTitles }, TTL_RESOLVE);
+        return fromMediaTitles;
       }
 
-      if (!allowFranchiseFallback) return null;
+      for (const link of media.externalLinks || []) {
+        const fromUrl = WM?.extractImdbId?.(link?.url);
+        if (!fromUrl) continue;
+        const meta = await omdbPayloadForImdbId(fromUrl);
+        if (!meta) continue;
+        if (opts.requireRating && !meta.rating) continue;
+        writeSeriesCacheEntry(cacheKey, { imdbId: fromUrl }, TTL_RESOLVE);
+        return fromUrl;
+      }
 
-      if (isAnilistRateLimited()) return null;
+      if (!allowFranchiseFallback) return fromOmdbHint || null;
+
+      if (isAnilistRateLimited()) return fromOmdbHint || null;
 
       const walk = await walkAnilistTvPrequelRoot(Number(anilistId));
       const rootMedia = walk?.completed ? walk.media : null;
@@ -1972,14 +2080,17 @@
         const rootYear = rootMedia.startDate?.year ?? null;
         const franchiseImdb = await searchOmdbImdbByTitle(rootTitle, rootYear);
         if (franchiseImdb) {
-          writeSeriesCacheEntry(cacheKey, { imdbId: franchiseImdb }, TTL_RESOLVE);
-          return franchiseImdb;
+          const meta = await omdbPayloadForImdbId(franchiseImdb);
+          if (meta && (!opts.requireRating || meta.rating)) {
+            writeSeriesCacheEntry(cacheKey, { imdbId: franchiseImdb }, TTL_RESOLVE);
+            return franchiseImdb;
+          }
         }
       }
     } catch {
       // no linked IMDb
     }
-    return null;
+    return fromOmdbHint || null;
   }
 
   function buildSeasonMediaResolution(seasonAnilistId, resolution, rootAnilistId) {
@@ -3129,6 +3240,285 @@
     }
 
     return { state: ResultState.NO_SEASONS, movies: [] };
+  }
+
+  function normalizeAnilistSimilarTitle(node) {
+    const format = anilistSeasonFormat(node?.format);
+    const title =
+      node?.title?.english || node?.title?.romaji || node?.title?.native || "";
+    const duration = parsePositiveCount(node?.duration);
+    return {
+      source: "anilist",
+      anilistId: Number(node.id),
+      title,
+      poster: node?.coverImage?.large || "",
+      year: node?.startDate?.year ? String(node.startDate.year) : "",
+      overview: stripHtml(node?.description || ""),
+      runtimeMinutes: duration,
+      score: node?.averageScore != null ? Number(node.averageScore) : null,
+      contentType: "anime",
+      format,
+      pick: { anilistId: Number(node.id), source: "anilist" },
+    };
+  }
+
+  function similarTitleYearSortKey(entry) {
+    const y = parseInt(String(entry?.year || "").slice(0, 4), 10);
+    return Number.isFinite(y) ? y : 9999;
+  }
+
+  /**
+   * AniList recommendations often include multiple seasons of the same show as
+   * separate media. Collapse to one card per franchise root (prefer root /
+   * earliest season) so Similar never lists X S1…S9 as nine entries.
+   */
+  async function dedupeAnilistSimilarByFranchise(titles) {
+    if (!Array.isArray(titles) || titles.length < 2) return titles || [];
+
+    const ids = titles
+      .map((t) => Number(t.anilistId))
+      .filter((id) => Number.isFinite(id));
+    if (ids.length < 2) return titles;
+
+    const mapResult = await buildAnimeFranchiseRootMap(ids, { throttle: true });
+    const idToRoot = mapResult?.idToRoot || new Map();
+
+    const byId = new Map();
+    for (const entry of titles) {
+      const id = Number(entry.anilistId);
+      if (Number.isFinite(id)) byId.set(id, entry);
+    }
+
+    const groups = new Map();
+    const order = [];
+    for (const entry of titles) {
+      const id = Number(entry.anilistId);
+      if (!Number.isFinite(id)) {
+        order.push({ kind: "singleton", entry });
+        continue;
+      }
+      const root = idToRoot.get(id) ?? id;
+      const key = String(root);
+      if (!groups.has(key)) {
+        groups.set(key, { root, members: [] });
+        order.push({ kind: "group", key });
+      }
+      groups.get(key).members.push(entry);
+    }
+
+    const out = [];
+    for (const item of order) {
+      if (item.kind === "singleton") {
+        out.push(item.entry);
+        continue;
+      }
+      const group = groups.get(item.key);
+      if (!group?.members?.length) continue;
+      if (group.members.length === 1) {
+        const only = group.members[0];
+        const rootId = Number(group.root);
+        if (
+          Number.isFinite(rootId) &&
+          Number(only.anilistId) !== rootId
+        ) {
+          const rootEntry = byId.get(rootId);
+          out.push({
+            ...only,
+            ...(rootEntry
+              ? {
+                  title: rootEntry.title,
+                  poster: rootEntry.poster,
+                  year: rootEntry.year,
+                  overview: rootEntry.overview,
+                  runtimeMinutes: rootEntry.runtimeMinutes,
+                  score: rootEntry.score,
+                  format: rootEntry.format,
+                }
+              : {}),
+            anilistId: rootId,
+            pick: { anilistId: rootId, source: "anilist" },
+          });
+        } else {
+          out.push(only);
+        }
+        continue;
+      }
+
+      const rootId = Number(group.root);
+      let best =
+        group.members.find((m) => Number(m.anilistId) === rootId) || null;
+      if (!best) {
+        best = [...group.members].sort(
+          (a, b) => similarTitleYearSortKey(a) - similarTitleYearSortKey(b)
+        )[0];
+      }
+      const rootEntry = byId.get(rootId);
+      if (Number.isFinite(rootId) && Number(best.anilistId) !== rootId) {
+        out.push({
+          ...best,
+          ...(rootEntry
+            ? {
+                title: rootEntry.title,
+                poster: rootEntry.poster,
+                year: rootEntry.year,
+                overview: rootEntry.overview,
+                runtimeMinutes: rootEntry.runtimeMinutes,
+                score: rootEntry.score,
+                format: rootEntry.format,
+              }
+            : {}),
+          anilistId: rootId,
+          pick: { anilistId: rootId, source: "anilist" },
+        });
+      } else {
+        out.push(best);
+      }
+    }
+
+    return out;
+  }
+
+  async function fetchAnilistSimilarTitles(anilistId, locale, excludeId = null) {
+    const cacheKey = `metadata:v2:similar:anilist:${anilistId}:${locale}`;
+    const cached = readCached(cacheKey, TTL_SERIES);
+    if (cached?.titles) {
+      return {
+        state: cached.titles.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
+        titles: cached.titles,
+        isStale: isStale(cacheKey, TTL_SERIES),
+      };
+    }
+
+    const data = await anilistQuery(
+      `query ($id: Int) {
+        Media(id: $id, type: ANIME) {
+          id
+          recommendations(page: 1, perPage: 25, sort: RATING_DESC) {
+            nodes {
+              rating
+              mediaRecommendation {
+                id
+                type
+                format
+                episodes
+                duration
+                averageScore
+                title { english romaji native }
+                coverImage { large }
+                description(asHtml: false)
+                startDate { year month day }
+              }
+            }
+          }
+        }
+      }`,
+      { id: anilistId }
+    );
+
+    const nodes = data?.Media?.recommendations?.nodes || [];
+    const seen = new Set();
+    const exclude = Number(excludeId) || Number(anilistId);
+    const rawTitles = [];
+    for (const row of nodes) {
+      const node = row?.mediaRecommendation;
+      if (!node?.id || node.type !== "ANIME") continue;
+      const id = Number(node.id);
+      if (!Number.isFinite(id) || id === exclude || seen.has(id)) continue;
+      seen.add(id);
+      rawTitles.push(normalizeAnilistSimilarTitle(node));
+    }
+
+    const titles = await dedupeAnilistSimilarByFranchise(rawTitles);
+
+    writeSeriesCacheEntry(cacheKey, { titles }, TTL_SERIES);
+    return {
+      state: titles.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
+      titles,
+    };
+  }
+
+  async function fetchTmdbSimilarTitles(resolution, item, locale) {
+    const Tmdb = window.WatchlistTmdb;
+    if (!Tmdb?.fetchSimilar || !Tmdb.isAvailable?.()) {
+      return { state: ResultState.NO_SEASONS, titles: [] };
+    }
+
+    const imdbId =
+      resolution?.imdbId ||
+      window.WatchlistMetadata?.extractImdbId?.(item?.imdbLink) ||
+      window.WatchlistMetadata?.extractImdbId?.(item?.link) ||
+      "";
+    const tmdbId = Number(resolution?.tmdbId) || Number(item?.tmdbId) || null;
+    const mediaType = item?.contentType === "movies" ? "movie" : "tv";
+    const cacheKey = `metadata:v1:similar:tmdb:${mediaType}:${tmdbId || imdbId || "x"}:${locale}`;
+    const cached = readCached(cacheKey, TTL_SERIES);
+    if (cached?.titles) {
+      return {
+        state: cached.titles.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
+        titles: cached.titles,
+        isStale: isStale(cacheKey, TTL_SERIES),
+      };
+    }
+
+    const result = await Tmdb.fetchSimilar({
+      tmdbId: Number.isFinite(tmdbId) && tmdbId > 0 ? tmdbId : null,
+      mediaType,
+      imdbId,
+      locale,
+    });
+    if (!result?.ok) {
+      return { state: ResultState.OFFLINE_NO_CACHE, titles: [] };
+    }
+
+    const titles = (result.results || []).map((row) => ({
+      source: "tmdb",
+      tmdbId: Number(row.tmdbId) || null,
+      title: row.title || "",
+      poster: row.poster || "",
+      year: row.year || "",
+      overview: row.overview || "",
+      score: row.score != null ? Number(row.score) : null,
+      contentType: row.contentType || (mediaType === "movie" ? "movies" : "tvSeries"),
+      pick: {
+        source: "tmdb",
+        tmdbId: Number(row.tmdbId) || null,
+        tmdbType: row.tmdbType || mediaType,
+        title: row.title || "",
+        year: row.year || "",
+      },
+    })).filter((t) => t.title);
+
+    writeSeriesCacheEntry(cacheKey, { titles }, TTL_SERIES);
+    return {
+      state: titles.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
+      titles,
+    };
+  }
+
+  /**
+   * "More like this" recommendations — AniList for anime, TMDB (IMDb-linked) for
+   * movies/TV. Same card shape as related movies for the Similar tab.
+   */
+  async function fetchSimilarTitles(resolution, item, locale = "en") {
+    if (!resolution || resolution.isNegative) {
+      return { state: ResultState.INVALID_ID, titles: [] };
+    }
+
+    let anilistId = resolution.anilistId ? Number(resolution.anilistId) : null;
+    if (!anilistId && item?.contentType === "anime") {
+      const WM = window.WatchlistMetadata;
+      anilistId = Number(WM?.extractAnilistId?.(item?.link)) || null;
+      if (!anilistId) {
+        const resolved = await resolveAnimeSeriesId(item);
+        anilistId = resolved?.anilistId ? Number(resolved.anilistId) : null;
+      }
+    }
+
+    if (anilistId) {
+      return fetchAnilistSimilarTitles(anilistId, locale, anilistId);
+    }
+
+    return fetchTmdbSimilarTitles(resolution, item, locale);
   }
 
   async function fetchAnilistSeriesMetadata(anilistId, locale, fallbackPoster = "") {
@@ -4496,10 +4886,12 @@
           (await resolveSeriesId(item))?.anilistId ||
           null;
         if (anilistId) {
-          if (!item?.imdbRating) {
-            let linkedImdb = imdbId;
-            if (!linkedImdb) {
-              linkedImdb = await resolveLinkedImdbId(
+          let linkedImdb = imdbId;
+          let imdbMeta = linkedImdb ? await omdbPayloadForImdbId(linkedImdb) : null;
+          const needsRating = !item?.imdbRating;
+          if (needsRating || !imdbMeta) {
+            if (!imdbMeta?.rating) {
+              const resolved = await resolveLinkedImdbId(
                 { anilistId: Number(anilistId) },
                 item,
                 {
@@ -4507,18 +4899,34 @@
                   altTitle: item?.altTitle,
                   year: item?.year,
                   skipAnilist: isAnilistRateLimited(),
+                  requireRating: needsRating,
+                  forceRefresh: true,
                 }
               );
-            }
-            if (linkedImdb) {
-              const imdbMeta = await WM.getMetadata(linkedImdb);
-              if (imdbMeta?.rating) {
-                patches.imdbRating = imdbMeta.rating;
-                patches.imdbId = linkedImdb;
-                debugPayload.fieldsReturned.push("imdbRating");
-                debugPayload.providerUsed.push(`OMDb ${linkedImdb}`);
+              if (resolved && resolved !== linkedImdb) {
+                linkedImdb = resolved;
+                imdbMeta = await omdbPayloadForImdbId(linkedImdb, { refresh: true });
+              } else if (!linkedImdb && resolved) {
+                linkedImdb = resolved;
+                imdbMeta = await omdbPayloadForImdbId(linkedImdb);
+              } else if (linkedImdb && !imdbMeta && resolved) {
+                linkedImdb = resolved;
+                imdbMeta = await omdbPayloadForImdbId(linkedImdb, { refresh: true });
               }
             }
+          }
+          if (imdbMeta?.rating && needsRating) {
+            patches.imdbRating = imdbMeta.rating;
+            patches.imdbId = linkedImdb;
+            debugPayload.fieldsReturned.push("imdbRating");
+            debugPayload.providerUsed.push(`OMDb ${linkedImdb}`);
+          } else if (linkedImdb && linkedImdb !== imdbId) {
+            patches.imdbId = linkedImdb;
+            if (imdbMeta?.rating && needsRating) {
+              patches.imdbRating = imdbMeta.rating;
+              debugPayload.fieldsReturned.push("imdbRating");
+            }
+            debugPayload.providerUsed.push(`OMDb ${linkedImdb}`);
           }
 
           if (!isAnilistRateLimited() && !window.WatchlistMetadata?.getAnilistQueueStatus?.()?.paused) {
@@ -4553,6 +4961,7 @@
         debugPayload.fieldsSaved.push(key);
       }
     }
+    if (patches.imdbId) debugPayload.providerId = patches.imdbId;
 
     const missing = debugPayload.fieldsRequested.filter(
       (field) => !debugPayload.fieldsReturned.includes(field)
@@ -5063,10 +5472,6 @@
 
   function findWatchlistFranchiseDuplicateSource(item, watchlistAnime = [], rootMap = null) {
     const childId = Number(item?.pick?.anilistId ?? item?.details?.anilistId ?? item?.anilistId);
-    // #region agent log
-    const __dbgTitle = String(item?.title || "");
-    const __dbgIsInteresting = /naruto|boruto|fairy tail/i.test(__dbgTitle);
-    // #endregion
     if (!Number.isFinite(childId) || childId <= 0) return null;
     if (!Array.isArray(watchlistAnime) || !watchlistAnime.length) return null;
 
@@ -5083,11 +5488,6 @@
     }
 
     const childRoot = map.get(childId);
-    // #region agent log
-    if (__dbgIsInteresting) {
-      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'series-metadata.js:findWatchlistFranchiseDuplicateSource',message:'franchise root lookup',data:{title:__dbgTitle,childId,childRoot:childRoot||null,watchlistAnimeAnilistIds:watchlistAnime.map((w)=>Number(w.anilistId)),watchlistAnimeTitles:watchlistAnime.map((w)=>w.title),mapEntries:[...map.entries()]},hypothesisId:'H12',timestamp:Date.now()})}).catch(()=>{});
-    }
-    // #endregion
     if (!childRoot) return null;
 
     const rootCard = watchlistAnime.find((w) => Number(w.anilistId) === childRoot);
@@ -5151,6 +5551,7 @@
     fetchSeriesMetadata,
     fetchSeasonEpisodes,
     fetchRelatedMovies,
+    fetchSimilarTitles,
     fetchTitleEpisodeTotal,
     fetchTitleBadgeMeta,
     fetchTitleSeriesCounts,

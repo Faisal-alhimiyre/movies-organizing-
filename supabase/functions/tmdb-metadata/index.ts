@@ -4,7 +4,7 @@
  * Proxies a small allowlisted subset of TMDB v3 calls so the browser never
  * needs a client-side TMDB API key for per-episode ratings.
  *
- * Allowed actions: resolve | seasonRatings | search | details | tvFetch | imdbSuggest
+ * Allowed actions: resolve | seasonRatings | search | details | tvFetch | imdbSuggest | similar
  *
  * Secret env vars:
  *   TMDB_API_KEY   (required)
@@ -19,6 +19,7 @@ const ALLOWED_ACTIONS = new Set([
   "details",
   "tvFetch",
   "imdbSuggest",
+  "similar",
 ]);
 
 const CORS: Record<string, string> = {
@@ -560,6 +561,85 @@ async function actionImdbSuggest(
   return { ok: true, results };
 }
 
+/** Similar / recommendations for a movie or TV show (TMDB). */
+async function actionSimilar(
+  p: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  let tmdbId = n(p.tmdbId);
+  let mediaType = s(p.mediaType) === "movie" ? "movie" : s(p.mediaType) === "tv" ? "tv" : "";
+  const imdbId = s(p.imdbId);
+
+  if ((!tmdbId || tmdbId <= 0) && /^tt\d{6,10}$/.test(imdbId)) {
+    const findJson = await tmdbGet(`find/${imdbId}`, {
+      external_source: "imdb_id",
+    });
+    const movieHit = (Array.isArray(findJson?.movie_results)
+      ? findJson.movie_results
+      : [])[0] as Record<string, unknown> | undefined;
+    const tvHit = (Array.isArray(findJson?.tv_results)
+      ? findJson.tv_results
+      : [])[0] as Record<string, unknown> | undefined;
+    if (mediaType === "movie" && movieHit) {
+      tmdbId = n(movieHit.id);
+    } else if (mediaType === "tv" && tvHit) {
+      tmdbId = n(tvHit.id);
+    } else if (tvHit) {
+      tmdbId = n(tvHit.id);
+      mediaType = "tv";
+    } else if (movieHit) {
+      tmdbId = n(movieHit.id);
+      mediaType = "movie";
+    }
+  }
+
+  if (!mediaType) mediaType = "tv";
+  if (!tmdbId || tmdbId <= 0) return { error: "not_found", results: [] };
+
+  const lang = tmdbLanguage(p.locale);
+  const [similarJson, recJson] = await Promise.all([
+    tmdbGet(`${mediaType}/${tmdbId}/similar`, { language: lang, page: "1" }),
+    tmdbGet(`${mediaType}/${tmdbId}/recommendations`, {
+      language: lang,
+      page: "1",
+    }),
+  ]);
+
+  const rows: Record<string, unknown>[] = [];
+  const seen = new Set<number>();
+  for (const json of [recJson, similarJson]) {
+    const list = Array.isArray(json?.results) ? json.results : [];
+    for (const row of list as Record<string, unknown>[]) {
+      const id = n(row.id);
+      if (!id || seen.has(id) || id === tmdbId) continue;
+      seen.add(id);
+      rows.push(row);
+    }
+  }
+
+  const IMG = "https://image.tmdb.org/t/p/w342";
+  const results = rows.slice(0, 24).map((row) => {
+    const id = n(row.id) || 0;
+    const title = s(row.title || row.name);
+    const date = s(row.release_date || row.first_air_date);
+    const year = date.length >= 4 ? date.substring(0, 4) : "";
+    const posterPath = s(row.poster_path);
+    const vote = n(row.vote_average);
+    return {
+      source: "tmdb",
+      tmdbId: id,
+      tmdbType: mediaType,
+      title,
+      year,
+      overview: s(row.overview),
+      poster: posterPath ? `${IMG}${posterPath}` : "",
+      score: vote != null && vote > 0 ? Math.round(vote * 10) : null,
+      contentType: mediaType === "movie" ? "movies" : "tvSeries",
+    };
+  }).filter((r) => r.title);
+
+  return { ok: true, mediaType, tmdbId, results };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
@@ -610,6 +690,9 @@ Deno.serve(async (req: Request) => {
         break;
       case "imdbSuggest":
         result = await actionImdbSuggest(body);
+        break;
+      case "similar":
+        result = await actionSimilar(body);
         break;
       default:
         result = { error: "unsupported_action" };

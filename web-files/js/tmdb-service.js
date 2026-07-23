@@ -179,6 +179,34 @@
     }
   }
 
+  /**
+   * Similar / recommended titles for a movie or TV show (TMDB).
+   * Pass tmdbId + mediaType ("movie"|"tv"), or imdbId to resolve first.
+   */
+  async function fetchSimilar({
+    tmdbId = null,
+    mediaType = "tv",
+    imdbId = "",
+    locale = "en",
+  } = {}) {
+    try {
+      const result = await callFunction({
+        action: "similar",
+        tmdbId,
+        mediaType,
+        imdbId,
+        locale,
+      });
+      if (!result || result.error) {
+        return { ok: false, error: result?.error || "api_failure", results: [] };
+      }
+      return { ok: true, results: result.results || [] };
+    } catch (err) {
+      console.warn("[tmdb-service] fetchSimilar failed:", err.message);
+      return { ok: false, error: err.message, results: [] };
+    }
+  }
+
   /** True when Supabase is configured so the edge function is reachable. */
   function isAvailable() {
     return !!getFunctionUrl();
@@ -191,6 +219,7 @@
     getDetails,
     fetchTv,
     imdbSuggest,
+    fetchSimilar,
     isAvailable,
   };
 })();

@@ -149,7 +149,7 @@
       "empty.firstTitle": "Add your first title",
       "empty.firstSubtitle": "Pick any way below — you can mix them anytime.",
       "empty.hintSearch": "Search add — find movies, TV, or anime by name",
-      "empty.hintLink": "Manual add — paste an IMDb or AniList link",
+      "empty.hintLink": "Search to add a title",
       "empty.hintBulk": "Import list — paste titles from ChatGPT or a notes app",
       "empty.ctaSearch": "Search for a title",
       "empty.ctaBulk": "Paste multiple titles",
@@ -240,11 +240,14 @@
       "search.type.movie": "Movies",
       "search.type.series": "TV Series",
       "search.type.anime": "Anime",
-      "search.hint":
-        "<strong>Can't find your title?</strong> Tap <strong>Manual</strong> at the top and add it yourself.",
-      "search.label": "Search movies & shows",
+      "search.hint": "",
+      "search.label": "Search",
       "search.clearQuery": "Clear search",
-      "search.placeholder": "e.g. Avengers, Demon Slayer…",
+      "search.placeholder": "Search titles…",
+      "search.typeAll": "All",
+      "search.typeMovies": "Movies",
+      "search.typeTv": "TV",
+      "search.typeAnime": "Anime",
       "search.typeLabel": "Type",
       "search.minChars": "Type at least 2 characters to search.",
       "search.unavailable": "Search is not available right now.",
@@ -257,6 +260,7 @@
       "search.loadingDetails": "Loading details…",
       "search.loadFailed": "Could not load that title. Try again.",
       "search.back": "Back to search",
+      "search.backSimple": "Back",
       "search.chooseGenre": "Choose genre",
       "search.mainGenre": "Main genre",
       "search.noSummary": "No summary available.",
@@ -380,7 +384,9 @@
       "rating.notePlaceholder": "Your thoughts",
       "rating.yourThoughts": "Your thoughts",
       "rating.thoughtsSoFar": "Thoughts so far…",
-      "bulk.headline": "Add a whole list at once",
+      "bulk.headline": "Import a list",
+      "bulk.lead": "Copy the prompt for your AI, then paste the list below — or insert a .txt / .tsv file.",
+      "bulk.or": "or",
       "bulk.step1Title": "Copy the AI prompt",
       "bulk.step1Text":
         "Tap below to copy a short message for ChatGPT, Claude, or any chatbot. It asks the AI to return a simple list with each title, year, and type (movie, TV show, or anime).",
@@ -393,8 +399,10 @@
       "bulk.step3Text":
         "Paste what your AI sent you in the box below, or upload a file with the exact same list. Only plain text files work (.txt or .tsv) — not PDF, Word, Excel, or images.",
       "bulk.pastePlaceholder": "Paste your list here…",
-      "bulk.pasteLabel": "List from your AI",
-      "bulk.fileLabel": "Upload list file (.txt or .tsv)",
+      "bulk.pasteLabel": "List of titles",
+      "bulk.fileLabel": "Insert file",
+      "bulk.fileTitle": "Insert a .txt or .tsv file",
+      "bulk.copyPrompt": "Copy prompt",
       "bulk.fileHint": "Same list as above — plain text only.",
       "bulk.fileWrongType":
         "That file type won’t work. Save your list as a .txt or .tsv file (plain text), not PDF, Word, or an image.",
@@ -643,11 +651,14 @@
       "detail.tabSeasons": "Seasons",
       "detail.tabSpecials": "Specials",
       "detail.tabMovies": "Movies",
+      "detail.tabSimilar": "Similar",
       "detail.relatedSpecialsEmpty": "No specials for this title.",
       "detail.relatedMoviesLoading": "Loading related movies…",
       "detail.relatedMoviesEmpty": "no movies related to this title",
       "detail.relatedMovieAdd": "Tap to add to your list",
-      "detail.relatedMovieOnList": "Already on your list",
+      "detail.relatedMovieOnList": "In your list",
+      "detail.similarLoading": "Loading similar titles…",
+      "detail.similarEmpty": "No similar titles found.",
       "detail.addNote": "Add note",
       "detail.editNote": "Edit note",
       "detail.rateTitle": "Rate this title",
@@ -1024,7 +1035,7 @@
       "empty.firstTitle": "أضف عنوانك الأول",
       "empty.firstSubtitle": "اختر أي طريقة — يمكنك الجمع بينها في أي وقت.",
       "empty.hintSearch": "إضافة بالبحث — ابحث عن أفلام أو مسلسلات أو أنمي بالاسم",
-      "empty.hintLink": "إضافة يدوية — الصق رابط IMDb أو AniList",
+      "empty.hintLink": "ابحث لإضافة عنوان",
       "empty.hintBulk": "عناوين متعددة — الصق قائمة من ChatGPT أو ملاحظاتك",
       "empty.ctaSearch": "ابحث عن عنوان",
       "empty.ctaBulk": "الصق عدة عناوين",
@@ -1115,11 +1126,14 @@
       "search.type.movie": "أفلام",
       "search.type.series": "مسلسلات",
       "search.type.anime": "أنمي",
-      "search.hint":
-        "<strong>لم تجد عنوانك؟</strong> اضغط <strong>يدوي</strong> في الأعلى وأضفه بنفسك.",
-      "search.label": "ابحث عن أفلام ومسلسلات",
+      "search.hint": "",
+      "search.label": "بحث",
       "search.clearQuery": "مسح البحث",
-      "search.placeholder": "مثال: Avengers، Demon Slayer…",
+      "search.placeholder": "ابحث عن عناوين…",
+      "search.typeAll": "الكل",
+      "search.typeMovies": "أفلام",
+      "search.typeTv": "مسلسلات",
+      "search.typeAnime": "أنمي",
       "search.typeLabel": "النوع",
       "search.minChars": "اكتب حرفين على الأقل للبحث.",
       "search.unavailable": "البحث غير متاح حالياً.",
@@ -1132,6 +1146,7 @@
       "search.loadingDetails": "جاري تحميل التفاصيل…",
       "search.loadFailed": "تعذر تحميل هذا العنوان. حاول مرة أخرى.",
       "search.back": "العودة للبحث",
+      "search.backSimple": "رجوع",
       "search.chooseGenre": "اختر التصنيف",
       "search.mainGenre": "التصنيف الرئيسي",
       "search.noSummary": "لا يوجد ملخص.",
@@ -1253,7 +1268,9 @@
       "rating.thoughtsSoFar": "أفكارك حتى الآن…",
       "rating.note": "ملاحظة لنفسك",
       "rating.notePlaceholder": "أفكارك",
-      "bulk.headline": "أضف قائمة كاملة دفعة واحدة",
+      "bulk.headline": "استيراد قائمة",
+      "bulk.lead": "انسخ الرسالة للذكاء الاصطناعي، ثم الصق القائمة أدناه — أو أدرج ملف .txt / .tsv.",
+      "bulk.or": "أو",
       "bulk.step1Title": "انسخ رسالة الذكاء الاصطناعي",
       "bulk.step1Text":
         "اضغط الزر أدناه لنسخ رسالة قصيرة لـ ChatGPT أو Claude أو أي روبوت محادثة. تطلب قائمة بسيطة: العنوان والسنة والنوع (فيلم، مسلسل، أو أنمي).",
@@ -1266,8 +1283,10 @@
       "bulk.step3Text":
         "الصق ما أرسله الذكاء الاصطناعي في المربع أدناه، أو ارفع ملفاً بنفس القائمة تماماً. الملفات النصية فقط (.txt أو .tsv) — وليس PDF أو Word أو Excel أو صور.",
       "bulk.pastePlaceholder": "الصق قائمتك هنا…",
-      "bulk.pasteLabel": "القائمة من الذكاء الاصطناعي",
-      "bulk.fileLabel": "رفع ملف القائمة (.txt أو .tsv)",
+      "bulk.pasteLabel": "قائمة العناوين",
+      "bulk.fileLabel": "إدراج ملف",
+      "bulk.fileTitle": "أدرج ملف .txt أو .tsv",
+      "bulk.copyPrompt": "نسخ الرسالة",
       "bulk.fileHint": "نفس القائمة أعلاه — نص عادي فقط.",
       "bulk.fileWrongType":
         "نوع الملف غير مدعوم. احفظ القائمة كملف .txt أو .tsv (نص عادي)، وليس PDF أو Word أو صورة.",
@@ -1376,11 +1395,14 @@
       "detail.tabSeasons": "المواسم",
       "detail.tabSpecials": "حلقات خاصة",
       "detail.tabMovies": "الأفلام",
+      "detail.tabSimilar": "مشابه",
       "detail.relatedSpecialsEmpty": "لا توجد حلقات خاصة لهذا العنوان.",
       "detail.relatedMoviesLoading": "جاري تحميل الأفلام المرتبطة…",
       "detail.relatedMoviesEmpty": "لا توجد أفلام ذات صلة بهذا العنوان",
       "detail.relatedMovieAdd": "اضغط للإضافة إلى قائمتك",
-      "detail.relatedMovieOnList": "موجود في قائمتك",
+      "detail.relatedMovieOnList": "في قائمتك",
+      "detail.similarLoading": "جاري تحميل العناوين المشابهة…",
+      "detail.similarEmpty": "لا توجد عناوين مشابهة.",
       "detail.addNote": "إضافة ملاحظة",
       "detail.editNote": "تعديل الملاحظة",
       "detail.rateTitle": "قيِّم هذا العنوان",
@@ -1826,21 +1848,27 @@
     setAria("#listSwitcher", "menu.switchList");
     setText("label[for='listSwitcher']", "menu.switchList");
 
-    setHtml("#searchAddStep .add-panel-hint", "search.hint");
-    setText("#searchAddStep .form-field__label", "search.label");
     setPlaceholder("#titleSearchInput", "search.placeholder");
-    setText(".title-search__filter-label", "search.typeLabel");
+    setText("#titleSearchTypePills [data-search-type='all']", "search.typeAll");
+    setText("#titleSearchTypePills [data-search-type='movie']", "search.typeMovies");
+    setText("#titleSearchTypePills [data-search-type='series']", "search.typeTv");
+    setText("#titleSearchTypePills [data-search-type='anime']", "search.typeAnime");
     setText("#titleSearchMore", "btn.loadMore");
-    setText("#searchConfirmBack", "search.back");
+    setText(
+      "#searchConfirmBack",
+      window.WatchlistApp?.getSearchConfirmBackKey?.() || "search.back"
+    );
     setText("#searchConfirmStep .form-field:nth-child(1) .form-field__label", "form.type");
     setText("#searchConfirmStep label.form-field .form-field__label", "search.mainGenre");
     setText(
       "#searchConfirmStep .form-field:has(#searchConfirmSecondaryAdd) .form-field__label",
       "form.secondaryGenres"
     );
-    setText("#searchConfirmAdd", "btn.addTitle");
+    setText(
+      "#searchConfirmAdd",
+      window.WatchlistApp?.getSearchConfirmAddKey?.() || "btn.addTitle"
+    );
 
-    setHtml(".add-panel-hint--manual", "manual.hint");
     setText("#itemForm .form-field:nth-child(1) .form-field__label", "manual.link");
     setPlaceholder("#formLink", "manual.linkPlaceholder");
 
@@ -1934,21 +1962,20 @@
     setText("#bulkImportColProvider", "bulk.previewColProvider");
     setText("#bulkImportColReason", "bulk.previewColReason");
     setText("#bulkImportShowAll", "bulk.filter.showAll");
-    setText("#bulkFileLabel", "bulk.fileLabel");
-    setText("#bulkFileHint", "bulk.fileHint");
+    setText("#bulkHeadline", "bulk.headline");
+    setText("#bulkLead", "bulk.lead");
+    setText("#bulkActionsOr", "bulk.or");
+    setText("#copyBulkTemplateLabel", "bulk.copyPrompt");
+    setText("#bulkFileLabelText", "bulk.fileLabel");
+    setAria("#bulkFileLabel", "bulk.fileLabel");
+    const bulkFileLabel = document.getElementById("bulkFileLabel");
+    if (bulkFileLabel?.parentElement) {
+      bulkFileLabel.parentElement.title = t("bulk.fileTitle");
+    }
     setText("#bulkImportPause", "bulk.pause");
     setText("#bulkImportResume", "bulk.resume");
     setText("#bulkImportRetry", "bulk.retryFailed");
     setText("#bulkImportCancel", "bulk.cancelRemaining");
-    setText(".bulk-add__headline", "bulk.headline");
-    setText(".bulk-add__step:nth-child(1) .bulk-add__step-title", "bulk.step1Title");
-    setText(".bulk-add__step:nth-child(1) p", "bulk.step1Text");
-    setText("#copyBulkTemplate", "btn.copyTemplate");
-    setText(".bulk-add__step:nth-child(2) .bulk-add__step-title", "bulk.step2Title");
-    setText(".bulk-add__step:nth-child(2) .bulk-add__step-body > p:nth-of-type(1)", "bulk.step2Text");
-    setText(".bulk-add__example", "bulk.example");
-    setText(".bulk-add__step:nth-child(3) .bulk-add__step-title", "bulk.step3Title");
-    setText(".bulk-add__step:nth-child(3) .bulk-add__step-body > p", "bulk.step3Text");
     setPlaceholder("#bulkPasteInput", "bulk.pastePlaceholder");
     setAria("#bulkPasteInput", "bulk.pasteLabel");
 

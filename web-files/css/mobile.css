@@ -23,7 +23,7 @@
   }
 
   #itemModal {
-    align-items: flex-end;
+    align-items: stretch;
     justify-content: stretch;
     padding: 0;
   }
@@ -31,9 +31,10 @@
   #itemModal .modal__panel {
     width: 100%;
     max-width: 100%;
-    height: auto;
-    max-height: 94dvh;
-    border-radius: 20px 20px 0 0;
+    height: 100%;
+    max-height: 100dvh;
+    max-height: 100vh;
+    border-radius: 0;
   }
 
   .modal__panel--compact {
@@ -656,6 +657,14 @@
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
   }
 
+  .card__overlay .badge--episodes,
+  .app[data-layout="hover"] .card__head .badge--episodes {
+    color: #86efac;
+    background: rgba(12, 28, 18, 0.96);
+    border: 1px solid rgba(134, 239, 172, 0.45);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  }
+
   .card__overlay .card__sections {
     position: absolute;
     top: 0;
@@ -1206,21 +1215,18 @@
 
   .title-search-confirm__preview,
   .form-link-preview__card {
-    gap: 0.5rem;
-    padding: 0.5rem;
+    gap: 0.65rem;
   }
 
-  .title-search-confirm__poster {
-    width: 3.25rem;
-  }
-
-  .title-search-confirm__poster--empty {
-    width: 3.25rem;
-    min-height: 4.5rem;
+  #itemModal .title-search-confirm__preview > .search-poster-btn,
+  #itemModal .title-search-confirm__preview > .title-search-confirm__poster,
+  #itemModal .title-search-confirm__poster--empty {
+    width: 100%;
+    max-height: none;
   }
 
   .title-search-confirm__name {
-    font-size: 0.88rem;
+    font-size: 0.95rem;
   }
 
   .title-search-confirm__plot {
@@ -1250,21 +1256,23 @@
   .title-search-confirm__preview,
   .form-link-preview__card {
     flex-direction: column;
-    align-items: center;
-    text-align: center;
+    align-items: stretch;
+    text-align: start;
   }
 
-  .title-search-confirm__poster,
-  .title-search-confirm__poster--empty {
-    width: 4.5rem;
+  #itemModal .title-search-confirm__preview > .search-poster-btn,
+  #itemModal .title-search-confirm__preview > .title-search-confirm__poster,
+  #itemModal .title-search-confirm__poster--empty {
+    width: 100%;
+    max-height: none;
   }
 
   .title-search-confirm__actors {
-    justify-content: center;
+    justify-content: flex-start;
   }
 
   html[dir="rtl"] .title-search-confirm__body {
-    text-align: center;
+    text-align: start;
   }
 
   .header__title,

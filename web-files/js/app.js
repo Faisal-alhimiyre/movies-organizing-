@@ -165,6 +165,8 @@
     searchLoading: false,
     searchPickDetails: null,
     searchPickResultKey: null,
+    searchConfirmOrigin: "search",
+    searchConfirmForceOnList: false,
     searchConfirmSecondary: [],
     searchAddedKeys: new Set(),
     searchAddingKeys: new Set(),
@@ -569,9 +571,14 @@
       button.setAttribute("aria-busy", "true");
       if (loadingKey) button.textContent = t(loadingKey);
     } else {
-      button.disabled = false;
       button.classList.remove("btn--loading");
       button.removeAttribute("aria-busy");
+      if (button === els.searchConfirmAdd) {
+        delete button.dataset.defaultLabel;
+        syncSearchConfirmAddButton();
+        return;
+      }
+      button.disabled = false;
       if (button.dataset.defaultLabel) {
         button.textContent = button.dataset.defaultLabel;
         delete button.dataset.defaultLabel;
@@ -659,7 +666,7 @@
         return;
       }
 
-      if (state.addMode === "manual" && !els.form?.hidden && els.form?.checkValidity()) {
+      if (state.editingId && !els.form?.hidden && els.form?.checkValidity()) {
         event.preventDefault();
         els.form.requestSubmit();
       }
@@ -4521,6 +4528,19 @@
     if (!item || !patches) return false;
     const safe = stripProtectedEnrichmentFields(patches, item);
     let changed = false;
+
+    // imdbId/imdbLink are enrichment-protected identity fields, but badge
+    // enrichment intentionally corrects wrong AniList/suggest IMDb ids
+    // (e.g. Arms Alchemy tt11916660 → Buso Renkin tt0877507).
+    if (patches.imdbId) {
+      const id = String(patches.imdbId).trim().toLowerCase();
+      if (id.startsWith("tt") && (item.imdbId !== id || getImdbId(item) !== id)) {
+        item.imdbId = id;
+        item.imdbLink = `https://www.imdb.com/title/${id}/`;
+        changed = true;
+      }
+    }
+
     for (const [key, value] of Object.entries(safe)) {
       if (value == null || value === "") continue;
       if (key === "episodeCount" || key === "seasonCount") {
@@ -4599,7 +4619,21 @@
     if (item.contentType !== "tvSeries" && item.contentType !== "anime" && item.contentType !== "movies") {
       return;
     }
-    if (!itemNeedsBadgeEnrichment(item)) {
+    let forceImdbHeal = false;
+    if (
+      item.contentType === "anime" &&
+      item.imdbRating &&
+      getAnilistId(item) &&
+      getImdbId(item)
+    ) {
+      try {
+        const meta = await window.WatchlistMetadata?.getMetadata?.(getImdbId(item));
+        if (!meta) forceImdbHeal = true;
+      } catch {
+        forceImdbHeal = true;
+      }
+    }
+    if (!itemNeedsBadgeEnrichment(item) && !forceImdbHeal) {
       if (item.contentType === "anime") cacheAnimeProviderSnapshot(item);
       finishEnrichmentPending(itemId);
       return;
@@ -4623,6 +4657,13 @@
       if (patches.imdbRating && !live.imdbRating) {
         live.imdbRating = patches.imdbRating;
       }
+      if (patches.imdbId) {
+        const id = String(patches.imdbId).trim().toLowerCase();
+        if (id.startsWith("tt") && getImdbId(live) !== id) {
+          live.imdbId = id;
+          live.imdbLink = `https://www.imdb.com/title/${id}/`;
+        }
+      }
       preservePosterFieldsOnItem(live, { __source: "badge enrichment" });
       const pendingCleared = live.enrichmentPending ? ((live.enrichmentPending = false), true) : false;
       if (live.contentType === "anime") cacheAnimeProviderSnapshot(live);
@@ -4630,6 +4671,9 @@
 
       persistEnrichmentSave(itemId);
       syncListCard(itemId);
+      if (window.WatchlistTitleDetail?.activeItemId?.() === itemId) {
+        window.WatchlistTitleDetail.refresh?.();
+      }
     } catch (error) {
       console.warn("[badge-enrich] failed:", error);
       finishEnrichmentPending(itemId);
@@ -4856,9 +4900,12 @@
           if (linked) {
             live.imdbId = linked;
             live.imdbLink = `https://www.imdb.com/title/${linked}/`;
-            if (window.WatchlistMetadata?.hasOmdbKey?.()) {
+            const hasOmdb = !!window.WatchlistMetadata?.hasOmdbKey?.();
+            let omdbRating = null;
+            if (hasOmdb) {
               const imdbMeta = await window.WatchlistMetadata.getMetadata(linked);
-              if (imdbMeta?.rating) live.imdbRating = imdbMeta.rating;
+              omdbRating = imdbMeta?.rating || null;
+              if (omdbRating) live.imdbRating = omdbRating;
             }
           }
         }
@@ -6377,27 +6424,51 @@
     return `<span class="card__progress-check" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><circle cx="12" cy="12" r="9" opacity="0.35"/><path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" stroke="none"/></svg></span>`;
   }
 
-  function renderTitleMetaBadges(item) {
+  /**
+   * Poster badges stay off by default so artwork stays visible. When the user
+   * sorts/filters by a field that maps to a badge, show only that one for
+   * quick scanning — genres never appear on the card exterior.
+   */
+  function cardExteriorBadgeKind() {
+    const source = state.ratingFilterSource;
+    if (source === "release") return "year";
+    if (source === "age") return "age";
+    if (source === "duration") return "duration";
+    if (source === "episodes") return "episodes";
+    return null;
+  }
+
+  function renderTitleMetaBadges(item, allowedKind) {
     const badges =
       window.WatchlistMetadata?.buildTitleMetaBadges(item, item.contentType) || [];
-    const rendered = badges
-      .map(
-        (badge) => {
-          const titleAttr =
-            badge.kind === "age" && badge.title
-              ? ` title="${escapeHtml(badge.title)}"`
-              : "";
-          return `<span class="badge badge--${badge.kind}"${titleAttr}>${escapeHtml(badge.label)}</span>`;
-        }
-      )
+    const visible = allowedKind
+      ? badges.filter((badge) => badge.kind === allowedKind)
+      : badges;
+    return visible
+      .map((badge) => {
+        const titleAttr =
+          badge.kind === "age" && badge.title
+            ? ` title="${escapeHtml(badge.title)}"`
+            : "";
+        return `<span class="badge badge--${badge.kind}"${titleAttr}>${escapeHtml(badge.label)}</span>`;
+      })
       .join("");
-    // Bulk-imported anime can land on the list before AniList badges
-    // (age/runtime/episodes) finish fetching in the background — say so
-    // instead of just leaving a sparse row that looks unfinished.
-    const pendingBadge = item.enrichmentPending
-      ? `<span class="badge badge--pending" aria-busy="true">${escapeHtml(t("card.finishingDetails"))}</span>`
-      : "";
-    return `${rendered}${pendingBadge}`;
+  }
+
+  function renderCardInfoRow(item) {
+    const typeBadge = getTypeBadge(item);
+    const kind = cardExteriorBadgeKind();
+    let badgesHtml = `<span class="badge badge--${typeBadge.className}">${escapeHtml(typeBadge.label)}</span>`;
+    if (kind === "year") {
+      badgesHtml += renderReleaseYearBadge(item);
+    } else if (kind) {
+      badgesHtml += renderTitleMetaBadges(item, kind);
+    }
+    // Enrichment status is not a filter badge — keep it when details are still loading.
+    if (item.enrichmentPending) {
+      badgesHtml += `<span class="badge badge--pending" aria-busy="true">${escapeHtml(t("card.finishingDetails"))}</span>`;
+    }
+    return `<div class="card__info-row">${badgesHtml}</div>`;
   }
 
   function renderCardSection(labelKey, content, modifierClass = "") {
@@ -6412,22 +6483,12 @@
   }
 
   function renderCard(item) {
-    const typeBadge = getTypeBadge(item);
     const isWatched = isItemWatched(item.id);
     const watchEntry = getWatchEntry(item.id);
     const rated = isWatched && hasWatchRating(watchEntry);
     const progressState = itemProgressState(item.id);
     const altTitle = item.altTitle
       ? `<span class="card__alt text-ltr">${escapeHtml(ltr(item.altTitle))}</span>`
-      : "";
-    const secondaryBadges = (item.secondaryGenres || [])
-      .map(
-        (genre) =>
-          `<span class="badge badge--genre-secondary">${escapeHtml(genreLabel(genre))}</span>`
-      )
-      .join("");
-    const mainGenreBadge = item.genre
-      ? `<span class="badge badge--genre-primary">${escapeHtml(genreLabel(item.genre))}</span>`
       : "";
 
     const imdbId = getImdbId(item);
@@ -6437,10 +6498,7 @@
       : "";
     const imdbAttr = imdbId ? ` data-imdb-id="${escapeHtml(imdbId)}"` : "";
     const externalScores = renderExternalRatings(item);
-    const yearBadge = renderReleaseYearBadge(item);
     const hasLink = Boolean(item.link);
-    const titleMetaBadges = renderTitleMetaBadges(item);
-    const genreBadges = `${mainGenreBadge}${secondaryBadges}`;
     const displayTitle = cardDisplayTitle(item);
     const titleBlock = `
       <div class="card__top">
@@ -6451,41 +6509,13 @@
         </h3>
       </div>
     `;
-    const detailsContent = `
-      <div class="card__info-row">
-        <span class="badge badge--${typeBadge.className}">${escapeHtml(typeBadge.label)}</span>
-        ${yearBadge}
-        ${titleMetaBadges}
-      </div>
-    `;
-    const cardSections = `
-      <div class="card__sections">
-        ${detailsContent}
-        ${
-          genreBadges
-            ? renderCardSection(
-                "card.sectionGenres",
-                `<div class="card__genre-row">${genreBadges}</div>`,
-                "card__section--genres"
-              )
-            : ""
-        }
-      </div>
-    `;
-    const overlaySections = `
-      <div class="card__sections card__sections--overlay">
-        ${detailsContent}
-        ${
-          genreBadges
-            ? renderCardSection(
-                "card.sectionGenres",
-                `<div class="card__genre-row card__genre-row--single-line">${genreBadges}</div>`,
-                "card__section--genres"
-              )
-            : ""
-        }
-      </div>
-    `;
+    const detailsContent = renderCardInfoRow(item);
+    const cardSections = detailsContent
+      ? `<div class="card__sections">${detailsContent}</div>`
+      : "";
+    const overlaySections = detailsContent
+      ? `<div class="card__sections card__sections--overlay">${detailsContent}</div>`
+      : "";
     const overlayBlock = `${overlaySections}${titleBlock}`;
 
     const posterBlock = hasLink
@@ -6781,15 +6811,17 @@
       .join("");
   }
 
-  function addTitlePosterMarkup(posterUrl, title, posterClass, { lazy = true } = {}) {
+  function addTitlePosterMarkup(posterUrl, title, posterClass, { lazy = true, lightbox = true } = {}) {
     if (!posterUrl) {
       return `<div class="${posterClass} ${posterClass}--empty" aria-hidden="true">🎬</div>`;
     }
-    const viewLabel = t("detail.viewPoster", { title: title || "" });
     const lazyAttr = lazy ? ' loading="lazy"' : "";
+    const img = `<img class="${posterClass}" src="${escapeHtml(posterUrl)}" alt=""${lazyAttr} />`;
+    if (!lightbox) return img;
+    const viewLabel = t("detail.viewPoster", { title: title || "" });
     return `<button type="button" class="search-poster-btn" data-action="view-search-poster"
       aria-label="${escapeHtml(viewLabel)}">
-      <img class="${posterClass}" src="${escapeHtml(posterUrl)}" alt=""${lazyAttr} />
+      ${img}
     </button>`;
   }
 
@@ -6812,8 +6844,26 @@
       const pct = formatAnilistDisplay(details.anilistRating || details.rating);
       if (pct) return pct;
     }
-    const score = formatImdbDisplay(details.rating);
+    const score = formatImdbDisplay(details.rating || details.imdbRating);
     return score ? `${score}/10` : "";
+  }
+
+  function renderSearchConfirmRatingBadge(details) {
+    if (!details) return "";
+    if (details.anilistRating || details.source === "anilist") {
+      const pct = formatAnilistDisplay(details.anilistRating || details.rating);
+      if (!pct) return "";
+      return `<span class="card__score card__score--anilist" title="AniList ${escapeHtml(pct)}">
+        <span class="card__score-value text-num">${escapeHtml(pct)}</span>
+        <img class="card__score-logo card__score-logo--anilist" src="${BRAND_ANILIST_LOGO}" width="34" height="26" alt="" />
+      </span>`;
+    }
+    const imdb = formatImdbDisplay(details.rating || details.imdbRating);
+    if (!imdb) return "";
+    return `<span class="card__score card__score--imdb" title="IMDb ${escapeHtml(imdb)}">
+      <span class="card__score-value text-num">${escapeHtml(imdb)}</span>
+      <img class="card__score-logo card__score-logo--imdb" src="${BRAND_IMDB_LOGO}" width="46" height="20" alt="" />
+    </span>`;
   }
 
   function renderTitlePreview(container, details) {
@@ -6825,13 +6875,11 @@
       "title-search-confirm__poster",
       { lazy: false }
     );
-    const yearHtml = details.year
-      ? `<span class="title-search-confirm__year">${escapeHtml(String(details.year))}</span>`
+    const year = formatReleaseYearDisplay(details.year);
+    const yearHtml = year
+      ? `<span class="badge badge--year text-num" title="${escapeHtml(t("card.releaseYear"))}">${escapeHtml(year)}</span>`
       : "";
-    const rating = formatSearchConfirmRating(details);
-    const ratingHtml = rating
-      ? `<span class="title-search-confirm__rating">${escapeHtml(rating)}</span>`
-      : "";
+    const ratingHtml = renderSearchConfirmRatingBadge(details);
     const titleMetaBadges = renderTitleMetaBadges(details);
     const titleMetaHtml = titleMetaBadges
       ? `<span class="title-search-confirm__meta-badges">${titleMetaBadges}</span>`
@@ -7015,7 +7063,8 @@
         const poster = addTitlePosterMarkup(
           result.poster,
           result.title,
-          "title-search__poster"
+          "title-search__poster",
+          { lightbox: false }
         );
         const meta = [result.year, formatSearchResultType(
           result.displayType ||
@@ -7127,6 +7176,15 @@
     }
   }
 
+  function syncTitleSearchTypePills() {
+    const value = els.titleSearchType?.value || "all";
+    document.querySelectorAll("#titleSearchTypePills [data-search-type]").forEach((pill) => {
+      const active = pill.dataset.searchType === value;
+      pill.classList.toggle("title-search__type-pill--active", active);
+      pill.setAttribute("aria-pressed", String(active));
+    });
+  }
+
   function resetSearchAddState() {
     setModalSearchMode(false);
     clearTimeout(searchDebounceTimer);
@@ -7138,6 +7196,8 @@
     state.searchLoading = false;
     state.searchPickDetails = null;
     state.searchPickResultKey = null;
+    state.searchConfirmOrigin = "search";
+    state.searchConfirmForceOnList = false;
     state.searchConfirmSecondary = [];
     state.searchAddedKeys = new Set();
     state.searchAddingKeys = new Set();
@@ -7155,16 +7215,65 @@
               : "all";
       els.titleSearchType.value = typeFilter;
     }
+    syncTitleSearchTypePills();
     if (els.titleSearchResults) els.titleSearchResults.innerHTML = "";
     if (els.titleSearchMore) els.titleSearchMore.hidden = true;
     if (els.searchAddStep) els.searchAddStep.hidden = false;
     if (els.searchConfirmStep) els.searchConfirmStep.hidden = true;
     setTitleSearchStatus("");
+    syncSearchConfirmBackLabel();
+    syncSearchConfirmAddButton(null);
+  }
+
+  function getSearchConfirmBackKey() {
+    return state.searchConfirmOrigin === "related"
+      ? "search.backSimple"
+      : "search.back";
+  }
+
+  function syncSearchConfirmBackLabel() {
+    if (!els.searchConfirmBack) return;
+    els.searchConfirmBack.textContent = t(getSearchConfirmBackKey());
+  }
+
+  function isSearchConfirmOnList(details = state.searchPickDetails) {
+    if (state.searchConfirmForceOnList) return true;
+    if (!details?.title) return false;
+    return isTitleOnList({
+      title: details.title,
+      imdbId: details.imdbId,
+      anilistId: details.anilistId,
+      year: details.year,
+    });
+  }
+
+  function getSearchConfirmAddKey(details = state.searchPickDetails) {
+    return isSearchConfirmOnList(details)
+      ? "detail.relatedMovieOnList"
+      : "btn.addTitle";
+  }
+
+  function syncSearchConfirmAddButton(details = state.searchPickDetails) {
+    const btn = els.searchConfirmAdd;
+    if (!btn) return;
+    const onList = isSearchConfirmOnList(details);
+    btn.dataset.onList = onList ? "true" : "false";
+    if (btn.classList.contains("btn--loading")) return;
+    delete btn.dataset.defaultLabel;
+    btn.disabled = onList;
+    btn.textContent = t(getSearchConfirmAddKey(details));
+    btn.classList.toggle("title-search-confirm__add--on-list", onList);
   }
 
   async function openAddTitleConfirm(details, options = {}) {
     if (!details?.title) return;
     openModal("add");
+    state.searchConfirmOrigin =
+      options.origin === "related" ? "related" : "search";
+    state.searchConfirmForceOnList = Boolean(options.forceOnList);
+    if (els.addModeTabs) {
+      els.addModeTabs.hidden = state.searchConfirmOrigin === "related";
+    }
     if (els.titleSearchType && options.defaultContentType) {
       const map = {
         movies: "movie",
@@ -7173,6 +7282,7 @@
       };
       const filter = map[options.defaultContentType];
       if (filter) els.titleSearchType.value = filter;
+      syncTitleSearchTypePills();
     }
     const enriched = {
       ...details,
@@ -7191,6 +7301,23 @@
     });
   }
 
+  /**
+   * Resolved AniList ids for every anime item already on the active list —
+   * cache-only (no network), used to detect when a "similar title"
+   * recommendation is actually a different season/sequel of a show the user
+   * already has (e.g. "My Hero Academia Season 4" vs "My Hero Academia").
+   */
+  function getAnimeWatchlistAnilistIds() {
+    const SM = window.WatchlistSeriesMetadata;
+    const ids = [];
+    for (const item of state.items) {
+      if (item.contentType !== "anime") continue;
+      const id = SM?.resolveWatchlistItemAnilistIdSync?.(item);
+      if (Number.isFinite(id)) ids.push(id);
+    }
+    return ids;
+  }
+
   async function quickToggleWatched(itemId) {
     if (!itemId) return;
     const progress = itemProgressState(itemId);
@@ -7207,6 +7334,7 @@
     const contentType = normalizeContentType(els.searchConfirmType.value);
     if (contentType !== "anime") {
       renderSearchConfirmPreview(details);
+      syncSearchConfirmAddButton(details);
       return;
     }
     const enriched = await window.WatchlistMetadata.ensureAnimeDetails(details, {
@@ -7214,6 +7342,7 @@
     });
     state.searchPickDetails = enriched;
     renderSearchConfirmPreview(enriched);
+    syncSearchConfirmAddButton(enriched);
   }
 
   async function showSearchConfirmStep(details) {
@@ -7225,6 +7354,10 @@
     state.searchPickDetails = details;
     els.searchAddStep.hidden = true;
     els.searchConfirmStep.hidden = false;
+    syncSearchConfirmBackLabel();
+    if (els.addModeTabs && state.searchConfirmOrigin === "related") {
+      els.addModeTabs.hidden = true;
+    }
 
     const searchTabAnime = els.titleSearchType?.value === "anime";
     const defaultType =
@@ -7264,17 +7397,27 @@
     }
 
     renderSearchConfirmPreview(previewDetails);
+    syncSearchConfirmAddButton(previewDetails);
 
     els.searchConfirmGenre?.focus();
     syncItemModalViewport();
   }
 
   function hideSearchConfirmStep() {
+    if (state.searchConfirmOrigin === "related") {
+      closeModal();
+      return;
+    }
     state.searchPickDetails = null;
     state.searchPickResultKey = null;
     state.searchConfirmSecondary = [];
     if (els.searchAddStep) els.searchAddStep.hidden = false;
     if (els.searchConfirmStep) els.searchConfirmStep.hidden = true;
+    if (els.addModeTabs && state.editingId == null) {
+      els.addModeTabs.hidden = false;
+    }
+    syncSearchConfirmBackLabel();
+    syncSearchConfirmAddButton(null);
     const restore = searchConfirmReturnFocus;
     searchConfirmReturnFocus = null;
     if (restore?.focus && els.modalPanel?.contains(restore)) {
@@ -7289,7 +7432,16 @@
     if (resultKey) state.searchAddedKeys.add(resultKey);
   }
 
+  function finishRelatedConfirmAdd() {
+    closeModal();
+    window.WatchlistSeasons?.refreshRelatedPanels?.();
+  }
+
   function returnToSearchAfterAdd(title, { alreadyOnList = false, resultKey = null } = {}) {
+    if (state.searchConfirmOrigin === "related") {
+      finishRelatedConfirmAdd();
+      return;
+    }
     if (resultKey) markSearchResultAdded(resultKey);
     hideSearchConfirmStep();
     renderTitleSearchResults();
@@ -7451,6 +7603,7 @@
       }
 
       state.searchPickResultKey = resultKey;
+      state.searchConfirmOrigin = "search";
       setTitleSearchStatus("");
       showSearchConfirmStep(details);
     } finally {
@@ -7565,10 +7718,11 @@
 
     state.searchAddingKeys.delete(resultKey);
 
-    // Fall back to confirm step when title or summary is missing
-    if (!item.title || !item.summary) {
+    // Missing summary is fine — providers may still be enriching. Only title is required.
+    if (!item.title) {
       renderTitleSearchResults();
       state.searchPickResultKey = resultKey;
+      state.searchConfirmOrigin = "search";
       showSearchConfirmStep(details);
       return;
     }
@@ -7703,6 +7857,11 @@
     const details = state.searchPickDetails;
     if (!details) return;
 
+    if (isSearchConfirmOnList(details)) {
+      returnToSearchAfterAdd(details.title, { alreadyOnList: true });
+      return;
+    }
+
     const genre = els.searchConfirmGenre?.value?.trim() || "";
     const contentType = normalizeContentType(els.searchConfirmType?.value || "movies");
 
@@ -7738,12 +7897,9 @@
       posterBroken: Boolean(item.posterBroken),
     });
 
-    if (!item.title || !item.summary) {
-      await window.WatchlistDialog.alert(t("alert.incomplete"), {
-        title: t("alert.incompleteTitle"),
-      });
-      return;
-    }
+    if (!item.title) return;
+
+    // Summary/actors come from providers — never block save for missing metadata.
 
     const duplicate = findDuplicate(item, null);
     if (duplicate) {
@@ -7780,10 +7936,11 @@
   }
 
   function setAddMode(mode) {
+    // Manual add removed — keep form only for edit. Map legacy "manual" to search.
+    if (mode === "manual") mode = "search";
     state.addMode = mode;
     const isBulk = mode === "bulk";
     const isSearch = mode === "search";
-    const isManual = mode === "manual";
 
     els.addModeTabs?.querySelectorAll("[data-add-mode]").forEach((tab) => {
       const active = tab.dataset.addMode === mode;
@@ -7792,7 +7949,7 @@
     });
 
     if (els.searchAddPanel) els.searchAddPanel.hidden = !isSearch;
-    if (els.form) els.form.hidden = !isManual;
+    if (els.form) els.form.hidden = true;
     if (els.bulkAddPanel) els.bulkAddPanel.hidden = !isBulk;
 
     if (!isSearch) {
@@ -7807,11 +7964,9 @@
       if (!els.bulkImportPreview || els.bulkImportPreview.hidden) {
         els.bulkPasteInput?.focus();
       }
-    } else if (isSearch) {
+    } else {
       hideSearchConfirmStep();
       els.titleSearchInput?.focus();
-    } else {
-      els.formLink?.focus();
     }
     syncItemModalViewport();
   }
@@ -7878,8 +8033,9 @@
     }
 
     if (els.modalPanel && !itemModalPanelDrag?.dragging) {
-      const maxH = Math.max(160, Math.round(vv.height * 0.94));
+      const maxH = Math.max(160, Math.round(vv.height));
       els.modalPanel.style.maxHeight = `${maxH}px`;
+      els.modalPanel.style.height = `${maxH}px`;
     }
   }
 
@@ -7889,6 +8045,7 @@
     resetItemModalDragStyles();
     if (els.modalPanel) {
       els.modalPanel.style.maxHeight = "";
+      els.modalPanel.style.height = "";
       els.modalPanel.style.transform = "";
     }
   }
@@ -9926,18 +10083,6 @@
     if (els.bulkImportEndJob) {
       els.bulkImportEndJob.hidden = !jobDone || showManualAdd || confirmShowingOwnLoadingState;
     }
-    // #region agent log
-    const __dbgChromeState = JSON.stringify({
-      jobDone, showManualAdd, confirmShowingOwnLoadingState,
-      processing, bulkImportWorkerBusy, hasWaiting,
-      due: queueProgress.due, statsProcessing: stats.processing || 0,
-      eligibleCount, endJobHidden: els.bulkImportEndJob?.hidden,
-    });
-    if (__dbgChromeState !== window.__dbg913c94LastChromeState) {
-      window.__dbg913c94LastChromeState = __dbgChromeState;
-      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'app.js:updateImportPreviewChrome',message:'chrome state changed',data:JSON.parse(__dbgChromeState),hypothesisId:'H14',timestamp:Date.now()})}).catch(()=>{});
-    }
-    // #endregion
   }
 
   // The worker fires a change event for every single title it resolves
@@ -10681,12 +10826,6 @@
 
     const items = IJ.loadItems(listId);
     const eligibleCount = IJ.countCommitEligible(items);
-    // #region agent log
-    if (!silent) {
-      const readyRows = Object.values(items || {}).filter((it) => it.status === "ready_to_add");
-      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'app.js:handleBulkImportCommit',message:'commit clicked',data:{eligibleCount,readyToAddCount:readyRows.length,readyToAddTitles:readyRows.map((it)=>it.title)},hypothesisId:'H13',timestamp:Date.now()})}).catch(()=>{});
-    }
-    // #endregion
     if (!eligibleCount) {
       if (!silent) {
         await window.WatchlistDialog.alert(t("bulk.verifyBeforeAdd"), {
@@ -10749,11 +10888,6 @@
         }
       );
 
-      // #region agent log
-      if (!silent) {
-        fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'app.js:handleBulkImportCommit',message:'commitReadyItems result',data:{blocked:Boolean(result.blocked),reason:result.reason||null,added:result.added,stillReady:result.stillReady,addedItemIdsCount:addedItemIds.length},hypothesisId:'H13',timestamp:Date.now()})}).catch(()=>{});
-      }
-      // #endregion
       if (result.blocked) {
         if (!silent) {
           const message =
@@ -11511,12 +11645,15 @@
 
     const item = formToItem();
 
-    if (!item.genre || !item.title || !item.summary) {
-      window.WatchlistDialog.alert(t("alert.incomplete"), {
-        title: t("alert.incompleteTitle"),
+    if (!item.title?.trim()) return;
+    if (!item.genre) {
+      window.WatchlistDialog.alert(t("alert.genreRequired"), {
+        title: t("alert.genreRequiredTitle"),
       });
       return;
     }
+
+    // Summary/actors come from providers — never block save for missing metadata.
 
     if (els.formLink.value.trim() && !item.link) {
       window.WatchlistDialog.alert(t("alert.invalidLink"), {
@@ -12711,6 +12848,16 @@
     });
 
     els.titleSearchType?.addEventListener("change", () => {
+      syncTitleSearchTypePills();
+      state.searchPage = 1;
+      runTitleSearch();
+    });
+
+    document.getElementById("titleSearchTypePills")?.addEventListener("click", (event) => {
+      const pill = event.target.closest("[data-search-type]");
+      if (!pill || !els.titleSearchType) return;
+      els.titleSearchType.value = pill.dataset.searchType || "all";
+      syncTitleSearchTypePills();
       state.searchPage = 1;
       runTitleSearch();
     });
@@ -13397,7 +13544,10 @@
     },
     normalizeGenre,
     openAddTitleConfirm,
+    getSearchConfirmBackKey,
+    getSearchConfirmAddKey,
     isTitleOnList,
+    getAnimeWatchlistAnilistIds,
     updateStats,
     refreshCardWatchState,
     canPullToRefresh,

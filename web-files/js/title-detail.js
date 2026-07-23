@@ -982,8 +982,11 @@
 
     const imdbRaw = item.imdbRating;
     const anilistRaw = item.anilistRating;
+    const storedImdbId = String(item.imdbId || "").trim().toLowerCase();
     const imdbId =
-      window.WatchlistMetadata?.extractImdbId?.(item.imdbLink || item.link) || null;
+      (storedImdbId.startsWith("tt") ? storedImdbId : null) ||
+      window.WatchlistMetadata?.extractImdbId?.(item.imdbLink || item.link) ||
+      null;
 
     // IMDb badge
     if (imdbRaw) {
@@ -1013,19 +1016,8 @@
           );
         }
       }
-    } else if (imdbId && item.imdbLink) {
-      const url = `https://www.imdb.com/title/${imdbId}/`;
-      parts.push(
-        `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer"
-           class="card__score card__score--imdb td-score-link"
-           aria-label="${esc(t("detail.openIMDb"))}"
-           title="IMDb">
-          <img class="card__score-logo card__score-logo--imdb"
-               src="assets/brand/imdb.svg"
-               width="46" height="20" alt="IMDb" />
-        </a>`
-      );
     }
+    // No numeric score (OMDb N/A) — match card UX and omit empty badge.
 
     // AniList badge
     if (anilistRaw) {

@@ -116,8 +116,8 @@ html[dir="rtl"] .form-link-preview__hint {
   text-align: right;
 }
 
-html[dir="rtl"] .title-search-confirm__year,
-html[dir="rtl"] .title-search-confirm__rating {
+html[dir="rtl"] .title-search-confirm__meta .badge--year,
+html[dir="rtl"] .title-search-confirm__meta .card__score {
   direction: ltr;
   unicode-bidi: isolate;
 }
