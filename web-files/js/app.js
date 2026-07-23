@@ -3931,7 +3931,12 @@
       .filter((item) => item.contentType === "anime")
       .map((item) => {
         const anilistId = SM?.resolveWatchlistItemAnilistIdSync?.(item) || getAnilistId(item);
-        if (!anilistId) return null;
+        if (!anilistId) {
+          // #region agent log
+          fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',hypothesisId:'H4b',location:'app.js:getWatchlistAnimeItems',message:'anime item failed anilistId resolution',data:{title:item.title,anilistId:item.anilistId,link:item.link,imdbLink:item.imdbLink,imdbId:item.imdbId,source:item.source,provider:item.provider,keys:Object.keys(item)},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion agent log
+          return null;
+        }
         return { ...item, anilistId: Number(anilistId) };
       })
       .filter(Boolean);
