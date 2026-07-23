@@ -4627,9 +4627,6 @@
     if (!SM?.resolveAnimeFranchiseRoot) return false;
 
     const watchlistAnime = helpers.getWatchlistAnime?.() || [];
-    // #region agent log
-    fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',hypothesisId:'H4',location:'import-job.js:applyLiveFranchiseDupSweep:entry',message:'sweep start',data:{watchlistAnime:watchlistAnime.map(w=>({title:w.title,anilistId:w.anilistId})),batchItems:batchItems.map(it=>({title:it.title,contentType:it.contentType,pickAnilistId:it.pick?.anilistId,status:it.status,matchStatus:it.matchStatus}))},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion agent log
     const importAnime = Object.values(items).filter(
       (it) =>
         it.contentType === "anime" &&
@@ -4685,9 +4682,6 @@
           candidates.push({ anilistId: oid, title: other.details?.title || other.title });
         }
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',hypothesisId:'H1',location:'import-job.js:applyLiveFranchiseDupSweep:candidates',message:'candidate search result',data:{myTitle,childId,candidates},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion agent log
       if (!candidates.length) {
         // No franchise suspects — done with this row for good.
         item._liveFranchiseCheckedFor = childId;
@@ -4721,18 +4715,12 @@
       // Rate-limited or out of budget: hold the row back from auto-commit
       // briefly and let the queue watchdog retry once AniList recovers.
       if (rateLimited || walkBudget <= 0) {
-        // #region agent log
-        fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',hypothesisId:'H3',location:'import-job.js:applyLiveFranchiseDupSweep:budget-bail',message:'bailed before walk: rate limited or no budget',data:{myTitle,childId,rateLimited,walkBudget},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion agent log
         changed = setFranchiseCheckHold(item) || changed;
         continue;
       }
 
       const childRes = await resolveRoot(childId);
       const childRoot = Number(childRes.rootAnilistId) || null;
-      // #region agent log
-      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',hypothesisId:'H2',location:'import-job.js:applyLiveFranchiseDupSweep:childRoot',message:'resolved child root',data:{myTitle,childId,childRes,walkBudgetAfter:walkBudget,rateLimitedAfter:rateLimited},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion agent log
       if (!childRoot) {
         // Walk failed (rate limit / network) — retry later, don't give up.
         changed = setFranchiseCheckHold(item) || changed;
@@ -4744,9 +4732,6 @@
       for (const cand of candidates.slice(0, 3)) {
         const candRes = await resolveRoot(cand.anilistId);
         const candRoot = Number(candRes.rootAnilistId) || null;
-        // #region agent log
-        fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',hypothesisId:'H2',location:'import-job.js:applyLiveFranchiseDupSweep:candRoot',message:'resolved candidate root vs child root',data:{myTitle,childId,childRoot,candTitle:cand.title,candAnilistId:cand.anilistId,candRes,candRoot,isMatch:candRoot===childRoot},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion agent log
         if (!candRoot) {
           allCandidatesResolved = false;
           continue;

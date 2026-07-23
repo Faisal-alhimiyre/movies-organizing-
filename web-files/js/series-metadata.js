@@ -1640,10 +1640,6 @@
           (a, b) => anilistStartSortKey(a.startDate) - anilistStartSortKey(b.startDate)
         );
 
-      // #region agent log
-      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',hypothesisId:'H2',location:'series-metadata.js:walkAnilistTvPrequelRoot:hop',message:'hop relations',data:{hop,currentId,mediaTitle:media.title,allEdges:(media.relations?.edges||[]).map(e=>({relationType:e.relationType,nodeId:e.node?.id,nodeType:e.node?.type,nodeFormat:e.node?.format,nodeTitle:e.node?.title})),chosenPrequels:prequels.map(p=>({id:p.id,title:p.title}))},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion agent log
-
       if (!prequels.length) {
         completed = true;
         break;
@@ -1662,10 +1658,6 @@
         writeFranchiseRootCacheEntry(vid, rootId, rootTitle);
       }
     }
-
-    // #region agent log
-    fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',hypothesisId:'H2',location:'series-metadata.js:walkAnilistTvPrequelRoot:final',message:'walk finished',data:{startAnilistId:Number(anilistId),completed,visitedIds,rootId:rootMedia?.id,rootTitle:rootMedia?anilistMediaTitle(rootMedia):null},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion agent log
 
     return { media: rootMedia, completed, rateLimited: false, visitedIds };
   }
