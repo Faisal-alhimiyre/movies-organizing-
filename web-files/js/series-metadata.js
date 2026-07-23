@@ -5241,6 +5241,7 @@
   function persistResolvedAnilistIdOnItem(item, anilistId, source = "") {
     if (!item || !Number.isFinite(Number(anilistId))) return false;
     const id = Number(anilistId);
+    const WM = window.WatchlistMetadata;
     let changed = false;
     if (Number(item.anilistId) !== id) {
       item.anilistId = id;
@@ -5248,10 +5249,22 @@
     }
     const link = String(item.link || "");
     if (!link.includes("anilist.co")) {
+      // Legacy anime rows (added before anilistId was persisted separately)
+      // often carry their only IMDb identity in `link`. getImdbId() falls
+      // back to item.link when imdbId/imdbLink aren't set, so preserve that
+      // IMDb id/link explicitly before repointing `link` at AniList —
+      // otherwise backfilling anilistId here would silently break the
+      // IMDb badge/link for that card.
+      if (!item.imdbId && !item.imdbLink) {
+        const imdbId = WM?.extractImdbId?.(link);
+        if (imdbId) {
+          item.imdbId = imdbId;
+          item.imdbLink = link;
+        }
+      }
       item.link = `https://anilist.co/anime/${id}/`;
       changed = true;
     }
-    const WM = window.WatchlistMetadata;
     if (WM?.cacheResolvedPreview) {
       WM.cacheResolvedPreview(
         { source: "anilist", anilistId: id },

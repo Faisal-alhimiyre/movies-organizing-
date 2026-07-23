@@ -10530,7 +10530,21 @@
     // Do NOT run type-audit here while matching is active — the old path
     // re-searched TMDb for every ready row and logged full pick objects,
     // which is what caused the Out-of-Memory crashes mid-import.
-    window.setTimeout(() => {
+    window.setTimeout(async () => {
+      if (listId !== state.activeListId) return;
+      if (!els.bulkImportPreview || els.bulkImportPreview.hidden) return;
+
+      // Legacy watchlist anime added before anilistId was persisted on the
+      // item (only anilistRating was stored, for the badge) are invisible to
+      // every franchise-duplicate check below, since those all key off
+      // resolveWatchlistItemAnilistIdSync(). Backfill them once (cheap: only
+      // runs the live/offline lookup for items still missing an id, then
+      // persists it) so franchise dedup can actually see them.
+      try {
+        await resolveWatchlistAnimeItems({ allowLive: true, allowOffline: true });
+      } catch (error) {
+        console.warn("[bulk-import:anilist-id-backfill]", error);
+      }
       if (listId !== state.activeListId) return;
       if (!els.bulkImportPreview || els.bulkImportPreview.hidden) return;
 
