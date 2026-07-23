@@ -8022,21 +8022,12 @@
   }
 
   function syncItemModalViewport() {
-    if (!els.modal || els.modal.hidden || !isItemModalMobileSheet()) return;
-    const vv = window.visualViewport;
-    if (!vv) return;
-
-    // Keep the overlay full-screen; only shrink the sheet and pin the frozen backdrop.
-    const offsetTop = Math.max(0, vv.offsetTop);
-    if (document.body.classList.contains("item-modal-scroll-lock")) {
-      document.body.style.top = `-${itemModalSavedScrollY + offsetTop}px`;
-    }
-
-    if (els.modalPanel && !itemModalPanelDrag?.dragging) {
-      const maxH = Math.max(160, Math.round(vv.height));
-      els.modalPanel.style.maxHeight = `${maxH}px`;
-      els.modalPanel.style.height = `${maxH}px`;
-    }
+    // Soft keyboards must overlay fixed modals — never shrink/translate sheets to
+    // visualViewport (that jumps every window when the keyboard opens).
+    // Viewport meta uses interactive-widget=overlays-content for the same reason.
+    if (!els.modalPanel || itemModalPanelDrag?.dragging) return;
+    els.modalPanel.style.maxHeight = "";
+    els.modalPanel.style.height = "";
   }
 
   function resetItemModalViewport() {
@@ -8158,15 +8149,12 @@
   }
 
   function bindItemModalViewport() {
-    if (itemModalViewportBound || !window.visualViewport) return;
+    // Intentionally unused: do not follow visualViewport resize (keyboard).
     itemModalViewportBound = true;
-    window.visualViewport.addEventListener("resize", syncItemModalViewport);
   }
 
   function unbindItemModalViewport() {
-    if (!itemModalViewportBound || !window.visualViewport) return;
     itemModalViewportBound = false;
-    window.visualViewport.removeEventListener("resize", syncItemModalViewport);
   }
 
   function getItemModalScrollEl() {
