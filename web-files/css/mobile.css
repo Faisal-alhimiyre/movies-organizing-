@@ -35,6 +35,9 @@
     max-height: 100dvh;
     max-height: 100vh;
     border-radius: 0;
+    border: none;
+    box-shadow: none;
+    align-self: stretch;
   }
 
   .modal__panel--compact {
