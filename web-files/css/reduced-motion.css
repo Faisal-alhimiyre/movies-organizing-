@@ -24,15 +24,22 @@
 
   .list-skeleton__heading,
   .list-skeleton__poster,
-  .list-skeleton__line {
+  .list-skeleton__line,
+  .card__poster.card__poster--pending {
     animation: none;
     background: rgba(255, 255, 255, 0.07);
   }
 
   html[data-theme="light"] .list-skeleton__heading,
   html[data-theme="light"] .list-skeleton__poster,
-  html[data-theme="light"] .list-skeleton__line {
+  html[data-theme="light"] .list-skeleton__line,
+  html[data-theme="light"] .card__poster.card__poster--pending {
     background: rgba(0, 0, 0, 0.06);
+  }
+
+  .badge--pending {
+    animation: none;
+    opacity: 0.85;
   }
 
   .card:hover,

@@ -107,7 +107,14 @@
   let bulkImportWorkerBusy = false;
   let bulkImportCommitBusy = false;
   let bulkImportTypeEditId = null;
+  let bulkImportAutoCommitTimer = null;
+  let bulkImportAutoCommitInFlight = false;
+  let bulkImportAutoCommitStallStreak = 0;
+  let bulkImportWakeLock = null;
   let bulkImportCopyUnresolvedResetTimer = null;
+  let bulkImportPreviewRenderTimer = null;
+  let bulkImportPreviewRenderLastAt = 0;
+  const BULK_IMPORT_PREVIEW_RENDER_MIN_GAP_MS = 600;
   let cloudShrinkPushAllowed = false;
   const SYNC_RACE_WINDOW_MS = 5 * 60 * 1000;
   let cacheRecoveryProbed = false;
@@ -488,6 +495,7 @@
     bulkImportShowAll: document.getElementById("bulkImportShowAll"),
     bulkImportContinue: document.getElementById("bulkImportContinue"),
     bulkImportResolve: document.getElementById("bulkImportResolve"),
+    bulkImportEndJob: document.getElementById("bulkImportEndJob"),
     bulkImportMainActions: document.getElementById("bulkImportMainActions"),
     bulkImportAccounting: document.getElementById("bulkImportAccounting"),
     bulkImportPersistenceError: document.getElementById("bulkImportPersistenceError"),
@@ -4566,6 +4574,22 @@
     );
   }
 
+  /**
+   * Badge enrichment (fetchTitleBadgeMeta) is the last step of the
+   * post-add enrichment chain for every code path (see enrichImportedItem,
+   * which always calls queueItemBadgeEnrichment on its way out). Clear the
+   * "still finishing" card flag here, whatever the outcome, so a bulk-added
+   * anime card never stays stuck showing a shimmer/skeleton forever.
+   */
+  function finishEnrichmentPending(itemId) {
+    const live = state.items.find((i) => i.id === itemId);
+    if (!live || !live.enrichmentPending) return false;
+    live.enrichmentPending = false;
+    persistEnrichmentSave(itemId);
+    syncListCard(itemId);
+    return true;
+  }
+
   async function enrichItemBadges(itemId) {
     const listId = state.activeListId;
     if (!listId || !itemId) return;
@@ -4575,7 +4599,11 @@
     if (item.contentType !== "tvSeries" && item.contentType !== "anime" && item.contentType !== "movies") {
       return;
     }
-    if (!itemNeedsBadgeEnrichment(item)) return;
+    if (!itemNeedsBadgeEnrichment(item)) {
+      if (item.contentType === "anime") cacheAnimeProviderSnapshot(item);
+      finishEnrichmentPending(itemId);
+      return;
+    }
 
     try {
       const locale = window.WatchlistI18n?.getLang?.() || "en";
@@ -4583,7 +4611,10 @@
         item,
         locale
       );
-      if (!patches || !canPersistActiveList(listId)) return;
+      if (!patches || !canPersistActiveList(listId)) {
+        finishEnrichmentPending(itemId);
+        return;
+      }
 
       const live = state.items.find((i) => i.id === itemId);
       if (!live) return;
@@ -4593,12 +4624,15 @@
         live.imdbRating = patches.imdbRating;
       }
       preservePosterFieldsOnItem(live, { __source: "badge enrichment" });
-      if (!changed && !patches.imdbRating) return;
+      const pendingCleared = live.enrichmentPending ? ((live.enrichmentPending = false), true) : false;
+      if (live.contentType === "anime") cacheAnimeProviderSnapshot(live);
+      if (!changed && !patches.imdbRating && !pendingCleared) return;
 
       persistEnrichmentSave(itemId);
       syncListCard(itemId);
     } catch (error) {
       console.warn("[badge-enrich] failed:", error);
+      finishEnrichmentPending(itemId);
     }
   }
 
@@ -4610,10 +4644,51 @@
   const bulkEnrichmentQueue = [];
   let bulkEnrichmentRunning = false;
 
+  // Post-add enrichment (re-fetching full details, cast, and badge fields —
+  // age rating/runtime/episode counts, each of which can be a TMDb/OMDb/AniList
+  // call) is only "nice to have" polish for a title that's already on the
+  // list. During a bulk import it was firing per-item almost immediately after
+  // each auto-commit, competing with the actual match queue for the same
+  // AniList capacity — a big contributor to the 429 storms/freezes. Enrichment
+  // now waits for the bulk import queue to go idle before draining.
+  function isBulkImportActivelyMatching() {
+    const IJ = window.WatchlistImportJob;
+    const listId = state.activeListId;
+    if (!IJ || !listId) return false;
+    if (IJ.isWorkerActive?.()) return true;
+    const job = IJ.loadJob?.(listId);
+    return Boolean(job && !job.paused && job.status === "processing");
+  }
+
   function queueImportedItemEnrichment(itemId) {
     if (!itemId || bulkEnrichmentQueue.includes(itemId)) return;
     bulkEnrichmentQueue.push(itemId);
-    void drainBulkEnrichmentQueue();
+    // Don't start draining while matching — just park the ids. Drain kicks
+    // in from drainBulkEnrichmentQueue's idle wait / next schedule.
+    if (!isBulkImportActivelyMatching()) {
+      void drainBulkEnrichmentQueue();
+    }
+  }
+
+  /** Save whatever we've collected for this anime title into the shared
+   * title_provider_cache (see metadata.js) so the next import of the same
+   * title — this list or anyone else's — can skip (or shrink) the live
+   * AniList call. Best-effort only; failures are swallowed by the callee. */
+  function cacheAnimeProviderSnapshot(item) {
+    const anilistId = getAnilistId(item);
+    if (!anilistId || !item?.title) return;
+    void window.WatchlistMetadata?.upsertTitleProviderCacheEntry?.("anilist", anilistId, {
+      title: item.title,
+      poster: item.poster || item.cardPoster || "",
+      year: item.year || "",
+      contentType: "anime",
+      genres: item.sourceGenres || [],
+      ageRating: item.ageRating || "",
+      episodeCount: item.episodeCount || null,
+      seasonCount: item.seasonCount || null,
+      runtime: item.runtime || "",
+      imdbRating: item.imdbRating || "",
+    });
   }
 
   function applyCastFromEnrichment(item, castResult) {
@@ -4846,6 +4921,10 @@
     if (bulkEnrichmentRunning) return;
     bulkEnrichmentRunning = true;
     while (bulkEnrichmentQueue.length) {
+      if (isBulkImportActivelyMatching()) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        continue;
+      }
       const itemId = bulkEnrichmentQueue.shift();
       await enrichImportedItem(itemId);
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -6170,11 +6249,16 @@
     slot.replaceWith(img);
   }
 
-  function posterPlaceholderMarkup(broken = false) {
+  function posterPlaceholderMarkup(broken = false, pending = false) {
     if (broken) {
       return `<div class="card__poster card__poster--placeholder card__poster--broken" data-poster-slot data-poster-broken="true" role="status">
         <span class="card__poster-message">${escapeHtml(t("card.posterBroken"))}</span>
       </div>`;
+    }
+    if (pending) {
+      // Cover still finishing in the background (see queueImportedItemEnrichment) —
+      // a quiet shimmer reads as "in progress", not broken.
+      return `<div class="card__poster card__poster--placeholder card__poster--pending" data-poster-slot aria-hidden="true" role="status"></div>`;
     }
     return `<div class="card__poster card__poster--placeholder" data-poster-slot aria-hidden="true">🎬</div>`;
   }
@@ -6235,6 +6319,9 @@
   }
 
   async function hydratePosters() {
+    // Skip live poster hydration while bulk import is matching — it walks
+    // every card and can fire metadata fetches for titles still finishing.
+    if (isBulkImportActivelyMatching()) return;
     const cards = els.main.querySelectorAll(".card--linked");
     for (const card of cards) {
       const item = state.items.find((entry) => entry.id === card.dataset.id);
@@ -6293,8 +6380,7 @@
   function renderTitleMetaBadges(item) {
     const badges =
       window.WatchlistMetadata?.buildTitleMetaBadges(item, item.contentType) || [];
-    if (!badges.length) return "";
-    return badges
+    const rendered = badges
       .map(
         (badge) => {
           const titleAttr =
@@ -6305,6 +6391,13 @@
         }
       )
       .join("");
+    // Bulk-imported anime can land on the list before AniList badges
+    // (age/runtime/episodes) finish fetching in the background — say so
+    // instead of just leaving a sparse row that looks unfinished.
+    const pendingBadge = item.enrichmentPending
+      ? `<span class="badge badge--pending" aria-busy="true">${escapeHtml(t("card.finishingDetails"))}</span>`
+      : "";
+    return `${rendered}${pendingBadge}`;
   }
 
   function renderCardSection(labelKey, content, modifierClass = "") {
@@ -6401,7 +6494,7 @@
             ? posterPlaceholderMarkup(true)
             : cardDisplayPoster(item)
               ? `<img class="card__poster" src="${escapeHtml(cardDisplayPoster(item))}" alt="" loading="lazy" />`
-              : posterPlaceholderMarkup(false)
+              : posterPlaceholderMarkup(false, Boolean(item.enrichmentPending))
         }<div class="card__overlay">${overlayBlock}</div></div>`
       : "";
 
@@ -6471,8 +6564,9 @@
       : t("card.markWatched");
     const cardProgressClass = progressState === "inProgress" ? " card--in-progress" : "";
 
+    const busyAttr = item.enrichmentPending ? ' aria-busy="true"' : "";
     return `
-      <article class="card${linkedClass}${progressState === "watched" ? " card--watched" : ""}${cardProgressClass}" data-id="${escapeHtml(item.id)}"${linkAttr}${imdbAttr}>
+      <article class="card${linkedClass}${progressState === "watched" ? " card--watched" : ""}${cardProgressClass}" data-id="${escapeHtml(item.id)}"${linkAttr}${imdbAttr}${busyAttr}>
         ${posterBlock}
         ${bodyStart}
         ${bodyHeader}
@@ -8984,11 +9078,64 @@
     );
   }
 
+  function findWatchlistFranchiseDuplicateForImport(item) {
+    const lookup = getWatchlistFranchiseLookupForImport();
+    return lookup?.find?.(item) || null;
+  }
+
+  let watchlistFranchiseLookupCache = null;
+  let watchlistFranchiseLookupAt = 0;
+
+  function getWatchlistFranchiseLookupForImport() {
+    const SM = window.WatchlistSeriesMetadata;
+    if (!SM?.buildWatchlistFranchiseLookup) return null;
+    const now = Date.now();
+    if (watchlistFranchiseLookupCache && now - watchlistFranchiseLookupAt < 5000) {
+      return watchlistFranchiseLookupCache;
+    }
+    watchlistFranchiseLookupCache = SM.buildWatchlistFranchiseLookup(getWatchlistAnimeItems());
+    watchlistFranchiseLookupAt = now;
+    return watchlistFranchiseLookupCache;
+  }
+
+  function invalidateWatchlistFranchiseLookupCache() {
+    watchlistFranchiseLookupCache = null;
+    watchlistFranchiseLookupAt = 0;
+  }
+
+  // "Already on your list" duplicate checks run per-row against the whole
+  // watchlist, and — for bulk import — that heal pass reruns on every batch
+  // cycle (dozens of times on a large import). Recomputing normalizeTitleKey
+  // for every watchlist item on every single lookup call was a real,
+  // multi-second synchronous cost on larger watchlists/imports (a likely
+  // contributor to the tab-level "Page Unresponsive" hang). Build the
+  // normalized-title set once and reuse it for a few seconds at a time.
+  let watchlistTitleLookupCache = null;
+  let watchlistTitleLookupAt = 0;
+  const WATCHLIST_TITLE_LOOKUP_TTL_MS = 5000;
+
+  function getWatchlistTitleLookup() {
+    const now = Date.now();
+    if (watchlistTitleLookupCache && now - watchlistTitleLookupAt < WATCHLIST_TITLE_LOOKUP_TTL_MS) {
+      return watchlistTitleLookupCache;
+    }
+    const set = new Set();
+    for (const item of state.items) {
+      set.add(`${item.contentType}::${normalizeTitleKey(item.title)}`);
+    }
+    watchlistTitleLookupCache = set;
+    watchlistTitleLookupAt = now;
+    return watchlistTitleLookupCache;
+  }
+
+  function invalidateWatchlistTitleLookupCache() {
+    watchlistTitleLookupCache = null;
+    watchlistTitleLookupAt = 0;
+  }
+
   function isTitleOnWatchlist(contentType, title) {
-    const titleKey = normalizeTitleKey(title);
-    return state.items.some(
-      (item) => item.contentType === contentType && normalizeTitleKey(item.title) === titleKey
-    );
+    const lookup = getWatchlistTitleLookup();
+    return lookup.has(`${contentType}::${normalizeTitleKey(title)}`);
   }
 
   function persistWatchlistLocalOnly() {
@@ -9035,18 +9182,40 @@
     );
   }
 
+  let enrichmentPersistTimer = null;
+  let enrichmentPersistPendingIds = null;
+
   function persistEnrichmentSave(itemId) {
     if (!canPersistActiveList()) return;
-    state.data = itemsToNested(state.items);
-    persistWatchlistLocalOnly();
-    queueItemCloudUpsert(itemId);
+    // Coalesce enrichment writes — rewriting the entire nested watchlist
+    // to localStorage/IDB after every single badge/poster update during
+    // bulk import was another Out-of-Memory path.
+    if (!enrichmentPersistPendingIds) enrichmentPersistPendingIds = new Set();
+    if (itemId) enrichmentPersistPendingIds.add(itemId);
+    if (enrichmentPersistTimer) return;
+    enrichmentPersistTimer = window.setTimeout(() => {
+      enrichmentPersistTimer = null;
+      const ids = enrichmentPersistPendingIds;
+      enrichmentPersistPendingIds = null;
+      if (!canPersistActiveList()) return;
+      state.data = itemsToNested(state.items);
+      persistWatchlistLocalOnly();
+      if (ids) {
+        for (const id of ids) queueItemCloudUpsert(id);
+      }
+    }, 2000);
   }
 
-  function setBulkCommitButtonLoading(loading, { current = 0, total = 0 } = {}) {
+  function setBulkCommitButtonLoading(loading, { current = 0, total = 0 } = {}, options = {}) {
+    bulkImportCommitBusy = loading;
+    // Silent auto-commits shouldn't flicker the "Add to watchlist" button —
+    // that button is only meaningful for a manual click, so leave its DOM
+    // alone when the commit is happening automatically in the background.
+    if (options.silent) return;
     const btn = els.bulkImportConfirm;
     if (!btn) return;
-    bulkImportCommitBusy = loading;
     if (loading) {
+      btn.hidden = false;
       btn.disabled = true;
       btn.classList.add("btn--loading");
       btn.setAttribute("aria-busy", "true");
@@ -9176,10 +9345,28 @@
     return "";
   }
 
+  /** Anime titles added via the offline-first fast path (see import-job.js
+   * finalizeMatchPick) still need a background AniList pass for a better
+   * poster + badges/genres (queueImportedItemEnrichment). That work keeps
+   * running after the match queue itself goes idle, so the bulk import
+   * progress line needs its own "still finishing details" note independent
+   * of whether the match queue is processing. */
+  function countPendingEnrichmentItems() {
+    return state.items.reduce((n, item) => (item.enrichmentPending ? n + 1 : n), 0);
+  }
+
   function updateBulkImportProgressLine(job, items) {
     if (!els.bulkImportProgress) return;
     const IJ = window.WatchlistImportJob;
     const listId = state.activeListId || job?.listId;
+    const pendingEnrichment = countPendingEnrichmentItems();
+    const finishingSuffix = pendingEnrichment
+      ? ` ${t("bulk.finishingDetails", { count: pendingEnrichment })}`
+      : "";
+    const setLine = (text) => {
+      els.bulkImportProgress.textContent = text ? `${text}${finishingSuffix}` : text;
+    };
+
     const persistenceMessage = bulkImportPersistenceMessage(listId, job);
     if (persistenceMessage || IJ?.isImportPersistenceBlocked?.(listId)) {
       els.bulkImportProgress.hidden = false;
@@ -9191,7 +9378,8 @@
     const hasWaiting = (stats.waiting || 0) > 0;
     const processing = job?.status === "processing" || IJ?.isWorkerActive?.();
     const paused = job?.status === "paused" || job?.paused;
-    const showProgress = processing || paused || hasWaiting || job?.retryProgress;
+    const showProgress =
+      processing || paused || hasWaiting || job?.retryProgress || pendingEnrichment > 0;
     els.bulkImportProgress.hidden = !showProgress;
     if (!showProgress) return;
 
@@ -9218,63 +9406,86 @@
     };
 
     if (queueStatus?.kind === "anilist_paused") {
-      els.bulkImportProgress.textContent = t("bulk.anilistPaused", {
-        time: formatImportRetryClock(queueStatus.resumeAt),
-        matched: progress.matched ?? progress.resolved,
-        total: progress.submitted,
-        remaining: progress.remainingAnime ?? 0,
-      });
+      setLine(
+        t("bulk.anilistPaused", {
+          time: formatImportRetryClock(queueStatus.resumeAt),
+          // Use "resolved" (added + matched + skipped + needs-attention), not the
+          // raw "matched-but-not-yet-added" count — with auto-add on, items move
+          // to "added" almost immediately, so "matched" alone sits near 0 even
+          // while the offline index/AniList are actively resolving titles.
+          matched: progress.resolved,
+          total: progress.submitted,
+          remaining: progress.remainingAnime ?? 0,
+        })
+      );
       return;
     }
 
     if (job?.retryProgress) {
-      els.bulkImportProgress.textContent = t("bulk.retryProgress", {
-        label: job.retryProgress.label,
-        current: job.retryProgress.current,
-        total: job.retryProgress.total,
-      });
+      setLine(
+        t("bulk.retryProgress", {
+          label: job.retryProgress.label,
+          current: job.retryProgress.current,
+          total: job.retryProgress.total,
+        })
+      );
       return;
     }
 
     if (job?.workerLabel) {
-      els.bulkImportProgress.textContent = job.workerLabel;
+      setLine(job.workerLabel);
       return;
     }
 
     if (queueStatus?.kind === "waiting" && queueStatus.detail) {
       const { detail } = queueStatus;
-      els.bulkImportProgress.textContent = t("bulk.waitingRetryIn", {
-        provider: detail.provider || "provider",
-        seconds: detail.countdown || "…",
-        time: formatImportRetryClock(detail.nextRetryAt),
-        resolved: progress.resolved,
-        total: progress.submitted,
-      });
+      setLine(
+        t("bulk.waitingRetryIn", {
+          provider: detail.provider || "provider",
+          seconds: detail.countdown || "…",
+          time: formatImportRetryClock(detail.nextRetryAt),
+          resolved: progress.resolved,
+          total: progress.submitted,
+        })
+      );
       return;
     }
 
     if (queueStatus?.kind === "stalled" && progress.due > 0) {
-      els.bulkImportProgress.textContent = t("bulk.queueStalled", {
-        due: progress.due,
-        resolved: progress.resolved,
-        total: progress.submitted,
-      });
+      setLine(
+        t("bulk.queueStalled", {
+          due: progress.due,
+          resolved: progress.resolved,
+          total: progress.submitted,
+        })
+      );
       return;
     }
 
     if (processing || hasWaiting) {
       if ((progress.remainingAnime ?? 0) > 0) {
-        els.bulkImportProgress.textContent = t("bulk.matchProgress", {
-          matched: progress.matched ?? progress.resolved,
-          total: progress.submitted,
-          remaining: progress.remainingAnime,
-        });
+        setLine(
+          t("bulk.matchProgress", {
+            matched: progress.resolved,
+            total: progress.submitted,
+            remaining: progress.remainingAnime,
+          })
+        );
       } else {
-        els.bulkImportProgress.textContent = t("bulk.queueResolved", {
-          resolved: progress.matched ?? progress.resolved,
-          total: progress.submitted,
-        });
+        setLine(
+          t("bulk.queueResolved", {
+            resolved: progress.resolved,
+            total: progress.submitted,
+          })
+        );
       }
+      return;
+    }
+
+    if (pendingEnrichment > 0) {
+      els.bulkImportProgress.textContent = t("bulk.finishingDetailsOnly", {
+        count: pendingEnrichment,
+      });
       return;
     }
 
@@ -9650,21 +9861,39 @@
       due: 0,
       waiting: hasWaiting ? stats.waiting : 0,
     };
+    // Nothing left for the queue to do automatically: not actively processing,
+    // nothing waiting on a retry timer, and nothing due/queued right now.
+    const jobDone =
+      !processing &&
+      !bulkImportWorkerBusy &&
+      !hasWaiting &&
+      queueProgress.due === 0 &&
+      (stats.processing || 0) === 0;
 
     updateBulkImportProgressLine(job, items);
-    if (hasWaiting || processing) ensureBulkProgressTicker();
-    else stopBulkProgressTicker();
+    // Keep the ticker alive while background enrichment is still finishing
+    // cards (see queueImportedItemEnrichment) even after the match queue
+    // itself has gone idle, so the "finishing details for N…" count stays
+    // live instead of freezing at whatever it was when matching stopped.
+    if (hasWaiting || processing || countPendingEnrichmentItems() > 0) {
+      ensureBulkProgressTicker();
+    } else {
+      stopBulkProgressTicker();
+    }
 
     if (els.bulkImportContinue) {
       const queued = stats.processing || 0;
+      // Only offer "Continue processing" when the worker has actually
+      // stopped — a title merely sitting in a retry-wait state (normal,
+      // automatic) is not a reason to show a manual restart button while
+      // the queue is still actively running on its own.
       const showContinue =
         !paused &&
+        !processing &&
         !bulkImportWorkerBusy &&
         typeof navigator !== "undefined" &&
         navigator.onLine !== false &&
-        ((queued > 0 && !processing) ||
-          hasWaiting ||
-          queueProgress.due > 0);
+        (queued > 0 || hasWaiting || queueProgress.due > 0);
       els.bulkImportContinue.hidden = !showContinue;
       els.bulkImportContinue.disabled = bulkImportWorkerBusy;
     }
@@ -9678,15 +9907,64 @@
       els.bulkImportAdvanced.hidden = needsAttention === 0 && !hasWaiting;
     }
 
-    if (els.bulkImportConfirm && !bulkImportCommitBusy) {
-      els.bulkImportConfirm.disabled = !canAdd;
-      els.bulkImportConfirm.setAttribute("aria-disabled", String(!canAdd));
-      els.bulkImportConfirm.textContent =
-        eligibleCount > 0
-          ? t("bulk.addVerifiedCount", { count: eligibleCount })
-          : t("bulk.addVerified");
-      els.bulkImportConfirm.title = canAdd ? "" : t("bulk.verifyBeforeAdd");
+    // "Add to watchlist" is only for leftovers after the job is idle —
+    // e.g. a needs-attention row you just fixed. While matching/auto-add
+    // is running, ready rows are committed silently; showing a count button
+    // here just looks like a stuck second step.
+    const confirmShowingOwnLoadingState =
+      els.bulkImportConfirm?.classList.contains("btn--loading");
+    const showManualAdd = jobDone && canAdd;
+    if (els.bulkImportConfirm && !confirmShowingOwnLoadingState) {
+      els.bulkImportConfirm.hidden = !showManualAdd;
+      els.bulkImportConfirm.disabled = !showManualAdd;
+      els.bulkImportConfirm.setAttribute("aria-disabled", String(!showManualAdd));
+      if (showManualAdd) {
+        els.bulkImportConfirm.textContent = t("bulk.addVerifiedCount", { count: eligibleCount });
+        els.bulkImportConfirm.title = "";
+      }
     }
+    if (els.bulkImportEndJob) {
+      els.bulkImportEndJob.hidden = !jobDone || showManualAdd || confirmShowingOwnLoadingState;
+    }
+    // #region agent log
+    const __dbgChromeState = JSON.stringify({
+      jobDone, showManualAdd, confirmShowingOwnLoadingState,
+      processing, bulkImportWorkerBusy, hasWaiting,
+      due: queueProgress.due, statsProcessing: stats.processing || 0,
+      eligibleCount, endJobHidden: els.bulkImportEndJob?.hidden,
+    });
+    if (__dbgChromeState !== window.__dbg913c94LastChromeState) {
+      window.__dbg913c94LastChromeState = __dbgChromeState;
+      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'app.js:updateImportPreviewChrome',message:'chrome state changed',data:JSON.parse(__dbgChromeState),hypothesisId:'H14',timestamp:Date.now()})}).catch(()=>{});
+    }
+    // #endregion
+  }
+
+  // The worker fires a change event for every single title it resolves
+  // (potentially hundreds of times over a long bulk import). Rebuilding the
+  // whole preview table + stat boxes on every one of those was the main
+  // cause of the UI becoming unresponsive (and, over many minutes, crashing)
+  // during active processing. Coalesce bursts of updates into at most ~1-2
+  // renders per second, always using the freshest job/items when it fires.
+  function scheduleImportPreviewRenderThrottled(listId, job, items, options) {
+    const now = Date.now();
+    const elapsed = now - bulkImportPreviewRenderLastAt;
+    if (elapsed >= BULK_IMPORT_PREVIEW_RENDER_MIN_GAP_MS) {
+      bulkImportPreviewRenderLastAt = now;
+      renderImportJobPreview(job, items, options);
+      return;
+    }
+    if (bulkImportPreviewRenderTimer) return;
+    bulkImportPreviewRenderTimer = window.setTimeout(() => {
+      bulkImportPreviewRenderTimer = null;
+      bulkImportPreviewRenderLastAt = Date.now();
+      const IJ = window.WatchlistImportJob;
+      if (listId !== state.activeListId) return;
+      if (!els.bulkImportPreview || els.bulkImportPreview.hidden) return;
+      const latestJob = IJ?.loadJob(listId) || job;
+      const latestItems = IJ?.loadItems(listId) || items;
+      renderImportJobPreview(latestJob, latestItems, options);
+    }, BULK_IMPORT_PREVIEW_RENDER_MIN_GAP_MS - elapsed);
   }
 
   function renderImportJobPreview(job, items, { preserveTypeEditor = false } = {}) {
@@ -9694,15 +9972,17 @@
     const IJ = window.WatchlistImportJob;
     IJ._helpers.isOnList = isTitleOnWatchlist;
     IJ._helpers.getWatchlistAnime = getWatchlistAnimeItems;
-    if (IJ.healDuplicateClassifications?.(items)) {
-      job.stats = IJ.recomputeStats(items, job);
-    }
+    IJ._helpers.findWatchlistFranchiseDuplicate = findWatchlistFranchiseDuplicateForImport;
+    IJ._helpers.getWatchlistFranchiseLookup = getWatchlistFranchiseLookupForImport;
     const stats = job.stats || IJ?.recomputeStats(items);
     const S = IJ?.STATUS;
     const allRows = Object.values(items || {});
     let filteredRows = IJ?.filterRowsByPreviewFilter(allRows, bulkImportStatusFilter) || allRows;
     filteredRows = IJ?.filterRowsBySearch?.(filteredRows, bulkImportSearchQuery) || filteredRows;
-    const rows = IJ?.sortPreviewRows(filteredRows) || filteredRows;
+    let rows = IJ?.sortPreviewRows(filteredRows) || filteredRows;
+    const PREVIEW_ROW_CAP = 80;
+    const truncated = rows.length > PREVIEW_ROW_CAP;
+    if (truncated) rows = rows.slice(0, PREVIEW_ROW_CAP);
 
     els.bulkImportSummary.innerHTML = renderBulkImportStatBoxes(
       stats,
@@ -9827,6 +10107,15 @@
       })
       .join("");
 
+    if (truncated) {
+      els.bulkImportTableBody.insertAdjacentHTML(
+        "beforeend",
+        `<tr class="bulk-import-preview__row-detail"><td colspan="6"><div class="bulk-import-preview__row-detail-body">${escapeHtml(
+          t("bulk.previewTruncated", { shown: PREVIEW_ROW_CAP, total: filteredRows.length })
+        )}</div></td></tr>`
+      );
+    }
+
     restoreImportTypeEditorIfOpen(items);
 
     updateImportPreviewChrome(job, items, stats, allRows);
@@ -9930,47 +10219,6 @@
       failingStage,
       ...extra,
     };
-  }
-
-  async function logSearchVsBulkPoster(row, bulkItem, bulkDetails, bulkRootCause) {
-    if (!/fairy tail/i.test(String(row?.title || ""))) return;
-    const WM = window.WatchlistMetadata;
-    const searchDetails = await WM.resolveDetailsForWatchlistAdd(row.pick, "anime", {
-      searchQuery: row.title,
-      pipeline: "search-dry-run",
-      posterRequired: false,
-      verifyPoster: false,
-    });
-    const searchPicked = await WM.selectLoadableAnilistPoster(searchDetails, {
-      skipProbe: false,
-    });
-    const searchPoster =
-      searchPicked.poster ||
-      searchDetails?.poster ||
-      "";
-    const searchItem = buildItemFromSearchDetails(
-      { ...searchDetails, poster: searchPoster },
-      {
-        contentType: "anime",
-        genre: bulkItem?.genre || "Action",
-        secondaryGenres: bulkItem?.secondaryGenres || [],
-      }
-    );
-    console.warn("[search-vs-bulk-poster]", {
-      title: row.title,
-      anilistId: bulkItem?.anilistId || searchItem?.anilistId || null,
-      searchAddPoster: searchItem?.poster || "",
-      bulkAddPoster: bulkItem?.poster || "",
-      searchAddBuilderFunction: "buildItemFromSearchDetails",
-      bulkAddBuilderFunction: bulkRootCause?.builderFunction || "buildItemFromSearchDetails",
-      searchAddCoverExtraLarge: searchDetails?.coverImageExtraLarge || "",
-      searchAddCoverLarge: searchDetails?.coverImageLarge || "",
-      searchAddCoverMedium: searchDetails?.coverImageMedium || "",
-      bulkAddCoverExtraLarge: bulkRootCause?.rawCoverImageExtraLarge || "",
-      bulkAddCoverLarge: bulkRootCause?.rawCoverImageLarge || "",
-      bulkAddCoverMedium: bulkRootCause?.rawCoverImageMedium || "",
-      finalPosterDifference: (searchItem?.poster || "") !== (bulkItem?.poster || ""),
-    });
   }
 
   async function applyAddedImportTypeCorrections(listId) {
@@ -10098,7 +10346,7 @@
     return audit;
   }
 
-  function showBulkImportPreview(job, items) {
+  function showBulkImportPreview(job, items, options = {}) {
     if (!els.bulkAddSteps || !els.bulkImportPreview) return;
     renderImportJobPreview(job, items);
     els.bulkAddSteps.hidden = true;
@@ -10107,45 +10355,85 @@
     if (els.bulkAddPasteFooter) els.bulkAddPasteFooter.hidden = true;
     if (els.bulkImportPreviewFooter) els.bulkImportPreviewFooter.hidden = false;
     syncItemModalViewport();
+    syncBulkImportWakeLock(job);
+
+    if (options.skipBackgroundWork) return;
 
     const listId = state.activeListId || window.WatchlistAuth?.getProfile();
     const IJ = window.WatchlistImportJob;
-    if (listId && IJ?.kickImportQueue && job && !job.paused && job.status !== "cancelled") {
-      IJ.kickImportQueue(listId);
-    }
-    if (listId && IJ?.applyAnimeGrouping) {
-      void (async () => {
+    const jobActive =
+      job &&
+      !job.paused &&
+      job.status !== "cancelled" &&
+      job.status !== "completed";
+
+    // Defer heavy follow-up so the preview paints before franchise work.
+    // Do NOT run type-audit here while matching is active — the old path
+    // re-searched TMDb for every ready row and logged full pick objects,
+    // which is what caused the Out-of-Memory crashes mid-import.
+    window.setTimeout(() => {
+      if (listId !== state.activeListId) return;
+      if (!els.bulkImportPreview || els.bulkImportPreview.hidden) return;
+
+      invalidateWatchlistFranchiseLookupCache();
+      invalidateWatchlistTitleLookupCache();
+      if (listId && IJ?.healDuplicateClassifications) {
         const fresh = IJ.loadItems(listId) || items;
-        await IJ.applyAnimeGrouping(listId, fresh);
-        IJ.saveImportItems?.(listId, fresh);
-        const latestJob = IJ.loadJob(listId) || job;
-        renderImportJobPreview(latestJob, fresh);
-      })();
-    }
-    if (listId && IJ?.auditMisclassifiedTypes) {
-      void IJ.auditMisclassifiedTypes(listId, { autoRetry: true }).then((audit) => {
-        if (audit?.retried > 0) {
-          renderImportJobPreview(IJ.loadJob(listId), IJ.loadItems(listId));
+        if (IJ.healDuplicateClassifications(fresh)) {
+          job.stats = IJ.recomputeStats(fresh, job);
+          IJ.saveImportItems?.(listId, fresh);
+          IJ.saveJob?.(listId, job);
+          renderImportJobPreview(job, fresh);
         }
-      });
-    }
-    if (listId) {
-      if (isImportAuditDebugEnabled()) {
+      }
+
+      if (jobActive && listId && IJ?.kickImportQueue) {
+        IJ.kickImportQueue(listId);
+      }
+
+      // Franchise grouping only when the queue is idle — running it on every
+      // preview open during a 300+ title import competes with matching.
+      if (!jobActive && listId && IJ?.applyAnimeGrouping) {
+        void (async () => {
+          const fresh = IJ.loadItems(listId) || items;
+          await IJ.applyAnimeGrouping(listId, fresh);
+          IJ.saveImportItems?.(listId, fresh);
+          const latestJob = IJ.loadJob(listId) || job;
+          renderImportJobPreview(latestJob, fresh);
+        })();
+      }
+
+      // Local-only type audit, and only when the job is not actively matching.
+      if (!jobActive && listId && IJ?.auditMisclassifiedTypes) {
+        void IJ.auditMisclassifiedTypes(listId, { autoRetry: true }).then((audit) => {
+          if (audit?.retried > 0) {
+            renderImportJobPreview(IJ.loadJob(listId), IJ.loadItems(listId));
+          }
+        });
+      }
+      if (!jobActive && listId && isImportAuditDebugEnabled()) {
         void applyAddedImportTypeCorrections(listId).then((audit) => {
           if (audit?.corrected > 0 || audit?.flagged > 0) {
             renderImportJobPreview(IJ.loadJob(listId), IJ.loadItems(listId));
           }
-          queueCastBackfillForImportAdds(listId);
         });
-      } else {
-        queueCastBackfillForImportAdds(listId);
       }
-    }
+
+      // Auto-commit anything already confidently matched (including titles left
+      // over as "ready to add" from a previous session) so the user doesn't have
+      // to take an extra manual step.
+      scheduleBulkImportAutoCommit(listId, 300);
+    }, 50);
   }
 
   function hideBulkImportPreview() {
     if (!els.bulkAddSteps || !els.bulkImportPreview) return;
     stopBulkProgressTicker();
+    releaseBulkImportWakeLock();
+    if (bulkImportPreviewRenderTimer) {
+      window.clearTimeout(bulkImportPreviewRenderTimer);
+      bulkImportPreviewRenderTimer = null;
+    }
     els.bulkAddSteps.hidden = false;
     els.bulkImportPreview.hidden = true;
     els.modal?.classList.remove("modal--bulk-preview");
@@ -10158,22 +10446,41 @@
     const listId = state.activeListId || window.WatchlistAuth?.getProfile();
     const IJ = window.WatchlistImportJob;
     if (!listId || !IJ?.loadJob) return;
-    const hydrated = (await IJ.hydrateJobDataAsync?.(listId)) || IJ.hydrateJobData?.(listId);
-    const job = hydrated?.job || IJ.loadJob(listId);
-    const items = hydrated?.items || IJ.loadItems(listId);
-    if (!job || !items || !Object.keys(items).length) return;
-    if (isImportAuditDebugEnabled()) {
-      void applyAddedImportTypeCorrections(listId);
+
+    // Let the Import tab paint first — large leftover jobs can freeze the UI.
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    if (state.addMode !== "bulk" || els.bulkAddPanel?.hidden) return;
+
+    let job = IJ.loadJob(listId);
+    let items = IJ.loadItems(listId);
+    if (!job || !items || !Object.keys(items).length) {
+      const hydrated = (await IJ.hydrateJobDataAsync?.(listId)) || IJ.hydrateJobData?.(listId);
+      if (state.addMode !== "bulk" || els.bulkAddPanel?.hidden) return;
+      job = hydrated?.job || IJ.loadJob(listId);
+      items = hydrated?.items || IJ.loadItems(listId);
     }
-    queueCastBackfillForImportAdds(listId);
-    if (state.addMode === "bulk" && !els.bulkAddPanel?.hidden) {
-      IJ.healTransientFailedItems(items);
-      job.stats = IJ.recomputeStats(items);
-      showBulkImportPreview(job, items);
-      if (!job.paused && job.status !== "cancelled") {
-        IJ.kickImportQueue?.(listId);
+    if (!job || !items || !Object.keys(items).length) return;
+
+    const rowCount = Object.keys(items).length;
+    const stats = IJ.recomputeStats?.(items) || job.stats || {};
+    job.stats = stats;
+
+    // An unfinished/unclosed job should always resume into the processing/preview
+    // display rather than dropping the user back to the 3-step paste screen. Use
+    // "End import job" (handleBulkImportEndJob) to actually close it out.
+    IJ.healTransientFailedItems?.(items);
+
+    if (rowCount > 80 && bulkImportStatusFilter === "all") {
+      if ((stats.ready || 0) > 0) bulkImportStatusFilter = "ready";
+      else if ((stats.needsAttention || 0) > 0) bulkImportStatusFilter = "needs_attention";
+      else if ((stats.failed || 0) > 0 || (stats.notFound || 0) > 0) {
+        bulkImportStatusFilter = "needs_attention";
+      } else {
+        bulkImportStatusFilter = "ready";
       }
     }
+
+    showBulkImportPreview(job, items);
   }
 
   const animePosterRepairFailed = new Set();
@@ -10187,41 +10494,57 @@
       return { ok: false, reason: "no_identity" };
     }
 
-    const { cover, picked, rootCause } = await WM.resolveAnimePosterForBulkCommit(pick, {
-      title: row.title,
+    const existingPoster = String(row.details?.poster || "").trim();
+    const canReuseImportPoster =
+      existingPoster && !row.details?.posterPending && !row.details?.posterBroken;
+
+    const rootCause = {
+      title: row.title || pick.title || "",
       importedType: row.contentType || contentType,
-    });
+      resolvedAnilistId: Number(pick.anilistId),
+      reusedImportPoster: canReuseImportPoster,
+    };
 
-    if (!picked.poster) {
-      return {
-        ok: false,
-        reason: "poster_pending",
-        message: "Fetching anime poster",
-        rootCause,
-      };
+    let details = row.details;
+    if (!details?.title) {
+      // Never hit live AniList during commit for identity — matching already
+      // verified anilistId. Build a minimal card; enrichment fills the rest.
+      details =
+        WM?.getLightweightDetailsForPick?.(pick, {
+          contentType,
+          importTitle: row.title,
+          year: row.year,
+        }) || {
+          title: pick.title || row.title || "",
+          year: pick.year || row.year || "",
+          anilistId: pick.anilistId,
+          poster: pick.poster || "",
+          source: "anilist",
+          contentType: "anime",
+        };
     }
-
-    let details = await WM.resolveDetailsForWatchlistAdd(pick, contentType, {
-      searchQuery: row.title,
-      pipeline: options.pipeline || "bulk-commit",
-      posterRequired: false,
-      verifyPoster: false,
-    });
 
     if (!details?.title) {
       return { ok: false, reason: "no_identity", rootCause };
     }
 
+    // Bulk anime matches often arrive with identity (and sometimes a poster
+    // from the offline index) but without the full AniList polish yet.
+    // Rather than blocking the add on a live AniList poster/detail fetch
+    // here — which would compete with the match queue for the same AniList
+    // rate limit — accept whatever poster we already have, even none, and
+    // let the background enrichment queue (queueImportedItemEnrichment)
+    // finish the card right after it's added.
+    const enrichmentPending = Boolean(row.enrichmentPending) || !existingPoster;
+
     details = {
       ...details,
-      poster: picked.poster,
+      poster: existingPoster || details.poster || "",
       posterPending: false,
       posterBroken: false,
-      posterSource: "anilist_cover_fetch",
-      coverImageExtraLarge:
-        cover?.coverImageExtraLarge || details.coverImageExtraLarge || "",
-      coverImageLarge: cover?.coverImageLarge || details.coverImageLarge || "",
-      coverImageMedium: cover?.coverImageMedium || details.coverImageMedium || "",
+      posterSource: canReuseImportPoster
+        ? "import_preview"
+        : details.posterSource || "pending_enrichment",
       anilistId: details.anilistId || pick.anilistId,
     };
     row.details = details;
@@ -10241,14 +10564,8 @@
     rootCause.finalItemPosterBeforeInsert = item.poster || "";
     rootCause.finalItemPosterBroken = Boolean(item.posterBroken);
 
-    if (!item.poster) {
-      rootCause.failingStage = rootCause.failingStage || "C";
-      return {
-        ok: false,
-        reason: "poster_pending",
-        message: "Fetching anime poster",
-        rootCause,
-      };
+    if (enrichmentPending || !item.poster) {
+      item.enrichmentPending = true;
     }
 
     return { ok: true, item, details, rootCause };
@@ -10286,7 +10603,7 @@
       item = built.item;
     } else {
       details = row.details;
-      if (row.pick) {
+      if ((!details?.title || details?.posterPending) && row.pick) {
         const resolved = await WM?.resolveDetailsForWatchlistAdd?.(row.pick, contentType, {
           searchQuery: row.title,
           pipeline: "bulk-commit",
@@ -10298,12 +10615,14 @@
       }
       if (!details?.title) return { ok: false, reason: "no_identity" };
 
-      details = (await WM?.enrichDetailsGenres?.(details, {
-        contentType,
-        standardGenres: STANDARD_GENRES,
-        debugLabel: row.title,
-      })) || details;
-      row.details = details;
+      if (!details.mergedGenres?.length) {
+        details = (await WM?.enrichDetailsGenres?.(details, {
+          contentType,
+          standardGenres: STANDARD_GENRES,
+          debugLabel: row.title,
+        })) || details;
+        row.details = details;
+      }
 
       const suggested =
         details.mergedGenres ||
@@ -10322,12 +10641,25 @@
 
     const anilistId = details.anilistId || row.pick?.anilistId;
     if (contentType === "anime" && anilistId) {
+      const franchiseDup = findWatchlistFranchiseDuplicateForImport(row);
+      if (franchiseDup) {
+        return {
+          ok: false,
+          reason: "duplicate",
+          message: franchiseDup.title
+            ? `Already on your list as “${franchiseDup.title}”.`
+            : "Already on your list.",
+          rootCause,
+        };
+      }
       const grouped = await IJ?.isAnimeGroupedChild?.(anilistId);
       if (grouped?.parent) {
         return {
           ok: false,
-          reason: "grouped_under_parent",
-          parentTitle: grouped.parent.title,
+          reason: "duplicate",
+          message: grouped.parent.title
+            ? `Already on your list as “${grouped.parent.title}”.`
+            : "Already on your list.",
           rootCause,
         };
       }
@@ -10335,32 +10667,53 @@
 
     if (findDuplicate(item, null)) return { ok: false, reason: "duplicate", rootCause };
 
-    if (contentType === "anime") {
-      await logSearchVsBulkPoster(row, item, details, rootCause);
-    }
-
     stampItemAddedAt(item);
     state.items.push(item);
     if (itemHasTrustedPoster(item)) bumpItemMutation(item.id);
-    queueImportedItemEnrichment(item.id);
     return { ok: true, itemId: item.id, rootCause, row };
   }
 
-  async function handleBulkImportCommit() {
+  async function handleBulkImportCommit(options = {}) {
+    const silent = Boolean(options.silent);
     const listId = state.activeListId || window.WatchlistAuth?.getProfile();
     const IJ = window.WatchlistImportJob;
     if (!listId || !IJ?.commitReadyItems || bulkImportCommitBusy) return;
 
     const items = IJ.loadItems(listId);
     const eligibleCount = IJ.countCommitEligible(items);
+    // #region agent log
+    if (!silent) {
+      const readyRows = Object.values(items || {}).filter((it) => it.status === "ready_to_add");
+      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'app.js:handleBulkImportCommit',message:'commit clicked',data:{eligibleCount,readyToAddCount:readyRows.length,readyToAddTitles:readyRows.map((it)=>it.title)},hypothesisId:'H13',timestamp:Date.now()})}).catch(()=>{});
+    }
+    // #endregion
     if (!eligibleCount) {
-      await window.WatchlistDialog.alert(t("bulk.verifyBeforeAdd"), {
-        title: t("bulk.addVerified"),
-      });
+      if (!silent) {
+        await window.WatchlistDialog.alert(t("bulk.verifyBeforeAdd"), {
+          title: t("bulk.addVerified"),
+        });
+      }
       return;
     }
 
-    setBulkCommitButtonLoading(true, { current: 0, total: eligibleCount });
+    setBulkCommitButtonLoading(true, { current: 0, total: eligibleCount }, { silent });
+
+    // Auto-commits (silent) reuse the poster/details already captured during
+    // matching in the vast majority of cases, so they rarely touch AniList at
+    // all. Pausing the matching queue for every one of these small, frequent
+    // commits was fragmenting the AniList bulk-search batching (smaller
+    // batches → more gated requests → much slower overall matching). Only the
+    // explicit manual "Add to watchlist" click still pauses the queue.
+    const jobBefore = IJ.loadJob(listId);
+    const resumeImportAfter =
+      !silent &&
+      jobBefore &&
+      !jobBefore.paused &&
+      jobBefore.status !== "cancelled" &&
+      jobBefore.status !== "completed";
+    if (resumeImportAfter) {
+      IJ.pauseJob?.(listId);
+    }
 
     try {
       const addedItemIds = [];
@@ -10371,7 +10724,15 @@
           const addResult = await addImportRowToWatchlist(row);
           if (addResult?.ok && addResult.itemId) {
             addedItemIds.push(addResult.itemId);
-            if (addResult.rootCause && addResult.row) {
+            // Poster root-cause tracing is debug-only and builds large
+            // console.table payloads — never collect it during silent
+            // auto-commit (hundreds of rows → memory blowup).
+            if (
+              !silent &&
+              addResult.rootCause &&
+              addResult.row &&
+              isPosterOverwriteDebugEnabled()
+            ) {
               posterTraceCommits.push({
                 row: addResult.row,
                 rootCause: addResult.rootCause,
@@ -10383,24 +10744,33 @@
         },
         {
           onProgress: ({ current, total }) => {
-            setBulkCommitButtonLoading(true, { current, total });
+            setBulkCommitButtonLoading(true, { current, total }, { silent });
           },
         }
       );
 
+      // #region agent log
+      if (!silent) {
+        fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'app.js:handleBulkImportCommit',message:'commitReadyItems result',data:{blocked:Boolean(result.blocked),reason:result.reason||null,added:result.added,stillReady:result.stillReady,addedItemIdsCount:addedItemIds.length},hypothesisId:'H13',timestamp:Date.now()})}).catch(()=>{});
+      }
+      // #endregion
       if (result.blocked) {
-        const message =
-          result.reason === "incomplete_accounting"
-            ? t("bulk.importStatusIncomplete")
-            : result.errors?.[0] || t("bulk.verifyBeforeAdd");
-        await window.WatchlistDialog.alert(message, {
-          title: t("bulk.addVerified"),
-        });
+        if (!silent) {
+          const message =
+            result.reason === "incomplete_accounting"
+              ? t("bulk.importStatusIncomplete")
+              : result.errors?.[0] || t("bulk.verifyBeforeAdd");
+          await window.WatchlistDialog.alert(message, {
+            title: t("bulk.addVerified"),
+          });
+        }
         return;
       }
 
       if (result.added > 0) {
         persistWatchlistLocalOnly();
+        invalidateWatchlistTitleLookupCache();
+        invalidateWatchlistFranchiseLookupCache();
         window.WatchlistSync?.cancelScheduledPush?.();
         for (const id of addedItemIds) {
           const prev = enrichmentUpsertTimers.get(id);
@@ -10425,7 +10795,16 @@
           );
         }
         updateGenreOptions();
-        render();
+        // Never full-rebuild the main list while matching is still running —
+        // painting hundreds of cards + poster hydration mid-import was a
+        // primary Out-of-Memory cause. Cards appear after matching idles.
+        if (silent) {
+          if (!isBulkImportActivelyMatching()) {
+            scheduleDeferredListRender();
+          }
+        } else {
+          render();
+        }
 
         if (posterTraceCommits.length) {
           const rootCauseRows = [];
@@ -10445,28 +10824,136 @@
 
       const job = IJ.loadJob(listId);
       const freshItems = IJ.loadItems(listId);
-      setBulkCommitButtonLoading(false);
+      setBulkCommitButtonLoading(false, {}, { silent });
       renderImportJobPreview(job, freshItems);
 
-      await window.WatchlistDialog.alert(
-        t("bulk.commitResult", {
-          added: result.added,
-          alreadyPresent: result.alreadyPresent,
-          grouped: result.grouped,
-          failed: result.failed,
-          stillReady: result.stillReady,
-        }),
-        { title: t("alert.bulkAddedTitle") }
-      );
+      if (!silent) {
+        await window.WatchlistDialog.alert(
+          t("bulk.commitResult", {
+            added: result.added,
+            alreadyPresent: result.alreadyPresent,
+            grouped: result.grouped,
+            failed: result.failed,
+            stillReady: result.stillReady,
+          }),
+          { title: t("alert.bulkAddedTitle") }
+        );
+      }
     } catch (error) {
       console.warn("[bulk-import:commit]", error);
-      setBulkCommitButtonLoading(false);
+      setBulkCommitButtonLoading(false, {}, { silent });
       const job = IJ.loadJob(listId);
       renderImportJobPreview(job, IJ.loadItems(listId));
-      await window.WatchlistDialog.alert(t("bulk.commitFailed"), {
-        title: t("bulk.addVerified"),
-      });
+      if (!silent) {
+        await window.WatchlistDialog.alert(t("bulk.commitFailed"), {
+          title: t("bulk.addVerified"),
+        });
+      }
+    } finally {
+      if (resumeImportAfter) {
+        IJ.resumeJob?.(listId);
+      }
     }
+  }
+
+  // Auto-commit newly matched titles as soon as they're confidently identified,
+  // so the user doesn't need an extra manual "Add to watchlist" click. Only
+  // rows that genuinely need attention (failed/ambiguous) require a decision.
+  let deferredListRenderTimer = null;
+  function scheduleDeferredListRender() {
+    if (deferredListRenderTimer) return;
+    deferredListRenderTimer = window.setTimeout(() => {
+      deferredListRenderTimer = null;
+      render();
+    }, 1200);
+  }
+
+  function scheduleBulkImportAutoCommit(listId, delayMs = 5000) {
+    if (!listId) return;
+    if (bulkImportAutoCommitTimer) window.clearTimeout(bulkImportAutoCommitTimer);
+    bulkImportAutoCommitTimer = window.setTimeout(() => {
+      bulkImportAutoCommitTimer = null;
+      void runBulkImportAutoCommit(listId);
+    }, delayMs);
+  }
+
+  async function runBulkImportAutoCommit(listId) {
+    const IJ = window.WatchlistImportJob;
+    if (!listId || !IJ?.commitReadyItems) return;
+    if (bulkImportAutoCommitInFlight || bulkImportCommitBusy) return;
+    if (state.activeListId !== listId) return;
+    if (!els.bulkImportPreview || els.bulkImportPreview.hidden) return;
+    if (bulkImportTypeEditId) return; // don't interrupt an in-progress manual type edit
+
+    const beforeCount = IJ.countCommitEligible(IJ.loadItems(listId));
+    if (!beforeCount) return;
+    // Circuit breaker: if repeated auto-commit attempts make no progress at
+    // all (e.g. an item stuck on some unexpected error), stop re-scheduling
+    // ourselves instead of looping forever every few seconds — a stuck loop
+    // like that previously caused runaway retries and a tab memory crash.
+    if (bulkImportAutoCommitStallStreak >= 5) return;
+
+    bulkImportAutoCommitInFlight = true;
+    try {
+      await handleBulkImportCommit({ silent: true });
+    } catch (error) {
+      console.warn("[bulk-import:auto-commit]", error);
+    } finally {
+      bulkImportAutoCommitInFlight = false;
+    }
+
+    // More titles may have finished matching while we were committing.
+    const remaining = IJ.countCommitEligible(IJ.loadItems(listId));
+    if (remaining >= beforeCount) {
+      bulkImportAutoCommitStallStreak += 1;
+      if (bulkImportAutoCommitStallStreak >= 5) {
+        console.warn(
+          "[bulk-import:auto-commit] no progress after repeated attempts — pausing auto-add; use the \"Add to watchlist\" button manually."
+        );
+        return;
+      }
+    } else {
+      bulkImportAutoCommitStallStreak = 0;
+    }
+
+    if (remaining > 0) scheduleBulkImportAutoCommit(listId, 5000);
+  }
+
+  async function handleBulkImportEndJob() {
+    const listId = state.activeListId || window.WatchlistAuth?.getProfile();
+    const IJ = window.WatchlistImportJob;
+    if (!listId || !IJ?.clearJob) return;
+
+    const confirmed = await window.WatchlistDialog.confirm(t("bulk.endJobWarning"), {
+      title: t("bulk.endJobTitle"),
+      confirmLabel: t("bulk.endJobConfirm"),
+      cancelLabel: t("btn.cancel"),
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    if (bulkImportAutoCommitTimer) {
+      window.clearTimeout(bulkImportAutoCommitTimer);
+      bulkImportAutoCommitTimer = null;
+    }
+    bulkImportAutoCommitStallStreak = 0;
+    IJ.pauseJob?.(listId);
+    IJ.forceReleaseWorkerLock?.(listId);
+    await IJ.clearJob(listId);
+    window.WatchlistBulkTitles?.clearBulkImportDraft?.();
+
+    bulkImportStatusFilter = "all";
+    bulkImportSearchQuery = "";
+    bulkImportExpandedRowId = null;
+    bulkImportTypeEditId = null;
+
+    if (els.bulkPasteInput) els.bulkPasteInput.value = "";
+    setBulkPasteError("");
+    hideBulkImportPreview();
+
+    await window.WatchlistDialog.alert(t("bulk.endJobDone"), {
+      title: t("bulk.endJobTitle"),
+    });
   }
 
   async function startBulkImportFromText(raw) {
@@ -10480,6 +10967,7 @@
 
     IJ._helpers.isOnList = isTitleOnWatchlist;
     IJ._helpers.getWatchlistAnime = getWatchlistAnimeItems;
+    IJ._helpers.findWatchlistFranchiseDuplicate = findWatchlistFranchiseDuplicateForImport;
 
     const parsed = WT.parseBulkImport(raw, { isOnList: IJ._helpers.isOnList });
 
@@ -10541,6 +11029,7 @@
       }
     }
 
+    bulkImportAutoCommitStallStreak = 0;
     const { job, items } = IJ.createJobFromParse(listId, parsed);
     WT.saveBulkImportDraft(WT.buildDraft(listId, parsed));
     showBulkImportPreview(job, items);
@@ -10628,10 +11117,15 @@
   function handleBulkImportContinue() {
     const listId = state.activeListId;
     const IJ = window.WatchlistImportJob;
-    if (!listId || !IJ?.kickImportQueue || bulkImportWorkerBusy) return;
+    if (!listId || !IJ || bulkImportWorkerBusy) return;
+
+    // Unstick AniList pause / deadlocked worker so matching can resume.
+    window.WatchlistMetadata?.clearAnilistRateLimitPause?.();
+    IJ.forceReleaseWorkerLock?.();
+
     bulkImportWorkerBusy = true;
     setBulkActionButtonLoading(els.bulkImportContinue, true, "bulk.continuing");
-    const kick = IJ.kickImportQueue(listId);
+    const kick = IJ.continueProcessing?.(listId) || IJ.kickImportQueue?.(listId);
     if (!kick?.started) {
       bulkImportWorkerBusy = false;
       setBulkActionButtonLoading(els.bulkImportContinue, false);
@@ -10658,6 +11152,51 @@
     if (!listId || !IJ?.kickImportQueue) return;
     if (!els.bulkImportPreview || els.bulkImportPreview.hidden) return;
     IJ.kickImportQueue(listId);
+    syncBulkImportWakeLock(IJ.loadJob?.(listId));
+  }
+
+  // Bulk import (especially anime falling back to AniList) can take several
+  // minutes of mostly-idle waiting between throttled requests. If the OS/screen
+  // goes to sleep during that time, all JS timers and in-flight requests freeze,
+  // which is what causes the "stops, restarts, stops again" behavior. Holding a
+  // Screen Wake Lock while a job is actively processing keeps the screen (and
+  // therefore the tab) awake so the import can run to completion uninterrupted.
+  async function requestBulkImportWakeLock() {
+    if (bulkImportWakeLock) return;
+    if (!("wakeLock" in navigator) || document.visibilityState !== "visible") return;
+    try {
+      const lock = await navigator.wakeLock.request("screen");
+      bulkImportWakeLock = lock;
+      lock.addEventListener("release", () => {
+        if (bulkImportWakeLock === lock) bulkImportWakeLock = null;
+      });
+    } catch {
+      bulkImportWakeLock = null;
+    }
+  }
+
+  function releaseBulkImportWakeLock() {
+    const lock = bulkImportWakeLock;
+    bulkImportWakeLock = null;
+    if (lock) {
+      lock.release().catch(() => {});
+    }
+  }
+
+  function syncBulkImportWakeLock(job) {
+    const IJ = window.WatchlistImportJob;
+    const jobIsLive =
+      Boolean(job) &&
+      !job.paused &&
+      job.status !== "cancelled" &&
+      job.status !== "completed";
+    const stillHasWork = jobIsLive || Boolean(IJ?.isWorkerActive?.());
+    const previewOpen = Boolean(els.bulkImportPreview) && !els.bulkImportPreview.hidden;
+    if (stillHasWork && previewOpen) {
+      void requestBulkImportWakeLock();
+    } else {
+      releaseBulkImportWakeLock();
+    }
   }
 
   async function handleBulkImportCopyUnresolved() {
@@ -10872,6 +11411,11 @@
     const IJ = window.WatchlistImportJob;
     if (!IJ) return;
 
+    IJ._helpers.isOnList = isTitleOnWatchlist;
+    IJ._helpers.getWatchlistAnime = getWatchlistAnimeItems;
+    IJ._helpers.findWatchlistFranchiseDuplicate = findWatchlistFranchiseDuplicateForImport;
+    IJ._helpers.getWatchlistFranchiseLookup = getWatchlistFranchiseLookupForImport;
+
     bindImportPreviewTypeInteractions();
 
     if (els.bulkImportToolbar?.dataset.bound === "true") return;
@@ -10885,7 +11429,13 @@
         setBulkActionButtonLoading(els.bulkImportContinue, false);
         setBulkActionButtonLoading(els.bulkImportResolve, false);
       }
-      renderImportJobPreview(job, items, { preserveTypeEditor: Boolean(bulkImportTypeEditId) });
+      scheduleImportPreviewRenderThrottled(listId, job, items, {
+        preserveTypeEditor: Boolean(bulkImportTypeEditId),
+      });
+      if (IJ.countCommitEligible?.(items)) {
+        scheduleBulkImportAutoCommit(listId);
+      }
+      syncBulkImportWakeLock(job);
     });
 
     els.bulkImportSummary?.addEventListener("click", (event) => {
@@ -10917,11 +11467,18 @@
     els.bulkImportContinue?.addEventListener("click", () => {
       handleBulkImportContinue();
     });
+    els.bulkImportEndJob?.addEventListener("click", () => {
+      void handleBulkImportEndJob();
+    });
 
     if (!window.__bulkImportQueueWakeBound) {
       window.__bulkImportQueueWakeBound = true;
       document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") wakeImportQueueIfNeeded();
+        if (document.visibilityState === "visible") {
+          wakeImportQueueIfNeeded();
+        } else {
+          releaseBulkImportWakeLock();
+        }
       });
       window.addEventListener("focus", wakeImportQueueIfNeeded);
       window.addEventListener("online", wakeImportQueueIfNeeded);
@@ -12554,7 +13111,8 @@
     const listId = state.activeListId;
 
     void window.WatchlistImportJobStore?.migrateLegacyLocalStorage?.(listId);
-    void window.WatchlistImportJobStore?.hydrate?.(listId);
+    // Don't hydrate a huge leftover import job during startup — it can freeze the page.
+    // Import tab loads it on demand.
 
     let hasLocal = false;
     try {
@@ -12645,6 +13203,8 @@
     }
     updateStats();
     updateAppBanners();
+    // Yield so the shell paints before rendering hundreds of cards.
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
     render();
     scheduleDeferredAnimeMaintenance();
     window.WatchlistLifecycle?.setPhase(window.WatchlistLifecycle.PHASE.synced);

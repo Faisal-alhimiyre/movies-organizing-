@@ -203,8 +203,6 @@
     return upgradeTmdbPosterUrl(url);
   }
 
-  const memory = new Map();
-
   const GENRE_ALIASES = {
     "sci-fi": "Science Fiction",
     "science fiction": "Science Fiction",
@@ -382,23 +380,63 @@
       .trim();
   }
 
+  const memory = new Map();
+  const MEMORY_CACHE_MAX = 400;
+  let diskCacheDirty = false;
+  let diskCacheTimer = null;
+  let diskCacheSnapshot = null;
+
   function readCache() {
+    if (diskCacheSnapshot) return diskCacheSnapshot;
     try {
-      return JSON.parse(localStorage.getItem(CACHE_KEY) || "{}");
+      diskCacheSnapshot = JSON.parse(localStorage.getItem(CACHE_KEY) || "{}");
     } catch {
-      return {};
+      diskCacheSnapshot = {};
     }
+    return diskCacheSnapshot;
   }
 
-  function writeCacheEntry(cacheKey, data) {
-    const cache = readCache();
-    cache[cacheKey] = { ...data, cachedAt: Date.now() };
-    try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+  function flushDiskCacheSoon() {
+    if (diskCacheTimer) return;
+    diskCacheTimer = setTimeout(() => {
+      diskCacheTimer = null;
+      if (!diskCacheDirty || !diskCacheSnapshot) return;
+      diskCacheDirty = false;
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify(diskCacheSnapshot));
     } catch {
       /* ignore quota errors */
     }
-    memory.set(cacheKey, data);
+    }, 5000);
+  }
+
+  function writeCacheEntry(cacheKey, data) {
+    const slim = {
+      title: data.title || "",
+      year: data.year || "",
+      anilistId: data.anilistId || null,
+      tmdbId: data.tmdbId || null,
+      imdbId: data.imdbId || null,
+      poster: data.poster || "",
+      source: data.source || "",
+      genres: Array.isArray(data.genres) ? data.genres.slice(0, 8) : [],
+      anilistRating: data.anilistRating || "",
+      imdbRating: data.imdbRating || "",
+      ageRating: data.ageRating || "",
+      episodeCount: data.episodeCount || null,
+      seasonCount: data.seasonCount || null,
+      runtime: data.runtime || "",
+      cachedAt: Date.now(),
+    };
+    const cache = readCache();
+    cache[cacheKey] = slim;
+    diskCacheDirty = true;
+    flushDiskCacheSoon();
+    memory.set(cacheKey, slim);
+    if (memory.size > MEMORY_CACHE_MAX) {
+      const oldest = memory.keys().next().value;
+      memory.delete(oldest);
+    }
   }
 
   function readCached(cacheKey) {
@@ -1511,31 +1549,47 @@
     };
 
     const { payload: cover, fetchMeta } = await fetchAnilistCoverOnly(anilistId, {
-      forceLive: true,
-      bypassCache: true,
       title,
       reason: "bulk_commit_cover",
     });
-    rootCause.liveCoverFetchRan = Boolean(fetchMeta?.ran);
-    rootCause.liveAnilistOperation = fetchMeta?.operation || "";
-    rootCause.liveAnilistRequestUrl = fetchMeta?.requestUrl || ANILIST_API;
-    rootCause.liveAnilistResponseStatus = fetchMeta?.httpStatus ?? null;
-    if (cover) {
-      rootCause.rawCoverImageExtraLarge = cover.coverImageExtraLarge || "";
-      rootCause.rawCoverImageLarge = cover.coverImageLarge || "";
-      rootCause.rawCoverImageMedium = cover.coverImageMedium || "";
+    let resolvedCover = cover;
+    let resolvedMeta = fetchMeta;
+    if (!cover?.poster && !fetchMeta?.rateLimited) {
+      const live = await fetchAnilistCoverOnly(anilistId, {
+        forceLive: true,
+        bypassCache: true,
+        title,
+        reason: "bulk_commit_cover_retry",
+      });
+      if (live.payload?.poster) {
+        resolvedCover = live.payload;
+        resolvedMeta = live.fetchMeta;
+      } else if (live.fetchMeta?.rateLimited) {
+        resolvedMeta = live.fetchMeta;
+      }
+    }
+    rootCause.liveCoverFetchRan = Boolean(resolvedMeta?.ran);
+    rootCause.liveAnilistOperation = resolvedMeta?.operation || "";
+    rootCause.liveAnilistRequestUrl = resolvedMeta?.requestUrl || ANILIST_API;
+    rootCause.liveAnilistResponseStatus = resolvedMeta?.httpStatus ?? null;
+    if (resolvedCover) {
+      rootCause.rawCoverImageExtraLarge = resolvedCover.coverImageExtraLarge || "";
+      rootCause.rawCoverImageLarge = resolvedCover.coverImageLarge || "";
+      rootCause.rawCoverImageMedium = resolvedCover.coverImageMedium || "";
     }
 
-    const picked = await selectLoadableAnilistPoster(cover, { skipProbe: false });
+    const picked = await selectLoadableAnilistPoster(resolvedCover, {
+      skipProbe: Boolean(resolvedCover?.poster && !resolvedMeta?.ran),
+    });
     rootCause.posterProbeResults = picked.probeResults;
     rootCause.selectedPosterBeforeFinalBuild = picked.poster || "";
     if (!picked.poster) {
-      if (!fetchMeta?.ran) rootCause.failingStage = "A";
-      else if (!cover) rootCause.failingStage = "B";
+      if (!resolvedMeta?.ran) rootCause.failingStage = "A";
+      else if (!resolvedCover) rootCause.failingStage = "B";
       else rootCause.failingStage = "G";
     }
 
-    return { cover, picked, rootCause, fetchMeta };
+    return { cover: resolvedCover, picked, rootCause, fetchMeta: resolvedMeta };
   }
 
   async function ensureAnimePosterOnDetails(details, options = {}) {
@@ -1819,6 +1873,7 @@
   }
 
   async function anilistQueryDetailed(query, variables) {
+    return runAnilistBulkScheduled(async () => {
     try {
       await waitForAnilistGate();
       const response = await fetch(ANILIST_API, {
@@ -1869,6 +1924,7 @@
       }
       return { ok: true, data: json.data, httpStatus: response.status };
     } catch (error) {
+      // Network/CORS failures are not rate limits — don't pause AniList for 90s.
       return {
         ok: false,
         transient: true,
@@ -1876,6 +1932,7 @@
         message: String(error?.message || error),
       };
     }
+    });
   }
 
   async function anilistQuery(query, variables) {
@@ -1889,7 +1946,7 @@
 
   let anilistBulkChain = Promise.resolve();
   let anilistBulkLastAt = 0;
-  const ANILIST_BULK_GAP_MS = 950;
+  const ANILIST_BULK_GAP_MS = 1200;
   let anilistGlobalPauseUntil = 0;
 
   function parseAnilistRateLimitReset(response) {
@@ -1903,19 +1960,30 @@
 
   function noteAnilistRateLimit(retryAfterHeader, resetMs) {
     const now = Date.now();
-    let until = now + 60000;
+    let until = now + 30000;
     if (retryAfterHeader) {
       const sec = parseInt(String(retryAfterHeader), 10);
-      if (sec > 0) until = Math.max(until, now + sec * 1000);
+      if (sec > 0) until = Math.max(until, now + Math.min(sec, 90) * 1000);
     }
-    if (resetMs > now) until = Math.max(until, resetMs);
-    anilistGlobalPauseUntil = Math.max(anilistGlobalPauseUntil, until);
+    if (resetMs > now) until = Math.max(until, Math.min(resetMs, now + 90000));
+    // Never stack pauses beyond 90s from now — avoids multi-minute freezes.
+    anilistGlobalPauseUntil = Math.min(
+      Math.max(anilistGlobalPauseUntil, until),
+      now + 90000
+    );
+  }
+
+  function clearAnilistRateLimitPause() {
+    anilistGlobalPauseUntil = 0;
+    // Break a deadlocked schedule chain so new AniList calls can run again.
+    anilistBulkChain = Promise.resolve();
+    anilistBulkLastAt = 0;
   }
 
   async function waitForAnilistGate() {
     const now = Date.now();
     if (anilistGlobalPauseUntil > now) {
-      await sleepMs(anilistGlobalPauseUntil - now);
+      await sleepMs(Math.min(anilistGlobalPauseUntil - now, 90000));
     }
   }
 
@@ -1938,11 +2006,12 @@
 
   function lookupCachedAnilistMatch(title, options = {}) {
     const passes = (options.searchPasses || [String(title || "").trim()]).filter(Boolean);
-    const cache = readCache();
+    // Only scan the in-memory Map (capped). Never JSON.parse the entire
+    // localStorage cache and walk every key per title — that was O(cache×titles).
     for (const pass of passes) {
       const norm = normalizeTitleForCacheLookup(pass);
       if (!norm) continue;
-      for (const [key, entry] of Object.entries(cache)) {
+      for (const [key, entry] of memory.entries()) {
         if (!key.startsWith("anilist:") || !entry?.anilistId) continue;
         const variants = [
           entry.title,
@@ -1985,6 +2054,127 @@
     } catch (err) {
       console.warn("[anime-index-search]", err);
       return null;
+    }
+  }
+
+  // --- title_provider_cache -------------------------------------------
+  // Shared, app-owned cache of AniList details we've already collected for
+  // a title (poster + genres/age/episodes/duration), keyed by
+  // `provider`/`provider_id` (e.g. "anilist"/12345). Separate from the
+  // licensed manami `anime_title_index` dump — see
+  // docs/ANIME-DATA-LICENSE.md — so it's safe to write our own live AniList
+  // fields here. Checking this before a live AniList call lets a bulk
+  // import (or a different user's import later) skip AniList entirely for
+  // titles someone has already resolved. Every function here fails open —
+  // a missing table/policy or a network hiccup just means "no cache hit",
+  // never a broken import.
+  const TITLE_PROVIDER_CACHE_TABLE = "title_provider_cache";
+
+  function titleProviderCacheRowToHit(row) {
+    if (!row) return null;
+    const payload = row.payload && typeof row.payload === "object" ? row.payload : {};
+    return {
+      title: row.display_title || payload.title || "",
+      poster: row.poster || payload.poster || "",
+      year: row.year || payload.year || "",
+      genres: Array.isArray(payload.genres) ? payload.genres : [],
+      ageRating: payload.ageRating || "",
+      episodeCount: payload.episodeCount || null,
+      seasonCount: payload.seasonCount || null,
+      runtime: payload.runtime || "",
+      imdbRating: payload.imdbRating || "",
+    };
+  }
+
+  /** One query for a whole bulk-import batch instead of one per title. */
+  async function fetchTitleProviderCacheBatch(provider, providerIds) {
+    const ids = [
+      ...new Set((providerIds || []).map((id) => String(id).trim()).filter(Boolean)),
+    ];
+    if (!ids.length) return null;
+    const sb = window.WatchlistAuth?.getSupabase?.();
+    if (!sb?.from) return null;
+    try {
+      const { data, error } = await sb
+        .from(TITLE_PROVIDER_CACHE_TABLE)
+        .select("provider_id, display_title, poster, year, payload")
+        .eq("provider", provider)
+        .in("provider_id", ids);
+      if (error || !data) return null;
+      const map = new Map();
+      for (const row of data) {
+        const hit = titleProviderCacheRowToHit(row);
+        if (hit) map.set(String(row.provider_id), hit);
+      }
+      return map;
+    } catch (err) {
+      console.warn("[title-provider-cache] batch read failed:", err);
+      return null;
+    }
+  }
+
+  async function fetchTitleProviderCacheEntry(provider, providerId) {
+    const id = String(providerId || "").trim();
+    if (!id) return null;
+    const sb = window.WatchlistAuth?.getSupabase?.();
+    if (!sb?.from) return null;
+    try {
+      const { data, error } = await sb
+        .from(TITLE_PROVIDER_CACHE_TABLE)
+        .select("provider_id, display_title, poster, year, payload")
+        .eq("provider", provider)
+        .eq("provider_id", id)
+        .maybeSingle();
+      if (error || !data) return null;
+      return titleProviderCacheRowToHit(data);
+    } catch (err) {
+      console.warn("[title-provider-cache] read failed:", err);
+      return null;
+    }
+  }
+
+  /** Fire-and-forget: save whatever we've collected so far so the next
+   * lookup (this import or a future one) gets a richer hit. Safe to call
+   * more than once for the same title as more fields arrive — later calls
+   * simply overwrite with a fuller snapshot. */
+  async function upsertTitleProviderCacheEntry(provider, providerId, snapshot) {
+    const id = String(providerId || "").trim();
+    if (!id || !snapshot?.title) return false;
+    const sb = window.WatchlistAuth?.getSupabase?.();
+    if (!sb?.from) return false;
+    try {
+      const { error } = await sb.from(TITLE_PROVIDER_CACHE_TABLE).upsert(
+        {
+          provider,
+          provider_id: id,
+          canonical_title: normalizeTitleForCacheLookup(snapshot.title),
+          display_title: snapshot.title,
+          year: String(snapshot.year || ""),
+          content_type: snapshot.contentType || "anime",
+          poster: snapshot.poster || "",
+          payload: {
+            title: snapshot.title,
+            poster: snapshot.poster || "",
+            year: snapshot.year || "",
+            genres: snapshot.genres || [],
+            ageRating: snapshot.ageRating || "",
+            episodeCount: snapshot.episodeCount || null,
+            seasonCount: snapshot.seasonCount || null,
+            runtime: snapshot.runtime || "",
+            imdbRating: snapshot.imdbRating || "",
+          },
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "provider,provider_id" }
+      );
+      if (error) {
+        console.warn("[title-provider-cache] upsert failed:", error.message || error);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.warn("[title-provider-cache] upsert failed:", err);
+      return false;
     }
   }
 
@@ -2371,9 +2561,7 @@
         variables[`search${idx}`] = req._batchTerm;
       });
 
-      const meta = await runAnilistBulkScheduled(() =>
-        anilistQueryDetailed(query, variables)
-      );
+      const meta = await anilistQueryDetailed(query, variables);
 
       if (meta.transient) {
         for (const req of chunk) {
@@ -2405,9 +2593,10 @@
           ok: true,
           transient: false,
           results,
-          meta,
+          httpStatus: meta.httpStatus,
         });
       });
+      // Don't retain the full GraphQL batch payload after mapping results.
     }
 
     return out;
@@ -2421,12 +2610,10 @@
     let lastMeta = null;
 
     for (const searchTerm of passes) {
-      const meta = await runAnilistBulkScheduled(() =>
-        anilistQueryDetailed(ANILIST_BULK_SEARCH_QUERY, {
-          search: searchTerm,
-          page: 1,
-        })
-      );
+      const meta = await anilistQueryDetailed(ANILIST_BULK_SEARCH_QUERY, {
+        search: searchTerm,
+        page: 1,
+      });
       lastMeta = meta;
 
       if (meta.transient) {
@@ -3052,14 +3239,14 @@
     const titleLocale = detectQueryTitleLocale(options.searchQuery || "");
     const preferAnime = options.preferAnime === true;
 
-    if (pick.anilistId) {
-      return fetchAnilistById(pick.anilistId);
-    }
+      if (pick.anilistId) {
+        return fetchAnilistById(pick.anilistId);
+      }
 
-    if (preferAnime && pick.title) {
-      const match = await fetchAnilistMatchByTitle(pick.title, pick.year);
-      if (match?.anilistId) {
-        return fetchAnilistById(match.anilistId);
+      if (preferAnime && pick.title) {
+        const match = await fetchAnilistMatchByTitle(pick.title, pick.year);
+        if (match?.anilistId) {
+          return fetchAnilistById(match.anilistId);
       }
     }
 
@@ -3109,6 +3296,38 @@
   }
 
   /**
+   * IMDb suggestion search (proxied via the edge function).
+   * IMDb matches alternate titles (AKAs) and fuzzy spellings the way its own
+   * search box does — this is what lets "seven" find Se7en and English anime
+   * titles find their romaji IMDb entries. TMDB's plain text search misses
+   * many of these.
+   */
+  const imdbSuggestCache = new Map();
+  const IMDB_SUGGEST_CACHE_MAX = 60;
+
+  async function searchImdbSuggestions(query, type) {
+    if (typeof window.WatchlistTmdb?.imdbSuggest !== "function") return [];
+    if (!window.WatchlistTmdb.isAvailable()) return [];
+    const q = String(query || "").trim();
+    if (q.length < 2 || detectQueryTitleLocale(q) === "ar") return [];
+
+    const cacheKey = q.toLowerCase();
+    let all = imdbSuggestCache.get(cacheKey);
+    if (!all) {
+      const res = await window.WatchlistTmdb.imdbSuggest(q);
+      if (!res?.ok) return [];
+      all = res.results || [];
+      imdbSuggestCache.set(cacheKey, all);
+      if (imdbSuggestCache.size > IMDB_SUGGEST_CACHE_MAX) {
+        imdbSuggestCache.delete(imdbSuggestCache.keys().next().value);
+      }
+    }
+    if (type === "movie") return all.filter((r) => r.type === "movie");
+    if (type === "series") return all.filter((r) => r.type === "series");
+    return all;
+  }
+
+  /**
    * Search via the TMDB edge function if Supabase is configured.
    * Falls back to direct API calls when not available.
    */
@@ -3139,6 +3358,13 @@
     const type = options.type || "all";
     const tasks = [];
 
+    // Kick off IMDb suggestions in parallel — merged in at the end so AKA
+    // matches TMDB misses (e.g. "seven" → Se7en) still show up.
+    const imdbSuggestPromise =
+      type !== "anime" && page === 1
+        ? searchImdbSuggestions(q, type).catch(() => [])
+        : Promise.resolve([]);
+
     if (type === "anime") {
       tasks.push(searchAnilist(q, page));
     } else {
@@ -3158,13 +3384,26 @@
         }
       }
 
-      if (type === "all" || type === "series") {
+      if ((type === "all" || type === "series") && !options.skipAnilistCrossCheck) {
         tasks.push(searchAnilist(q, page));
       }
     }
 
     const lists = await Promise.all(tasks);
     let results = mergeSearchResults(lists);
+
+    // Surface IMDb suggestion hits we don't already have (dedupe by
+    // normalized title + year). Novel entries go first: when IMDb finds
+    // something TMDB completely missed, it's almost always the exact title
+    // the user was typing.
+    const imdbSuggestions = await imdbSuggestPromise;
+    if (imdbSuggestions.length) {
+      const seen = new Set(results.map((r) => resultDedupeKey(r)));
+      const novel = imdbSuggestions.filter((r) => !seen.has(resultDedupeKey(r)));
+      if (novel.length) {
+        results = mergeSearchResults([novel, results]);
+      }
+    }
 
     if (type === "all" || type === "series" || type === "anime") {
       try {
@@ -3267,7 +3506,11 @@
     searchAnimeOfflineIndex,
     searchAnimeOfflineBatch,
     lookupCachedAnilistMatch,
+    fetchTitleProviderCacheBatch,
+    fetchTitleProviderCacheEntry,
+    upsertTitleProviderCacheEntry,
     getAnilistQueueStatus,
+    clearAnilistRateLimitPause,
     noteAnilistRateLimit,
     fetchAnimeIndexMeta,
     anilistQueryDetailed,

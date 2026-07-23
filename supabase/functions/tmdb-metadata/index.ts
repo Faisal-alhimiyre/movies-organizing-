@@ -4,19 +4,21 @@
  * Proxies a small allowlisted subset of TMDB v3 calls so the browser never
  * needs a client-side TMDB API key for per-episode ratings.
  *
- * Allowed actions: resolve | seasonRatings | search | details | tvFetch
+ * Allowed actions: resolve | seasonRatings | search | details | tvFetch | imdbSuggest
  *
  * Secret env vars:
  *   TMDB_API_KEY   (required)
  */
 
 const TMDB_BASE = "https://api.themoviedb.org/3";
+const IMDB_SUGGEST_BASE = "https://v2.sg.media-imdb.com/suggestion";
 const ALLOWED_ACTIONS = new Set([
   "resolve",
   "seasonRatings",
   "search",
   "details",
   "tvFetch",
+  "imdbSuggest",
 ]);
 
 const CORS: Record<string, string> = {
@@ -498,6 +500,66 @@ async function actionSearch(
   };
 }
 
+/**
+ * IMDb suggestion search — the same engine behind IMDb's own search box.
+ * Matches alternate titles (AKAs) and fuzzy spellings, e.g. "seven" → Se7en,
+ * "Yamada and the Seven Witches" → "Yamada-kun to 7-nin no Majo".
+ * No API key required; proxied here because the endpoint has no CORS headers.
+ */
+async function actionImdbSuggest(
+  p: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const query = s(p.query).trim();
+  if (query.length < 2) return { error: "query_too_short" };
+
+  const first = query[0].toLowerCase();
+  const url = `${IMDB_SUGGEST_BASE}/${encodeURIComponent(first)}/${encodeURIComponent(query)}.json`;
+
+  const resp = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!resp.ok) return { error: "api_failure" };
+
+  const json = (await resp.json()) as Record<string, unknown>;
+  const rows = Array.isArray(json?.d) ? (json.d as Record<string, unknown>[]) : [];
+
+  const TITLE_QIDS: Record<string, string> = {
+    movie: "movie",
+    tvMovie: "movie",
+    short: "movie",
+    tvSeries: "series",
+    tvMiniSeries: "series",
+    tvSpecial: "series",
+  };
+
+  const results = rows
+    .map((row) => {
+      const imdbId = s(row.id);
+      if (!/^tt\d{6,10}$/.test(imdbId)) return null;
+      const qid = s(row.qid);
+      const type = TITLE_QIDS[qid];
+      if (!type) return null;
+      const title = s(row.l);
+      if (!title) return null;
+      const year = n(row.y);
+      const image = row.i as Record<string, unknown> | undefined;
+      return {
+        source: "imdb",
+        imdbId,
+        tmdbId: null as number | null,
+        tmdbType: null as string | null,
+        anilistId: null as number | null,
+        title,
+        year: year != null ? String(year) : "",
+        type,
+        qid,
+        poster: s(image?.imageUrl),
+        resultKey: `imdb:${imdbId}`,
+      };
+    })
+    .filter(Boolean);
+
+  return { ok: true, results };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
@@ -545,6 +607,9 @@ Deno.serve(async (req: Request) => {
         break;
       case "tvFetch":
         result = await actionTvFetch(body);
+        break;
+      case "imdbSuggest":
+        result = await actionImdbSuggest(body);
         break;
       default:
         result = { error: "unsupported_action" };

@@ -226,6 +226,7 @@
       "card.sectionDetails": "Details",
       "card.sectionTitle": "Title",
       "card.sectionGenres": "Genres",
+      "card.finishingDetails": "Finishing details…",
       "ageRating.allAges": "All ages",
       "ageRating.kids": "Kids",
       "ageRating.ages7": "Ages 7+",
@@ -452,6 +453,10 @@
         "Matched {matched} of {total} — checking {remaining} remaining anime",
       "bulk.anilistPaused":
         "AniList is temporarily limited — continuing automatically at {time} · Matched {matched} of {total}",
+      "bulk.finishingDetails":
+        "· finishing details for {count} in the background",
+      "bulk.finishingDetailsOnly":
+        "Titles are on your list — finishing details for {count} in the background",
       "credits.menu": "Credits & data sources",
       "credits.title": "Credits & data sources",
       "credits.animeAttribution":
@@ -512,6 +517,7 @@
       "bulk.copyUnresolved": "Copy unresolved TSV",
       "bulk.copyUnresolvedCopied": "Copied!",
       "bulk.copyUnresolvedEmpty": "No unresolved titles to copy.",
+      "bulk.previewTruncated": "Showing {shown} of {total} titles. Use filters to narrow the list.",
       "bulk.pasteCorrected": "Paste corrected TSV",
       "bulk.pasteFromClipboard": "Paste",
       "bulk.applyCorrections": "Apply corrections",
@@ -523,6 +529,12 @@
       "bulk.replaceJobWarning":
         "You already have an import job with {count} titles in progress. Pasting again will discard that progress unless you cancel.",
       "bulk.replaceJobConfirm": "Replace job",
+      "bulk.endJob": "End import job",
+      "bulk.endJobTitle": "End import job?",
+      "bulk.endJobWarning":
+        "Titles already added to your watchlist will stay. Any remaining unresolved or unmatched titles in this import will be discarded so you can start a new import.",
+      "bulk.endJobConfirm": "End job",
+      "bulk.endJobDone": "Import job ended. You can start a new import now.",
       "bulk.fileLabelOptional": "Upload corrected file (optional)",
       "bulk.verifyBeforeAdd": "Wait until titles are matched before adding.",
       "bulk.previewTitle": "Review your list",
@@ -1089,6 +1101,7 @@
       "card.sectionDetails": "التفاصيل",
       "card.sectionTitle": "العنوان",
       "card.sectionGenres": "التصنيف",
+      "card.finishingDetails": "جارٍ إكمال التفاصيل…",
       "ageRating.allAges": "لجميع الأعمار",
       "ageRating.kids": "للأطفال",
       "ageRating.ages7": "7+",
@@ -1261,6 +1274,12 @@
       "bulk.fileReadFailed": "تعذر قراءة الملف.",
       "bulk.reviewImport": "تحقق من قائمتي",
       "bulk.addVerified": "أضف إلى قائمتي",
+      "bulk.endJob": "إنهاء عملية الإضافة",
+      "bulk.endJobTitle": "إنهاء عملية الإضافة؟",
+      "bulk.endJobWarning":
+        "العناوين التي أُضيفت بالفعل إلى قائمتك ستبقى. أي عناوين متبقية غير محلولة أو غير مطابقة في هذه العملية سيتم تجاهلها لتتمكن من بدء إضافة جديدة.",
+      "bulk.endJobConfirm": "إنهاء المهمة",
+      "bulk.endJobDone": "تم إنهاء عملية الإضافة. يمكنك بدء إضافة جديدة الآن.",
       "bulk.verifyBeforeAdd": "انتظر حتى يتم مطابقة العناوين قبل الإضافة.",
       "bulk.previewTitle": "راجع قائمتك",
       "bulk.previewTotal": "المُرسَل",
@@ -1282,6 +1301,7 @@
       "bulk.backToPaste": "العودة للصق",
       "bulk.copyUnresolved": "نسخ العناوين غير المحلولة",
       "bulk.copyUnresolvedCopied": "تم النسخ!",
+      "bulk.previewTruncated": "يُعرض {shown} من أصل {total} عنواناً. استخدم عوامل التصفية لتضييق القائمة.",
       "bulk.copyUnresolvedEmpty": "لا توجد عناوين غير محلولة للنسخ.",
       "bulk.advancedRecovery": "استرداد متقدم",
       "bulk.largeImportTitle": "استيراد كبير",
@@ -1891,6 +1911,7 @@
     setText("#bulkAddConfirm", "bulk.reviewImport");
     setText("#bulkImportBack", "bulk.backToPaste");
     setText("#bulkImportResolve", "bulk.resolveRemaining");
+    setText("#bulkImportEndJob", "bulk.endJob");
     setText("#bulkImportAdvancedSummary", "bulk.advancedRecovery");
     setText("#bulkImportCopyUnresolved", "bulk.copyUnresolved");
     setText("#creditsModalTitle", "credits.title");

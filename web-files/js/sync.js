@@ -35,24 +35,6 @@
   let syncTimer = null;
   let syncing = false;
   let snapshotInFlight = false;
-  let syncOpSeq = 0;
-
-  function debugSyncLog(location, message, data = {}, hypothesisId = "SYNC") {
-    // #region agent log
-    fetch("http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "913c94" },
-      body: JSON.stringify({
-        sessionId: "913c94",
-        location,
-        message,
-        data,
-        hypothesisId,
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }
 
   function config() {
     return window.WATCHLIST_CONFIG || {};
@@ -502,17 +484,9 @@
 
   async function pushSnapshot(listId, watchlist, watched, meta = {}, options = {}) {
     if (snapshotInFlight) {
-      debugSyncLog("sync.js:pushSnapshot", "skipped snapshot in flight", { listId }, "H1");
       return { ok: false, skipped: true, reason: "snapshot-in-flight" };
     }
-    const opId = ++syncOpSeq;
     snapshotInFlight = true;
-    debugSyncLog(
-      "sync.js:pushSnapshot",
-      "start",
-      { opId, listId, rowCount: countWatchlistItems(watchlist), syncing },
-      "H1"
-    );
     const sb = getClient();
     if (!sb || !listId) {
       snapshotInFlight = false;
@@ -597,18 +571,6 @@
 
       if (!insertResult.ok) {
         syncing = false;
-        debugSyncLog(
-          "sync.js:pushSnapshot",
-          "insert failed",
-          {
-            opId,
-            listId,
-            error: insertResult.error?.message,
-            saved: insertResult.saved,
-            rowCount: rows.length,
-          },
-          "H2"
-        );
         console.warn("[sync] item save failed:", insertResult.error?.message);
         dispatchStatus("error");
         return { ok: false, error: insertResult.error };
@@ -633,7 +595,6 @@
 
     syncing = false;
     dispatchStatus("saved");
-    debugSyncLog("sync.js:pushSnapshot", "done", { opId, listId, titleCount }, "H1");
     return { ok: true };
     } finally {
       snapshotInFlight = false;
@@ -676,13 +637,6 @@
   }
 
   async function pushRowsUpsert(listId, watchlist, watched, itemIds, meta = {}) {
-    const opId = ++syncOpSeq;
-    debugSyncLog(
-      "sync.js:pushRowsUpsert",
-      "start",
-      { opId, listId, itemIds, snapshotInFlight, syncing },
-      "H3"
-    );
     const sb = getClient();
     if (!sb || !listId || !itemIds?.length) return { ok: false };
 
@@ -709,12 +663,6 @@
     });
     syncing = false;
     dispatchStatus(result.ok ? "saved" : "error");
-    debugSyncLog(
-      "sync.js:pushRowsUpsert",
-      result.ok ? "done" : "failed",
-      { opId, listId, itemIds, error: result.error?.message || null },
-      "H3"
-    );
     return result;
   }
 

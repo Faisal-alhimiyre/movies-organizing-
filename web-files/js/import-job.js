@@ -1,6 +1,10 @@
 (function () {
   "use strict";
 
+  // #region agent log
+  try{fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'import-job.js:init',message:'import-job build loaded',data:{build:'v207'},hypothesisId:'H15',timestamp:Date.now()})}).catch(()=>{});}catch(_e){}
+  // #endregion
+
   const LEGACY_IMPORT_JOBS_KEY = "import_jobs";
   const LEGACY_IMPORT_ITEMS_KEY = "import_items";
   const JOB_VERSION = 1;
@@ -13,7 +17,7 @@
   const MAX_PERMANENT_RETRIES = 8;
   const COMMIT_CHUNK = 40;
   /** Bump when audit heuristics change so open jobs re-check once. */
-  const TYPE_AUDIT_VERSION = 8;
+  const TYPE_AUDIT_VERSION = 9;
 
   const DUPLICATE_CATEGORY = {
     import_tsv: "import_tsv",
@@ -322,6 +326,36 @@
     }, QUEUE_WATCHDOG_MS);
   }
 
+  let franchiseRetrySweepRunning = false;
+
+  /**
+   * Rows whose franchise-duplicate walk was rate limited carry a
+   * franchiseCheckPendingAt hold. Once AniList is available again, re-run the
+   * live sweep for just those rows (walks are budgeted + cached).
+   */
+  async function retryHeldFranchiseChecks(items) {
+    if (franchiseRetrySweepRunning) return false;
+    const SM = window.WatchlistSeriesMetadata;
+    if (!SM?.resolveAnimeFranchiseRoot || SM.isAnilistRateLimited?.()) return false;
+    const held = Object.values(items || {}).filter(
+      (it) =>
+        it.franchiseCheckPendingAt &&
+        it.status !== STATUS.added &&
+        it.status !== STATUS.duplicate &&
+        it.status !== STATUS.cancelled
+    );
+    if (!held.length) return false;
+    franchiseRetrySweepRunning = true;
+    try {
+      return await applyLiveFranchiseDupSweep(items, held);
+    } catch (error) {
+      console.warn("[bulk-import:franchise-retry]", error);
+      return false;
+    } finally {
+      franchiseRetrySweepRunning = false;
+    }
+  }
+
   async function runQueueWatchdog(listId) {
     if (isImportPersistenceBlocked(listId)) {
       stopQueueWatchdog();
@@ -339,6 +373,8 @@
     const now = Date.now();
     let changed = promoteDueWaitingItems(items, now);
     changed = recoverStuckProcessingItems(items, now) || changed;
+    changed = expireFranchiseCheckHolds(items, now) || changed;
+    changed = (await retryHeldFranchiseChecks(items)) || changed;
     if (changed) {
       job.stats = recomputeStats(items);
       job.updatedAt = now;
@@ -398,6 +434,14 @@
       return false;
     }
     console.warn("[bulk-import:queue] releasing stale worker lock");
+    processing = false;
+    processingStartedAt = 0;
+    return true;
+  }
+
+  function forceReleaseWorkerLock() {
+    if (!processing) return false;
+    console.warn("[bulk-import:queue] force-releasing worker lock");
     processing = false;
     processingStartedAt = 0;
     return true;
@@ -616,7 +660,7 @@
       hydrateImportItem(item);
       if (before !== item.status) changed = true;
     }
-    if (healDuplicateClassifications(items)) changed = true;
+    // Skip expensive franchise heal on hydrate — run only when preview opens / commits.
     job.stats = recomputeStats(items, job);
     job.updatedAt = Date.now();
     if (changed) saveItems(listId, items);
@@ -737,7 +781,18 @@
     let apiFailed = false;
 
     for (const query of buildWesternSearchPasses(item)) {
-      const result = await WM.searchTitles(query, { type: searchType, page: 1 });
+      // Bulk import already runs its own offline-first anime cross-check
+      // (verifyMovieTvContentType -> scoreAnimeForItem), which only falls
+      // back to a live AniList call when genuinely needed. searchTitles's
+      // blanket "series" AniList lookup was firing for every single TV
+      // title (even ones with zero chance of being anime) and funneling
+      // through the same globally-gated AniList queue the anime batch
+      // uses — that's what was producing the multi-second-per-item ramp.
+      const result = await WM.searchTitles(query, {
+        type: searchType,
+        page: 1,
+        skipAnilistCrossCheck: true,
+      });
       if (!result?.ok) {
         apiFailed = true;
         continue;
@@ -764,7 +819,22 @@
     return normalizeImportTitle(title).replace(/[^\p{L}\p{N}\s]/gu, "");
   }
 
+  function isBulkMatchDebugEnabled() {
+    try {
+      return localStorage.getItem("watchlist-debug-import-audit") === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  // This fires on essentially every match attempt (every title, every
+  // candidate rejection) — on a large import that's hundreds to thousands
+  // of console.warn calls logging full candidate objects. With DevTools open
+  // (as it usually is while debugging) the console retains every one of
+  // those objects, which was a real contributor to long imports eventually
+  // running the tab out of memory. Keep it off unless explicitly enabled.
   function logBulkMatch(item, data) {
+    if (!isBulkMatchDebugEnabled()) return;
     console.warn("[bulk-import:match]", {
       title: item.title,
       normalized: normalizeImportTitle(item.title),
@@ -773,12 +843,53 @@
     });
   }
 
-  function saveProgress(listId, job, items) {
+  let saveProgressPending = null;
+  let saveProgressTimer = null;
+
+  function saveProgress(listId, job, items, options = {}) {
+    const flushNow = options.flush === true;
     job.stats = recomputeStats(items);
     job.updatedAt = Date.now();
-    saveJob(listId, job);
-    saveItems(listId, items);
-    onChange?.({ listId, job, items });
+
+    // Per-title saveProgress used to structured-clone + JSON the entire
+    // ~300-item job into IDB/Supabase on every match. That alone was enough
+    // to Out-of-Memory the tab. Coalesce to at most ~1.5s (or flush at
+    // batch boundaries).
+    if (!saveProgressPending) {
+      saveProgressPending = { listId, job, items };
+    } else {
+      saveProgressPending.listId = listId;
+      saveProgressPending.job = job;
+      saveProgressPending.items = items;
+    }
+
+    const notify = () => {
+      const pending = saveProgressPending;
+      if (!pending) return;
+      saveProgressPending = null;
+      saveJob(pending.listId, pending.job);
+      saveItems(pending.listId, pending.items);
+      onChange?.({
+        listId: pending.listId,
+        job: pending.job,
+        items: pending.items,
+      });
+    };
+
+    if (flushNow) {
+      if (saveProgressTimer) {
+        clearTimeout(saveProgressTimer);
+        saveProgressTimer = null;
+      }
+      notify();
+      return;
+    }
+
+    if (saveProgressTimer) return;
+    saveProgressTimer = setTimeout(() => {
+      saveProgressTimer = null;
+      notify();
+    }, 1500);
   }
 
   function providerForItem(item) {
@@ -846,7 +957,16 @@
   }
 
   function isCommitEligible(item) {
-    if (!isMatchVerified(item)) return false;
+    // #region agent log
+    const __dbgWatch = item?.status === STATUS.ready_to_add && /boruto/i.test(String(item?.title || ""));
+    const __dbgFail = (reason) => {
+      if (__dbgWatch) {
+        fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'import-job.js:isCommitEligible',message:'excluded from commit',data:{title:item?.title,reason,status:item?.status,matchStatus:item?.matchStatus,franchiseMember:Boolean(item?.franchiseMember),commitClaimed:Boolean(item?.commitClaimed),hasProviderId:hasProviderId(item),poster:item?.details?.poster||null,posterPending:Boolean(item?.details?.posterPending),enrichmentPending:Boolean(item?.enrichmentPending)},hypothesisId:'H13',timestamp:Date.now()})}).catch(()=>{});
+      }
+      return false;
+    };
+    // #endregion
+    if (!isMatchVerified(item)) return __dbgWatch ? __dbgFail("not_match_verified") : false;
     if (
       item.status === STATUS.added ||
       item.status === STATUS.duplicate ||
@@ -854,19 +974,32 @@
     ) {
       return false;
     }
-    if (item.franchiseMember) return false;
-    if (item.commitClaimed) return false;
-    if (!hasProviderId(item)) return false;
-    if (hasCommitTypeBlock(item)) return false;
+    if (item.franchiseMember) return __dbgWatch ? __dbgFail("franchise_member") : false;
+    if (item.commitClaimed) return __dbgWatch ? __dbgFail("commit_claimed") : false;
+    // Franchise-duplicate check still pending (live AniList walk was rate
+    // limited). Hold the row briefly; expireFranchiseCheckHolds fails open.
+    if (
+      item.franchiseCheckPendingAt &&
+      Date.now() - item.franchiseCheckPendingAt < FRANCHISE_CHECK_HOLD_MS
+    ) {
+      return __dbgWatch ? __dbgFail("franchise_check_pending") : false;
+    }
+    if (!hasProviderId(item)) return __dbgWatch ? __dbgFail("no_provider_id") : false;
+    if (hasCommitTypeBlock(item)) return __dbgWatch ? __dbgFail("commit_type_block") : false;
     if (item.contentType === "anime") {
       const poster = item.details?.poster;
-      if (!poster || item.details?.posterPending) return false;
+      if (!poster || item.details?.posterPending) return __dbgWatch ? __dbgFail("missing_poster") : false;
     }
-    return (
+    const eligible =
       item.status === STATUS.ready_to_add ||
       item.status === STATUS.ready ||
-      item.status === STATUS.exact_match
-    );
+      item.status === STATUS.exact_match;
+    // #region agent log
+    if (__dbgWatch && eligible) {
+      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'import-job.js:isCommitEligible',message:'IS eligible',data:{title:item?.title,status:item?.status},hypothesisId:'H13',timestamp:Date.now()})}).catch(()=>{});
+    }
+    // #endregion
+    return eligible;
   }
 
   function countCommitEligible(items) {
@@ -910,9 +1043,42 @@
     return false;
   }
 
+  function markWatchlistFranchiseDuplicate(item, parent) {
+    if (!item || !parent) return false;
+    item.status = STATUS.duplicate;
+    item.duplicateCategory = DUPLICATE_CATEGORY.on_watchlist;
+    item.duplicateSourceTitle = parent.title || "";
+    item.error = parent.title
+      ? `Already on your list as “${parent.title}”.`
+      : "Already on your list.";
+    item.franchiseMember = false;
+    item.groupedUnderWatchlistId = "";
+    // Verified via a live AniList franchise-root walk. Cache-only re-checks
+    // (healDuplicateClassifications) can't see parents that are import rows
+    // not yet committed to the watchlist — they must not undo this mark.
+    item.franchiseDupConfirmed = true;
+    item.franchiseCheckPendingAt = 0;
+    return true;
+  }
+
   function healDuplicateClassifications(items) {
     const helpers = window.WatchlistImportJob?._helpers || {};
     const isOnList = helpers.isOnList || (() => false);
+    const getAnime = helpers.getWatchlistAnime || (() => []);
+    const SM = window.WatchlistSeriesMetadata;
+    // Build franchise lookup once — per-row map rebuilds freeze the page on large imports.
+    const franchiseLookup =
+      helpers.getWatchlistFranchiseLookup?.() ||
+      SM?.buildWatchlistFranchiseLookup?.(getAnime()) ||
+      null;
+    const findFranchiseDup = (item) => {
+      if (!item || item.contentType !== "anime") return null;
+      if (franchiseLookup?.find) return franchiseLookup.find(item);
+      if (helpers.findWatchlistFranchiseDuplicate) {
+        return helpers.findWatchlistFranchiseDuplicate(item);
+      }
+      return SM?.findWatchlistFranchiseDuplicateSource?.(item, getAnime()) || null;
+    };
     const sorted = Object.values(items || {}).sort((a, b) => a.line - b.line);
     const firstByKey = new Map();
     const providerOwner = new Map();
@@ -943,6 +1109,12 @@
         continue;
       }
 
+      // A live AniList root walk already confirmed this row duplicates a
+      // franchise entry (possibly another row of this same import that isn't
+      // on the watchlist yet). The cache/watchlist-only checks below can't
+      // see that, so never "heal" the mark away.
+      if (item.franchiseDupConfirmed && item.status === STATUS.duplicate) continue;
+
       if (item.status === STATUS.added || item.status === STATUS.cancelled) continue;
 
       let category = null;
@@ -955,24 +1127,36 @@
         category = DUPLICATE_CATEGORY.import_tsv;
         sourceTitle = other?.importedTitle || other?.title || "";
         message = "Duplicate in this import.";
-      } else if (isOnList(item.contentType, item.title)) {
-        category = DUPLICATE_CATEGORY.on_watchlist;
-        message = "Already on your list.";
       } else {
-        const pKey =
-          item.providerKey ||
-          (item.pick ? providerKeyFromPick(item.pick, item.contentType) : "");
-        if (pKey) {
-          const ownerId = providerOwner.get(pKey);
-          if (ownerId && ownerId !== item.id) {
-            const other = items[ownerId];
-            sourceTitle = other?.details?.title || other?.importedTitle || other?.title || "";
-            if (other?.status === STATUS.added) {
-              category = DUPLICATE_CATEGORY.already_added_in_job;
-              message = "Already added from this import.";
-            } else if (isMatchVerified(other) || other?.status === STATUS.ready_to_add) {
-              category = DUPLICATE_CATEGORY.provider_id;
-              message = "Same provider ID already matched in this import.";
+        if (item.contentType === "anime" && !item.franchiseMember) {
+          const franchiseDup = findFranchiseDup(item);
+          if (franchiseDup) {
+            category = DUPLICATE_CATEGORY.on_watchlist;
+            sourceTitle = franchiseDup.title || "";
+            message = franchiseDup.title
+              ? `Already on your list as “${franchiseDup.title}”.`
+              : "Already on your list.";
+          }
+        }
+        if (!category && isOnList(item.contentType, item.title)) {
+          category = DUPLICATE_CATEGORY.on_watchlist;
+          message = "Already on your list.";
+        } else if (!category) {
+          const pKey =
+            item.providerKey ||
+            (item.pick ? providerKeyFromPick(item.pick, item.contentType) : "");
+          if (pKey) {
+            const ownerId = providerOwner.get(pKey);
+            if (ownerId && ownerId !== item.id) {
+              const other = items[ownerId];
+              sourceTitle = other?.details?.title || other?.importedTitle || other?.title || "";
+              if (other?.status === STATUS.added) {
+                category = DUPLICATE_CATEGORY.already_added_in_job;
+                message = "Already added from this import.";
+              } else if (isMatchVerified(other) || other?.status === STATUS.ready_to_add) {
+                category = DUPLICATE_CATEGORY.provider_id;
+                message = "Same provider ID already matched in this import.";
+              }
             }
           }
         }
@@ -1271,9 +1455,28 @@
       item.waiting = true;
     }
     if (item.status === STATUS.waiting_poster) {
-      item.waiting = true;
-      if (!item.metadataStatus || item.metadataStatus === METADATA_STATUS.not_started) {
-        item.metadataStatus = METADATA_STATUS.metadata_waiting;
+      // Legacy: anime used to block match on a live AniList poster fetch.
+      // Convert leftover waiting_poster rows into ready-to-add so they can
+      // auto-commit; enrichment finishes the cover in the background.
+      if (item.pick?.anilistId || item.contentType === "anime") {
+        item.waiting = false;
+        clearRetrySchedule(item);
+        item.enrichmentPending = true;
+        item.metadataStatus = METADATA_STATUS.pending;
+        item.needsEnrichment = true;
+        if (item.pick) {
+          item.matchStatus = MATCH_STATUS.verified;
+          item.status = STATUS.ready_to_add;
+          item.error = "";
+        } else {
+          item.status = STATUS.pending;
+          item.matchStatus = MATCH_STATUS.pending;
+        }
+      } else {
+        item.waiting = true;
+        if (!item.metadataStatus || item.metadataStatus === METADATA_STATUS.not_started) {
+          item.metadataStatus = METADATA_STATUS.metadata_waiting;
+        }
       }
     }
     if (item.retryAfter && !item.nextRetryAt) {
@@ -1419,7 +1622,8 @@
 
     bumpMatchRevision(item);
     applyLightweightDetails(item, pick, details);
-    window.WatchlistMetadata?.cacheResolvedPreview?.(pick, details);
+    // Skip provider localStorage cache writes during bulk matching — each
+    // write was JSON.parse + JSON.stringify of the entire metadata cache.
 
     item.providerKey = pKey;
     item.candidates = [];
@@ -1541,6 +1745,24 @@
   function healTransientFailedItems(items) {
     let changed = false;
     for (const item of Object.values(items || {})) {
+      // Leftover poster-wait rows from the old match path: identity is
+      // already known, so promote them to ready and let enrichment finish.
+      if (
+        item.status === STATUS.waiting_poster &&
+        item.pick?.anilistId &&
+        (item.contentType === "anime" || item.pick.source === "anilist")
+      ) {
+        item.waiting = false;
+        clearRetrySchedule(item);
+        item.enrichmentPending = true;
+        item.needsEnrichment = true;
+        item.metadataStatus = METADATA_STATUS.pending;
+        item.matchStatus = MATCH_STATUS.verified;
+        item.status = STATUS.ready_to_add;
+        item.error = "";
+        changed = true;
+        continue;
+      }
       if (isMatchVerified(item)) {
         if (
           item.status === STATUS.failed &&
@@ -1564,6 +1786,25 @@
           (item.failureKind === FAILURE_KIND.provider && item.pick))
       ) {
         if (item.pick && item.failureKind === FAILURE_KIND.provider) {
+          // Anime with a pick no longer needs a live details retry — verify
+          // from identity and let enrichment handle posters/badges.
+          if (item.pick.anilistId && (item.contentType === "anime" || item.pick.source === "anilist")) {
+            const { details, hasBadgeData } = buildAnimeIdentityDetails(item, item.pick);
+            if (details?.title) {
+              applyLightweightDetails(item, item.pick, details);
+              item.matchStatus = MATCH_STATUS.verified;
+              item.status = STATUS.ready_to_add;
+              item.waiting = false;
+              clearRetrySchedule(item);
+              item.failureKind = null;
+              item.error = "";
+              item.enrichmentPending = !(details.poster && hasBadgeData);
+              item.needsEnrichment = true;
+              item.metadataStatus = METADATA_STATUS.pending;
+              changed = true;
+              continue;
+            }
+          }
           item.status = STATUS.pending;
           item.waiting = true;
           item.error = "Retrying provider details…";
@@ -2904,7 +3145,14 @@
     );
   }
 
-  async function detectTypeAuditMismatch(item) {
+  /**
+   * Local-only type mismatch checks. NEVER call live TMDb/AniList here —
+   * the previous version did scoreTmdbForItem/scoreAnimeForItem for every
+   * ready row when the preview opened, which on ~300-title imports caused
+   * hundreds of network calls + console.warn(pick) spam and Out-of-Memory
+   * tab crashes (see [bulk-import:type-audit] in DevTools).
+   */
+  function detectTypeAuditMismatchLocal(item) {
     if (!item || item.status === STATUS.added) return null;
 
     const imported = effectiveImportedType(item);
@@ -2933,8 +3181,6 @@
     const contentType = item.contentType;
 
     if (imported === "anime" && contentType === "tvSeries") {
-      const anime = await scoreAnimeForItem(item, { allowAnilist: true });
-      if (anime?.pick && anime.topScore >= 85) return "anime_imported_corrected_to_tv";
       if (item.pick?.tmdbId && !item.pick?.anilistId) return "anime_imported_corrected_to_tv";
     }
 
@@ -2947,38 +3193,16 @@
       return "anime_tmdb_routing";
     }
 
-    if (contentType !== "tvSeries") return null;
-    if (imported !== "tvSeries") return null;
-
-    if (item.pick?.anilistId) {
+    if (contentType === "tvSeries" && imported === "tvSeries" && item.pick?.anilistId) {
       return "tv_with_anilist";
     }
 
-    const tvScore = itemTypeEvidenceScore(item);
-
-    const anime = await scoreAnimeForItem(item, { allowAnilist: false });
-    if (
-      anime?.pick &&
-      anime.topScore >= 120 &&
-      (!item.pick?.tmdbId ||
-        tvScore < TYPE_VERIFY_STRONG ||
-        anime.topScore > tvScore + TYPE_VERIFY_CROSS_GAP)
-    ) {
-      return "anime_stronger";
-    }
-
-    const movie = await scoreTmdbForItem(item, "movie");
-    if (
-      movie?.pick &&
-      movie.topScore >= 120 &&
-      (!item.pick?.tmdbId ||
-        tvScore < TYPE_VERIFY_STRONG ||
-        movie.topScore > tvScore + TYPE_VERIFY_CROSS_GAP)
-    ) {
-      return "movie_stronger";
-    }
-
     return null;
+  }
+
+  async function detectTypeAuditMismatch(item) {
+    // Kept async for call-site compatibility; intentionally local-only.
+    return detectTypeAuditMismatchLocal(item);
   }
 
   async function auditMisclassifiedTypes(listId, { autoRetry = true } = {}) {
@@ -2992,18 +3216,19 @@
     const retryIds = [];
     const reasons = {};
     for (const item of Object.values(items)) {
-      const reason = await detectTypeAuditMismatch(item);
+      const reason = detectTypeAuditMismatchLocal(item);
       if (!reason) continue;
       retryIds.push(item.id);
       reasons[item.id] = reason;
-      console.warn("[bulk-import:type-audit]", {
-        title: item.title,
-        contentType: item.contentType,
-        originalType: item.originalType,
-        status: item.status,
-        reason,
-        pick: item.pick,
-      });
+      if (isImportAuditDebugEnabled()) {
+        console.warn("[bulk-import:type-audit]", {
+          title: item.title,
+          contentType: item.contentType,
+          originalType: item.originalType,
+          status: item.status,
+          reason,
+        });
+      }
     }
 
     job.typeAuditVersion = TYPE_AUDIT_VERSION;
@@ -3630,16 +3855,102 @@
     }
   }
 
+  function slimPick(pick) {
+    if (!pick) return null;
+    return {
+      source: pick.source || (pick.anilistId ? "anilist" : pick.tmdbId ? "tmdb" : ""),
+      anilistId: pick.anilistId || null,
+      tmdbId: pick.tmdbId || null,
+      tmdbType: pick.tmdbType || "",
+      imdbId: pick.imdbId || null,
+      title: pick.title || pick.titleEnglish || pick.titleRomaji || "",
+      year: pick.year || "",
+      poster: pick.poster || "",
+      format: pick.format || "",
+      type: pick.type || "",
+    };
+  }
+
+  function slimDetails(details) {
+    if (!details) return null;
+    return {
+      title: details.title || "",
+      year: details.year || "",
+      anilistId: details.anilistId || null,
+      tmdbId: details.tmdbId || null,
+      tmdbType: details.tmdbType || "",
+      imdbId: details.imdbId || null,
+      poster: details.poster || "",
+      source: details.source || "",
+      contentType: details.contentType || "",
+      genres: Array.isArray(details.genres) ? details.genres.slice(0, 8) : [],
+      ageRating: details.ageRating || "",
+      episodeCount: details.episodeCount || null,
+      seasonCount: details.seasonCount || null,
+      runtime: details.runtime || "",
+      imdbRating: details.imdbRating || "",
+      anilistRating: details.anilistRating || "",
+      enrichmentDeferred: Boolean(details.enrichmentDeferred ?? !details.plot),
+    };
+  }
+
   function applyLightweightDetails(item, pick, details) {
     if (!details?.title) return false;
     details.enrichmentDeferred = !details.plot;
-    item.pick = pick;
-    item.details = details;
+    // Never keep the fat search hit / providerCacheHit on the row — ×300
+    // rows × every saveProgress clone was a major Out-of-Memory cause.
+    item.pick = slimPick(pick);
+    item.details = slimDetails(details);
     item.needsEnrichment = Boolean(details.enrichmentDeferred);
+    item.candidates = [];
     return true;
   }
 
-  async function finalizeMatchPick(item, pick, job, providerIds) {
+  /**
+   * Anime bulk match must never block on live AniList details/poster.
+   * Identity (anilistId + title/year, optional offline/search poster, optional
+   * title_provider_cache hit) is enough to verify + auto-add; enrichment
+   * finishes the card later. Calling resolveDetailsForWatchlistAdd /
+   * ensureAnimePosterOnDetails here was the main 429 + OOM source.
+   */
+  function buildAnimeIdentityDetails(item, pick) {
+    let details =
+      buildMinimalDetailsFromPick(pick, item) ||
+      {
+        title: pick.title || item.title || "",
+        year: pick.year || item.year || "",
+        anilistId: pick.anilistId,
+        source: "anilist",
+        contentType: "anime",
+      };
+    if (!details.title) details.title = pick.title || item.title || "";
+    if (!details.anilistId && pick.anilistId) details.anilistId = pick.anilistId;
+    if (!details.poster && pick.poster) details.poster = pick.poster;
+
+    const cacheHit = pick.providerCacheHit;
+    let hasBadgeData = false;
+    if (cacheHit) {
+      if (!details.poster && cacheHit.poster) details.poster = cacheHit.poster;
+      if (!details.genres?.length && cacheHit.genres?.length) {
+        details.genres = cacheHit.genres;
+      }
+      if (!details.ageRating && cacheHit.ageRating) details.ageRating = cacheHit.ageRating;
+      if (!details.episodeCount && cacheHit.episodeCount) {
+        details.episodeCount = cacheHit.episodeCount;
+      }
+      if (!details.seasonCount && cacheHit.seasonCount) {
+        details.seasonCount = cacheHit.seasonCount;
+      }
+      if (!details.runtime && cacheHit.runtime) details.runtime = cacheHit.runtime;
+      if (!details.imdbRating && cacheHit.imdbRating) details.imdbRating = cacheHit.imdbRating;
+      hasBadgeData = Boolean(details.ageRating && details.episodeCount);
+    }
+
+    details.enrichmentDeferred = !(details.poster && hasBadgeData && details.plot);
+    return { details, hasBadgeData };
+  }
+
+  async function finalizeMatchPick(item, pick, job, providerIds, options = {}) {
     const revision = item.matchRevision || 0;
     const pKey = providerKeyFromPick(pick, item.contentType);
     if (pKey && providerIds[pKey] && providerIds[pKey] !== item.id) {
@@ -3652,73 +3963,39 @@
       return false;
     }
 
-    let details = null;
-    const WM = window.WatchlistMetadata;
     const isAnimePick =
       item.contentType === "anime" || pick.anilistId || pick.source === "anilist";
 
-    if (isAnimePick && WM?.resolveDetailsForWatchlistAdd) {
-      const bypassPosterCache = (item.posterRetries || 0) > 0;
-      details = await WM.resolveDetailsForWatchlistAdd(pick, item.contentType, {
-        searchQuery: item.title,
-        pipeline: "bulk-verify",
-        posterRequired: true,
-        verifyPoster: false,
-        bypassCache: bypassPosterCache,
-        forceLive: bypassPosterCache,
-      });
-    } else if (isAnimePick) {
-      details = await fetchDetailsForPick(pick, item);
-    } else {
-      details = buildMinimalDetailsFromPick(pick, item);
-      if (!details?.title || (!details?.poster && !details?.plot)) {
-        details = await fetchDetailsForPick(pick, item);
+    // All anime identity matches (offline index OR AniList search) use the
+    // fast path — never a live details/poster round-trip during matching.
+    // options.offlineFast is kept for callers but no longer required.
+    if (isAnimePick && pick.anilistId) {
+      const { details, hasBadgeData } = buildAnimeIdentityDetails(item, pick);
+      if (!details.title) return false;
+      if (!canApplyMatchUpdate(item, revision)) return false;
+      const applied = setMatchVerified(item, pick, details, job, providerIds);
+      if (applied) {
+        item.enrichmentPending = !(details.poster && hasBadgeData);
+        item.waiting = false;
+        clearRetrySchedule(item);
+        if (item.status === STATUS.waiting_poster) {
+          item.status = STATUS.ready_to_add;
+        }
       }
+      return applied;
+    }
+
+    let details = null;
+    const WM = window.WatchlistMetadata;
+
+    // Movies / TV only — still may fetch provider details here.
+    details = buildMinimalDetailsFromPick(pick, item);
+    if (!details?.title || (!details?.poster && !details?.plot)) {
+      details = await fetchDetailsForPick(pick, item);
     }
 
     if (!details?.title) {
       details = buildMinimalDetailsFromPick(pick, item);
-    }
-
-    if (isAnimePick && details?.title && !details?.poster) {
-      details = await WM.ensureAnimePosterOnDetails?.(details, {
-        pick,
-        required: true,
-        bypassCache: true,
-        forceLive: true,
-        reason: "provider_cache_missing_poster",
-      });
-    }
-
-    if (isAnimePick && details?.title && !details?.poster) {
-      item.pick = pick;
-      item.details = details;
-      item.posterRetries = (item.posterRetries || 0) + 1;
-      const retryAt =
-        Date.now() +
-        Math.min(60000, 1500 * Math.pow(2, item.posterRetries)) +
-        ((item.line || 0) % 5) * RETRY_STAGGER_MS;
-      const posterReason = formatPosterRetryReason(retryAt);
-      if (item.posterRetries < MAX_POSTER_FETCH_RETRIES) {
-        setMatchStatus(item, MATCH_STATUS.pending);
-        item.status = STATUS.waiting_poster;
-        item.waiting = true;
-        syncRetrySchedule(item, retryAt, posterReason);
-        item.failureKind = null;
-        item.error = "Fetching anime poster";
-        item.metadataStatus = METADATA_STATUS.metadata_waiting;
-        return false;
-      }
-      setMatchStatus(item, MATCH_STATUS.needs_attention);
-      item.status = STATUS.failed;
-      setItemFailure(
-        item,
-        FAILURE_KIND.provider,
-        "AniList cover fetch failed",
-        providerForItem(item)
-      );
-      item.metadataStatus = METADATA_STATUS.permanent_failure;
-      return false;
     }
 
     if (!details?.title) {
@@ -3792,18 +4069,29 @@
         year: item.year,
         searchPasses: buildAnimeSearchPasses(item),
       });
-      if (offline?.ok && offline.pick) {
-        await finalizeMatchPick(item, offline.pick, job, providerIds);
-        if (isMatchVerified(item)) return;
-      }
-      if (offline?.ok && offline.results?.length) {
+      let candidatePick = offline?.ok ? offline.pick || null : null;
+      if (!candidatePick && offline?.ok && offline.results?.length) {
         const scored = scoreCandidates(offline.results, item);
         const auto = autoPickFromScored(scored, item);
         const topScore = scored[0]?.score || 0;
-        if (auto.pick && topScore >= 95) {
-          await finalizeMatchPick(item, auto.pick, job, providerIds);
-          if (isMatchVerified(item)) return;
+        if (auto.pick && topScore >= 95) candidatePick = auto.pick;
+      }
+      if (candidatePick?.anilistId) {
+        if (WM?.fetchTitleProviderCacheEntry) {
+          try {
+            const cacheHit = await WM.fetchTitleProviderCacheEntry(
+              "anilist",
+              candidatePick.anilistId
+            );
+            if (cacheHit) candidatePick.providerCacheHit = cacheHit;
+          } catch (error) {
+            console.warn("[bulk-import:provider-cache]", error);
+          }
         }
+        await finalizeMatchPick(item, candidatePick, job, providerIds, {
+          offlineFast: true,
+        });
+        if (isMatchVerified(item)) return;
       }
     }
 
@@ -4289,38 +4577,265 @@
     await applyAnimeWatchlistGrouping(listId, items);
   }
 
+  /**
+   * Are two normalized titles plausibly the same franchise? Whole-word
+   * containment: "fairy tail 100 years quest" ⊃ "fairy tail",
+   * "boruto naruto next generations" ⊃ "naruto". Cheap pre-filter so we only
+   * spend live AniList relation walks on genuine franchise suspects.
+   */
+  function titlesLookFranchiseRelated(a, b) {
+    const clean = (t) =>
+      normalizeImportTitle(t).replace(/[:'.]/g, " ").replace(/\s+/g, " ").trim();
+    const x = clean(a);
+    const y = clean(b);
+    if (!x || !y || x === y) return false;
+    const [shorter, longer] = x.length <= y.length ? [x, y] : [y, x];
+    return ` ${longer} `.includes(` ${shorter} `);
+  }
+
+  // Live AniList relation walks are rate-limited; keep the per-batch budget
+  // small. Walks cache their result (franchise root), so repeats are free.
+  const LIVE_FRANCHISE_WALK_BUDGET = 6;
+
+  // How long a franchise-suspect row is held back from auto-commit while its
+  // live root walk is pending (e.g. AniList rate-limit pause). Fail-open:
+  // after this window the row commits normally so nothing gets stuck.
+  const FRANCHISE_CHECK_HOLD_MS = 120000;
+
+  function setFranchiseCheckHold(item) {
+    if (item.franchiseCheckPendingAt) return false;
+    item.franchiseCheckPendingAt = Date.now();
+    return true;
+  }
+
+  function clearFranchiseCheckHold(item) {
+    if (!item.franchiseCheckPendingAt) return false;
+    item.franchiseCheckPendingAt = 0;
+    return true;
+  }
+
+  function expireFranchiseCheckHolds(items, now) {
+    let changed = false;
+    for (const item of Object.values(items || {})) {
+      if (
+        item.franchiseCheckPendingAt &&
+        now - item.franchiseCheckPendingAt >= FRANCHISE_CHECK_HOLD_MS
+      ) {
+        item.franchiseCheckPendingAt = 0;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /**
+   * Franchise duplicate detection that actually works on first import.
+   *
+   * The cache-only check (healDuplicateClassifications →
+   * buildBatchFranchiseRootMapFromCache) can never link sequels the first
+   * time around because nothing populates the franchise-root cache during
+   * import. This sweep runs right after a batch of anime is matched, finds
+   * title-related suspects (watchlist + earlier rows of this import), and
+   * resolves franchise roots live for just those few ids. Roots are cached,
+   * so every later pass — and the idle-time grouping — sees them too.
+   */
+  async function applyLiveFranchiseDupSweep(items, batchItems) {
+    const SM = window.WatchlistSeriesMetadata;
+    const helpers = window.WatchlistImportJob?._helpers || {};
+    if (!SM?.resolveAnimeFranchiseRoot) return false;
+
+    const watchlistAnime = helpers.getWatchlistAnime?.() || [];
+    const importAnime = Object.values(items).filter(
+      (it) =>
+        it.contentType === "anime" &&
+        isMatchVerified(it) &&
+        it.status !== STATUS.duplicate &&
+        Number(it.pick?.anilistId) > 0
+    );
+
+    let walkBudget = LIVE_FRANCHISE_WALK_BUDGET;
+    let rateLimited = Boolean(SM.isAnilistRateLimited?.());
+    const resolveRoot = async (anilistId) => {
+      if (rateLimited || walkBudget <= 0) {
+        return { rootAnilistId: null, incomplete: true, rateLimited };
+      }
+      const res = (await SM.resolveAnimeFranchiseRoot(anilistId, {})) || {
+        rootAnilistId: null,
+        incomplete: true,
+      };
+      if (!res.fromCache) walkBudget -= 1;
+      if (res.rateLimited) rateLimited = true;
+      return res;
+    };
+
+    let changed = false;
+    const ordered = [...batchItems].sort((a, b) => a.line - b.line);
+    for (const item of ordered) {
+      if (item.contentType !== "anime" || !isMatchVerified(item)) continue;
+      if (
+        item.status === STATUS.duplicate ||
+        item.status === STATUS.added ||
+        item.status === STATUS.cancelled
+      ) {
+        continue;
+      }
+      const childId = Number(item.pick?.anilistId);
+      if (!Number.isFinite(childId) || childId <= 0) continue;
+      if (item._liveFranchiseCheckedFor === childId) continue;
+      const myTitle = item.pick?.title || item.title;
+
+      const candidates = [];
+      for (const w of watchlistAnime) {
+        const wid = Number(w.anilistId);
+        if (!Number.isFinite(wid) || wid <= 0 || wid === childId) continue;
+        if (titlesLookFranchiseRelated(myTitle, w.title)) {
+          candidates.push({ anilistId: wid, title: w.title });
+        }
+      }
+      for (const other of importAnime) {
+        if (other.id === item.id || other.line >= item.line) continue;
+        const oid = Number(other.pick?.anilistId);
+        if (!Number.isFinite(oid) || oid <= 0 || oid === childId) continue;
+        if (titlesLookFranchiseRelated(myTitle, other.pick?.title || other.title)) {
+          candidates.push({ anilistId: oid, title: other.details?.title || other.title });
+        }
+      }
+      if (!candidates.length) {
+        // No franchise suspects — done with this row for good.
+        item._liveFranchiseCheckedFor = childId;
+        changed = clearFranchiseCheckHold(item) || changed;
+        continue;
+      }
+
+      // Fast path, zero network: if the row and a candidate appear in the
+      // same cached season chain (built when a card's seasons were viewed),
+      // they're the same franchise — no root walk needed.
+      const childChain = SM.readCachedChainIdsFromSeriesMetadata?.(childId) || null;
+      let chainMatched = false;
+      for (const cand of candidates.slice(0, 3)) {
+        const candChain =
+          SM.readCachedChainIdsFromSeriesMetadata?.(cand.anilistId) || null;
+        if (
+          childChain?.includes(Number(cand.anilistId)) ||
+          candChain?.includes(childId)
+        ) {
+          markWatchlistFranchiseDuplicate(item, { title: cand.title });
+          changed = true;
+          chainMatched = true;
+          // #region agent log
+          fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'import-job.js:applyLiveFranchiseDupSweep',message:'chain franchise dup marked',data:{title:item.title,parentTitle:cand.title,childId,candidateId:cand.anilistId},hypothesisId:'H12',timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+          break;
+        }
+      }
+      if (chainMatched) {
+        item._liveFranchiseCheckedFor = childId;
+        continue;
+      }
+
+      // Rate-limited or out of budget: hold the row back from auto-commit
+      // briefly and let the queue watchdog retry once AniList recovers.
+      if (rateLimited || walkBudget <= 0) {
+        changed = setFranchiseCheckHold(item) || changed;
+        continue;
+      }
+
+      const childRes = await resolveRoot(childId);
+      const childRoot = Number(childRes.rootAnilistId) || null;
+      if (!childRoot) {
+        // Walk failed (rate limit / network) — retry later, don't give up.
+        changed = setFranchiseCheckHold(item) || changed;
+        continue;
+      }
+
+      let allCandidatesResolved = true;
+      let matched = false;
+      for (const cand of candidates.slice(0, 3)) {
+        const candRes = await resolveRoot(cand.anilistId);
+        const candRoot = Number(candRes.rootAnilistId) || null;
+        if (!candRoot) {
+          allCandidatesResolved = false;
+          continue;
+        }
+        if (candRoot === childRoot) {
+          markWatchlistFranchiseDuplicate(item, { title: cand.title });
+          changed = true;
+          matched = true;
+          // #region agent log
+          fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'import-job.js:applyLiveFranchiseDupSweep',message:'live franchise dup marked',data:{title:item.title,parentTitle:cand.title,childId,candidateId:cand.anilistId,sharedRoot:childRoot},hypothesisId:'H12',timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+          break;
+        }
+      }
+      if (matched || allCandidatesResolved) {
+        item._liveFranchiseCheckedFor = childId;
+        changed = clearFranchiseCheckHold(item) || changed;
+      } else {
+        changed = setFranchiseCheckHold(item) || changed;
+      }
+    }
+    return changed;
+  }
+
   async function applyAnimeWatchlistGrouping(listId, items) {
     const SM = window.WatchlistSeriesMetadata;
     const helpers = window.WatchlistImportJob?._helpers || {};
     const getWatchlistAnime = helpers.getWatchlistAnime || (() => []);
-    if (!SM?.findAnimeParentOnList || !SM?.resolveWatchlistItemAnilistId) return;
+    if (!SM?.findWatchlistFranchiseDuplicateSource && !SM?.buildWatchlistFranchiseLookup) {
+      return false;
+    }
 
     const watchlistAnime = getWatchlistAnime();
-    if (!watchlistAnime.length) return;
+    if (!watchlistAnime.length) return false;
+
+    const lookup =
+      helpers.getWatchlistFranchiseLookup?.() ||
+      SM.buildWatchlistFranchiseLookup?.(watchlistAnime) ||
+      null;
+
+    let changed = false;
+    const unresolved = [];
 
     for (const item of Object.values(items || {})) {
       if (item.contentType !== "anime") continue;
       if (item.status === STATUS.duplicate || item.status === STATUS.cancelled) continue;
+      if (item.status === STATUS.added) continue;
       if (item.franchiseMember) continue;
 
-      const resolved = await SM.resolveWatchlistItemAnilistId(item, { persist: false });
-      if (!resolved?.anilistId) continue;
+      const cachedDup = lookup?.find
+        ? lookup.find(item)
+        : SM.findWatchlistFranchiseDuplicateSource?.(item, watchlistAnime);
+      if (cachedDup) {
+        if (markWatchlistFranchiseDuplicate(item, cachedDup)) changed = true;
+        continue;
+      }
 
-      const relation = await SM.findAnimeParentOnList(resolved.anilistId, watchlistAnime);
-      if (!relation?.parent) continue;
+      const childId = Number(item.pick?.anilistId || item.details?.anilistId);
+      if (!Number.isFinite(childId) || childId <= 0) continue;
+      // This full-list pass reruns on every batch cycle while the job is
+      // processing. Without memoizing a "no parent found" result per item,
+      // a large import re-checks every still-unresolved anime item against
+      // the franchise cache dozens of times over — skip anything we already
+      // confirmed has no relation the last time we looked.
+      if (item._franchiseNoParentFor === childId) continue;
+      unresolved.push({ item, childId });
+    }
 
-      item.franchiseMember = true;
-      item.franchiseGroupId = relation.parent.id || "";
-      item.groupedUnderWatchlistId = relation.parent.id || "";
-      item.duplicateCategory = DUPLICATE_CATEGORY.grouped_member;
-      item.duplicateSourceTitle = relation.parent.title || "";
-      item.groupedRelationType = relation.relationType || "sequel_chain";
-      item.groupedSeasonNumber = relation.seasonNumber || null;
-      item.error = `Will be grouped under “${relation.parent.title}”.`;
-      if (item.status !== STATUS.added && isMatchVerified(item)) {
-        item.status = STATUS.ready_to_add;
+    if (unresolved.length && SM.findAnimeParentOnList) {
+      for (const entry of unresolved) {
+        const { item, childId } = entry;
+        if (item.status === STATUS.duplicate) continue;
+        const relation = await SM.findAnimeParentOnList(childId, watchlistAnime);
+        if (relation?.parent && markWatchlistFranchiseDuplicate(item, relation.parent)) {
+          changed = true;
+        } else {
+          item._franchiseNoParentFor = childId;
+        }
       }
     }
+
+    if (changed) saveItems(listId, items);
+    return changed;
   }
 
   async function isAnimeGroupedChild(anilistId) {
@@ -4395,21 +4910,48 @@
             year: item.year,
           }))
         );
+        // Collect every AniList id the offline index handed back so we can
+        // check our own title_provider_cache in a single round trip instead
+        // of one Supabase query per title.
+        const offlineAnilistIds = [];
+        const offlinePickByItemId = new Map();
         for (const item of animeBatch) {
           if (isMatchVerified(item)) continue;
           const offline = offlineMap?.get(item.id);
           if (!offline?.ok) continue;
-          if (offline.pick) {
-            await finalizeMatchPick(item, offline.pick, job, providerIds);
-            continue;
+          let candidatePick = offline.pick || null;
+          if (!candidatePick && offline.results?.length) {
+            const scored = scoreCandidates(offline.results, item);
+            const auto = autoPickFromScored(scored, item);
+            const topScore = scored[0]?.score || 0;
+            if (auto.pick && topScore >= 95) candidatePick = auto.pick;
           }
-          if (!offline.results?.length) continue;
-          const scored = scoreCandidates(offline.results, item);
-          const auto = autoPickFromScored(scored, item);
-          const topScore = scored[0]?.score || 0;
-          if (auto.pick && topScore >= 95) {
-            await finalizeMatchPick(item, auto.pick, job, providerIds);
+          if (!candidatePick?.anilistId) continue;
+          offlinePickByItemId.set(item.id, candidatePick);
+          offlineAnilistIds.push(candidatePick.anilistId);
+        }
+
+        let cacheByAnilistId = null;
+        if (offlineAnilistIds.length && WM?.fetchTitleProviderCacheBatch) {
+          try {
+            cacheByAnilistId = await WM.fetchTitleProviderCacheBatch(
+              "anilist",
+              offlineAnilistIds
+            );
+          } catch (error) {
+            console.warn("[bulk-import:provider-cache]", error);
           }
+        }
+
+        for (const item of animeBatch) {
+          if (isMatchVerified(item)) continue;
+          const candidatePick = offlinePickByItemId.get(item.id);
+          if (!candidatePick) continue;
+          const cacheHit = cacheByAnilistId?.get(String(candidatePick.anilistId));
+          if (cacheHit) candidatePick.providerCacheHit = cacheHit;
+          await finalizeMatchPick(item, candidatePick, job, providerIds, {
+            offlineFast: true,
+          });
         }
       } catch (error) {
         console.warn("[bulk-import:offline-index]", error);
@@ -4437,11 +4979,9 @@
       otherBatch,
       async (item) => {
         await matchOneItem(item, job, items, providerIds);
-        saveProgress(listId, job, items);
       },
       MAX_CONCURRENCY
     );
-
     for (let i = 0; i < animeBatch.length; i++) {
       const item = animeBatch[i];
       if (paused || job.paused) break;
@@ -4464,9 +5004,22 @@
         item.failureKind = FAILURE_KIND.transient;
         item.error = item.waitingReason;
       }
-      saveProgress(listId, job, items);
       if (!paused && !animeSearchMap?.get(item.id)) {
         await new Promise((r) => setTimeout(r, ANILIST_ITEM_DELAY_MS));
+      }
+    }
+
+    // Drop the batch GraphQL map ASAP so the large response isn't retained.
+    animeSearchMap = null;
+
+    // Catch franchise sequels (Fairy Tail → 100 Years Quest, Naruto → Boruto)
+    // before auto-commit adds them as separate titles. Must run per batch —
+    // the idle-time grouping below fires after rows are already committed.
+    if (animeBatch.length) {
+      try {
+        await applyLiveFranchiseDupSweep(items, animeBatch);
+      } catch (error) {
+        console.warn("[bulk-import:franchise-live-dup]", error);
       }
     }
 
@@ -4478,11 +5031,23 @@
       : hasQueueWork(items)
         ? "idle"
         : "completed";
-    saveJob(listId, job);
-    saveItems(listId, items);
-    onChange?.({ listId, job, items });
+
+    // Franchise grouping only when the queue is about to go idle — not every
+    // batch of 20 (that was re-walking the whole watchlist + import map
+    // repeatedly and allocating hard).
+    const stillHasWork = hasQueueWork(items);
+    if (!stillHasWork || paused || job.paused) {
+      try {
+        await applyAnimeWatchlistGrouping(listId, items);
+        healDuplicateClassifications(items);
+      } catch (error) {
+        console.warn("[bulk-import:watchlist-franchise-dup]", error);
+      }
+    }
+
+    saveProgress(listId, job, items, { flush: true });
     scheduleQueueWake(listId, items);
-    return !paused && !job.paused && hasQueueWork(items);
+    return !paused && !job.paused && stillHasWork;
   }
 
   async function runProcessingLoop(listId) {
@@ -4726,8 +5291,10 @@
       };
     }
 
+    // Don't re-run full franchise grouping on every auto-commit chunk —
+    // matching already grouped at batch idle, and re-walking here during
+    // rapid auto-adds was another memory spike.
     try {
-      await applyAnimeGrouping(listId, items);
       healDuplicateClassifications(items);
     } catch (error) {
       console.warn("[bulk-import:grouping]", error);
@@ -4760,7 +5327,6 @@
 
         row.commitClaimed = true;
         row.commitError = "";
-        saveItems(listId, items);
 
         processed += 1;
         onProgress?.({
@@ -4798,11 +5364,27 @@
             result.alreadyPresent += 1;
           } else if (addResult?.reason === "poster_pending") {
             row.commitClaimed = false;
-            row.waiting = true;
-            row.status = STATUS.pending;
-            row.error = addResult.message || "Fetching anime poster";
-            syncRetrySchedule(row, Date.now() + 4000, row.error);
-            result.posterPending = (result.posterPending || 0) + 1;
+            row.commitPosterRetries = (row.commitPosterRetries || 0) + 1;
+            if (row.commitPosterRetries >= MAX_POSTER_FETCH_RETRIES) {
+              // Never let a stuck poster fetch retry forever — that hammers
+              // AniList and re-triggers a commit/render cycle indefinitely,
+              // which can snowball into a tab memory/CPU blowout on large
+              // imports. Surface it as needing attention instead.
+              row.status = STATUS.failed;
+              row.waiting = false;
+              row.failureKind = FAILURE_KIND.provider;
+              clearRetrySchedule(row);
+              row.error = "Could not fetch a poster for this title after several attempts.";
+              setMatchStatus(row, MATCH_STATUS.needs_attention);
+              result.failed += 1;
+              result.errors.push({ id: row.id, title: row.title, reason: "poster_pending" });
+            } else {
+              row.waiting = true;
+              row.status = STATUS.pending;
+              row.error = addResult.message || "Fetching anime poster";
+              syncRetrySchedule(row, Date.now() + 4000, row.error);
+              result.posterPending = (result.posterPending || 0) + 1;
+            }
           } else {
             row.commitClaimed = false;
             row.commitError = addResult?.reason || "failed";
@@ -4898,6 +5480,7 @@
     formatWaitingItemDetail,
     formatQueueProgress,
     isWorkerActive,
+    forceReleaseWorkerLock,
     pauseJob,
     resumeJob,
     resolveRemaining,

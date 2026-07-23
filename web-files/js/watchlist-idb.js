@@ -115,16 +115,28 @@
   }
 
   async function putImportItems(listId, items) {
-    const entries = Object.entries(items || {});
+    // One row per whole import job (like importJobs/watchlistCache), not one
+    // row per item. Writing 300+ individual put() calls per autosave was
+    // costing multiple seconds of structured-clone/IDB overhead on every
+    // batch — this collapses it to a single write.
     await tx(STORES.importItems, "readwrite", (store) => {
-      for (const [itemId, item] of entries) {
-        store.put({ key: `${listId}:${itemId}`, listId, itemId, item, updatedAt: Date.now() });
-      }
+      store.put({ key: listId, listId, items: items || {}, updatedAt: Date.now() });
     });
   }
 
   async function getImportItems(listId) {
-    const items = {};
+    const row = await tx(STORES.importItems, "readonly", (store) => {
+      const req = store.get(listId);
+      return new Promise((resolve, reject) => {
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+    });
+    if (row?.items) return row.items;
+
+    // Legacy fallback: earlier versions stored one row per item, keyed
+    // `${listId}:${itemId}`. Scan once to recover any pre-existing data.
+    const legacyItems = {};
     await tx(STORES.importItems, "readonly", (store) => {
       const req = store.openCursor();
       return new Promise((resolve, reject) => {
@@ -134,20 +146,25 @@
             resolve();
             return;
           }
-          const row = cursor.value;
-          if (row.listId === listId && row.item) {
-            items[row.itemId] = row.item;
+          const legacyRow = cursor.value;
+          if (legacyRow.listId === listId && legacyRow.itemId && legacyRow.item) {
+            legacyItems[legacyRow.itemId] = legacyRow.item;
           }
           cursor.continue();
         };
         req.onerror = () => reject(req.error);
       });
     });
-    return items;
+    return legacyItems;
   }
 
   async function deleteImportItems(listId) {
-    const keys = [];
+    await tx(STORES.importItems, "readwrite", (store) => {
+      store.delete(listId);
+    });
+
+    // Sweep any legacy per-item rows for this list too.
+    const legacyKeys = [];
     await tx(STORES.importItems, "readonly", (store) => {
       const req = store.openCursor();
       return new Promise((resolve, reject) => {
@@ -157,15 +174,17 @@
             resolve();
             return;
           }
-          if (cursor.value.listId === listId) keys.push(cursor.value.key);
+          if (cursor.value.listId === listId && cursor.value.itemId) {
+            legacyKeys.push(cursor.value.key);
+          }
           cursor.continue();
         };
         req.onerror = () => reject(req.error);
       });
     });
-    if (!keys.length) return;
+    if (!legacyKeys.length) return;
     await tx(STORES.importItems, "readwrite", (store) => {
-      for (const key of keys) store.delete(key);
+      for (const key of legacyKeys) store.delete(key);
     });
   }
 

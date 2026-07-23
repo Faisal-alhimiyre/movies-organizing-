@@ -35,7 +35,26 @@
     if (text.includes("row-level security") || text.includes("42501")) return "rls";
     if (text.includes("could not find") && text.includes("column")) return "schema";
     if (text.includes("schema cache")) return "schema";
+    // A dropped/blipped connection (common during a long bulk import doing
+    // lots of concurrent network work) throws a plain "Failed to fetch"
+    // TypeError — that is NOT a database migration/permissions problem and
+    // must not permanently halt the import the way a real RLS/schema error
+    // should. Let it retry on the next save instead.
+    if (
+      text.includes("failed to fetch") ||
+      text.includes("networkerror") ||
+      text.includes("network request failed") ||
+      text.includes("load failed") ||
+      text.includes("timed out") ||
+      text.includes("timeout")
+    ) {
+      return "network";
+    }
     return "remote";
+  }
+
+  function isTransientPersistErrorKind(kind) {
+    return kind === "network";
   }
 
   function notePersistenceFailure(listId, error, source) {
@@ -337,9 +356,10 @@
         onConflict: "list_id",
       });
       if (jobErr) {
+        const kind = classifyRemotePersistError(jobErr.message);
         console.warn("[import-store] job upsert failed:", jobErr.message);
-        notePersistenceFailure(listId, jobErr, "import_jobs");
-        return { ok: false, error: jobErr, kind: classifyRemotePersistError(jobErr.message) };
+        if (!isTransientPersistErrorKind(kind)) notePersistenceFailure(listId, jobErr, "import_jobs");
+        return { ok: false, error: jobErr, kind, transient: isTransientPersistErrorKind(kind) };
       }
 
       const rows = Object.values(items).map((item) => itemToRow(listId, item));
@@ -349,18 +369,20 @@
           onConflict: "list_id,item_id",
         });
         if (error) {
+          const kind = classifyRemotePersistError(error.message);
           console.warn("[import-store] items upsert failed:", error.message);
-          notePersistenceFailure(listId, error, "import_items");
-          return { ok: false, error, kind: classifyRemotePersistError(error.message) };
+          if (!isTransientPersistErrorKind(kind)) notePersistenceFailure(listId, error, "import_items");
+          return { ok: false, error, kind, transient: isTransientPersistErrorKind(kind) };
         }
       }
 
       clearPersistenceFailure(listId);
       return { ok: true };
     } catch (err) {
+      const kind = classifyRemotePersistError(err?.message);
       console.warn("[import-store] remote persist failed:", err);
-      notePersistenceFailure(listId, err, "import_jobs");
-      return { ok: false, error: err, kind: classifyRemotePersistError(err?.message) };
+      if (!isTransientPersistErrorKind(kind)) notePersistenceFailure(listId, err, "import_jobs");
+      return { ok: false, error: err, kind, transient: isTransientPersistErrorKind(kind) };
     }
   }
 

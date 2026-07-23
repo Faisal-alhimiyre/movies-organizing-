@@ -158,6 +158,27 @@
     }
   }
 
+  /**
+   * IMDb suggestion search (proxied) — matches alternate titles/AKAs the way
+   * IMDb's own search box does (e.g. "seven" → Se7en).
+   * @param {string} query
+   * @returns {Promise<{ ok: boolean, results: Array }>}
+   */
+  async function imdbSuggest(query) {
+    const q = String(query || "").trim();
+    if (q.length < 2) return { ok: false, error: "query_too_short", results: [] };
+    try {
+      const result = await callFunction({ action: "imdbSuggest", query: q });
+      if (!result || result.error) {
+        return { ok: false, error: result?.error || "api_failure", results: [] };
+      }
+      return { ok: true, results: result.results || [] };
+    } catch (err) {
+      console.warn("[tmdb-service] imdbSuggest failed:", err.message);
+      return { ok: false, error: err.message, results: [] };
+    }
+  }
+
   /** True when Supabase is configured so the edge function is reachable. */
   function isAvailable() {
     return !!getFunctionUrl();
@@ -169,6 +190,7 @@
     search,
     getDetails,
     fetchTv,
+    imdbSuggest,
     isAvailable,
   };
 })();

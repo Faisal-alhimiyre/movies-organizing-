@@ -332,23 +332,54 @@
   const _memory = new Map();
   const _memoryLargeEpisodes = new Map();
 
+  // Franchise/duplicate detection on large bulk imports calls readCached()
+  // (and thus readSeriesCache()) dozens of times per pass — one per
+  // watchlist anime id, per locale. Re-parsing the whole localStorage
+  // blob on every single call was costing several *seconds* of pure
+  // synchronous JSON.parse work each time, freezing the page. Cache the
+  // parsed object in memory and reuse it; every write path below already
+  // mutates whatever readSeriesCache() returns, so this stays consistent.
+  let _seriesCacheSnapshot = null;
+  let _seriesCacheDirty = false;
+  let _seriesCacheFlushTimer = null;
+
   function readSeriesCache() {
+    if (_seriesCacheSnapshot) return _seriesCacheSnapshot;
     try {
-      return JSON.parse(localStorage.getItem(SERIES_CACHE_KEY) || "{}");
+      _seriesCacheSnapshot = JSON.parse(localStorage.getItem(SERIES_CACHE_KEY) || "{}");
     } catch {
-      return {};
+      _seriesCacheSnapshot = {};
     }
+    return _seriesCacheSnapshot;
+  }
+
+  // Franchise-chain resolution during bulk import calls
+  // writeFranchiseRootCacheEntry() once per chain member, per watchlist
+  // anime, on every dedup pass — writing (and re-stringifying) the *entire*
+  // cache blob to localStorage synchronously on every single call was
+  // costing seconds of main-thread time that scaled with watchlist size.
+  // Mutate the in-memory snapshot immediately (cheap) and coalesce the
+  // actual disk write, same pattern as metadata.js's readCache/writeCacheEntry.
+  function flushSeriesCacheSoon() {
+    if (_seriesCacheFlushTimer) return;
+    _seriesCacheFlushTimer = setTimeout(() => {
+      _seriesCacheFlushTimer = null;
+      if (!_seriesCacheDirty || !_seriesCacheSnapshot) return;
+      _seriesCacheDirty = false;
+      try {
+        localStorage.setItem(SERIES_CACHE_KEY, JSON.stringify(_seriesCacheSnapshot));
+      } catch {
+        /* quota — ignore */
+      }
+    }, 2000);
   }
 
   function writeSeriesCacheEntry(key, data, ttlMs) {
     const entry = { ...data, cachedAt: Date.now(), ttlMs };
     const cache = readSeriesCache();
     cache[key] = entry;
-    try {
-      localStorage.setItem(SERIES_CACHE_KEY, JSON.stringify(cache));
-    } catch {
-      /* quota — ignore */
-    }
+    _seriesCacheDirty = true;
+    flushSeriesCacheSoon();
     _memory.set(key, entry);
   }
 
@@ -817,7 +848,10 @@
   const _anilistFranchiseTvIds = new Map();
   const _anilistFranchiseRootCache = new Map();
   const _rootTitleFingerprint = new Map();
-  const FRANCHISE_ROOT_CACHE_PREFIX = "metadata:v1:franchise:root:";
+  // v2: v1 entries were poisoned by applyFranchiseChainToRootMap crowning each
+  // card's own first season as franchise root (Boruto → Boruto instead of
+  // Boruto → Naruto), which broke franchise duplicate detection.
+  const FRANCHISE_ROOT_CACHE_PREFIX = "metadata:v2:franchise:root:";
   const ANIME_FRANCHISE_RESOLVE_DELAY_MS = 180;
 
   function delayMs(ms) {
@@ -872,13 +906,25 @@
 
   function applyFranchiseChainToRootMap(chainIds, idToRoot, rootTitle = "") {
     if (!Array.isArray(chainIds) || !chainIds.length) return;
-    const root = Number(chainIds[0]);
-    if (!Number.isFinite(root)) return;
+    const first = Number(chainIds[0]);
+    if (!Number.isFinite(first)) return;
+    // A cached season chain starts at the *card's* first season, which is not
+    // necessarily the franchise root — the standalone Boruto card's chain
+    // starts at Boruto even though the franchise root is Naruto. Only persist
+    // root entries when an authoritative prequel walk already established the
+    // chain start's root; otherwise keep the grouping local to this pass so
+    // we never poison the cache with self-roots.
+    const cachedFirst = readFranchiseRootCacheEntry(first);
+    const cachedFirstRoot = Number(cachedFirst?.rootAnilistId) || 0;
+    const root = cachedFirstRoot || first;
+    const persistedTitle = cachedFirstRoot ? cachedFirst?.rootTitle || "" : rootTitle;
     for (const cid of chainIds) {
       const id = Number(cid);
       if (!Number.isFinite(id)) continue;
       idToRoot.set(id, root);
-      writeFranchiseRootCacheEntry(id, root, rootTitle);
+      if (cachedFirstRoot) {
+        writeFranchiseRootCacheEntry(id, root, persistedTitle);
+      }
     }
   }
 
@@ -1293,15 +1339,62 @@
   }
 
   async function searchOmdbImdbByTitle(title, year = null, options = {}) {
-    const apiKey = getOmdbKey();
     const q = String(title || "").trim();
-    if (!apiKey || q.length < 2) return null;
+    if (q.length < 2) return null;
 
     const types = options.types || ["series", "movie"];
-    for (const omdbType of types) {
-      const found = await searchOmdbImdbByTitleTyped(q, year, omdbType);
-      if (found) return found;
+    if (getOmdbKey()) {
+      for (const omdbType of types) {
+        const found = await searchOmdbImdbByTitleTyped(q, year, omdbType);
+        if (found) return found;
+      }
     }
+
+    // Fallback: IMDb's own suggestion engine matches alternate titles (AKAs)
+    // that OMDb's literal title search misses — e.g. English anime titles vs
+    // IMDb's romaji naming ("Yamada and the Seven Witches" →
+    // "Yamada-kun to 7-nin no Majo"), or "seven" → Se7en.
+    return searchImdbSuggestImdbId(q, year, types);
+  }
+
+  async function searchImdbSuggestImdbId(q, year, types) {
+    if (typeof window.WatchlistTmdb?.imdbSuggest !== "function") return null;
+    if (!window.WatchlistTmdb.isAvailable?.()) return null;
+
+    const typesKey = [...types].sort().join(",");
+    const cacheKey = `metadata:v1:resolve:imdb:suggest:${q.toLowerCase()}:${year || ""}:${typesKey}`;
+    const cached = readCached(cacheKey, TTL_RESOLVE);
+    if (cached?.imdbId) return cached.imdbId;
+    if (cached?.miss) return null;
+
+    let res = null;
+    try {
+      res = await window.WatchlistTmdb.imdbSuggest(q);
+    } catch {
+      return null;
+    }
+    if (!res?.ok) return null;
+
+    // Suggestion rows carry type "movie" | "series" (mapped from IMDb qids).
+    const wantTypes = new Set(types);
+    const wantYear = year != null ? Number(year) : null;
+    let best = null;
+    for (const row of res.results || []) {
+      if (!wantTypes.has(row.type)) continue;
+      if (wantYear != null && Number.isFinite(wantYear)) {
+        const rowYear = parseInt(row.year, 10);
+        if (Number.isFinite(rowYear) && Math.abs(rowYear - wantYear) > 1) continue;
+      }
+      // Results are relevance-ranked by IMDb; first type/year-compatible wins.
+      best = row;
+      break;
+    }
+
+    if (best?.imdbId) {
+      writeSeriesCacheEntry(cacheKey, { imdbId: best.imdbId }, TTL_RESOLVE);
+      return best.imdbId;
+    }
+    writeSeriesCacheEntry(cacheKey, { miss: true }, TTL_RESOLVE);
     return null;
   }
 
@@ -1457,6 +1550,11 @@
         break;
       }
 
+      if (options.allowLive === false) {
+        completed = false;
+        break;
+      }
+
       const data = await anilistQuery(
         `query ($id: Int) {
           Media(id: $id, type: ANIME) {
@@ -1543,6 +1641,15 @@
       }
     }
 
+    if (options.allowLive === false) {
+      return {
+        rootAnilistId: null,
+        rootTitle: "",
+        rateLimited: false,
+        incomplete: true,
+      };
+    }
+
     const walk = await walkAnilistTvPrequelRoot(id, 12, options);
     if (!walk.completed) {
       return {
@@ -1556,6 +1663,9 @@
     const media = walk.media;
     const rootAnilistId = media?.id != null ? Number(media.id) : id;
     const rootTitle = anilistMediaTitle(media);
+    // Persist the resolved root so cache-only consumers (bulk-import franchise
+    // dedup, buildBatchFranchiseRootMapFromCache) can see it without another walk.
+    writeFranchiseRootCacheEntry(id, rootAnilistId, rootTitle);
     return {
       rootAnilistId,
       rootTitle,
@@ -4850,7 +4960,9 @@
       };
     }
 
-    const franchise = await resolveAnimeFranchiseRoot(id);
+    const franchise = await resolveAnimeFranchiseRoot(id, {
+      allowLive: options.allowLive !== false,
+    });
     if (franchise.incomplete || franchise.rateLimited || !franchise.rootAnilistId) {
       return {
         ok: false,
@@ -4949,10 +5061,68 @@
     };
   }
 
+  function findWatchlistFranchiseDuplicateSource(item, watchlistAnime = [], rootMap = null) {
+    const childId = Number(item?.pick?.anilistId ?? item?.details?.anilistId ?? item?.anilistId);
+    // #region agent log
+    const __dbgTitle = String(item?.title || "");
+    const __dbgIsInteresting = /naruto|boruto|fairy tail/i.test(__dbgTitle);
+    // #endregion
+    if (!Number.isFinite(childId) || childId <= 0) return null;
+    if (!Array.isArray(watchlistAnime) || !watchlistAnime.length) return null;
+
+    const exact = watchlistAnime.find((w) => Number(w.anilistId) === childId);
+    if (exact) return exact;
+
+    let map = rootMap;
+    if (!map) {
+      const watchlistIds = watchlistAnime
+        .map((w) => Number(w.anilistId))
+        .filter((id) => Number.isFinite(id) && id > 0);
+      if (!watchlistIds.length) return null;
+      map = buildBatchFranchiseRootMapFromCache([childId, ...watchlistIds]);
+    }
+
+    const childRoot = map.get(childId);
+    // #region agent log
+    if (__dbgIsInteresting) {
+      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',location:'series-metadata.js:findWatchlistFranchiseDuplicateSource',message:'franchise root lookup',data:{title:__dbgTitle,childId,childRoot:childRoot||null,watchlistAnimeAnilistIds:watchlistAnime.map((w)=>Number(w.anilistId)),watchlistAnimeTitles:watchlistAnime.map((w)=>w.title),mapEntries:[...map.entries()]},hypothesisId:'H12',timestamp:Date.now()})}).catch(()=>{});
+    }
+    // #endregion
+    if (!childRoot) return null;
+
+    const rootCard = watchlistAnime.find((w) => Number(w.anilistId) === childRoot);
+    if (rootCard) return rootCard;
+
+    return (
+      watchlistAnime.find((w) => {
+        const wid = Number(w.anilistId);
+        return wid !== childId && map.get(wid) === childRoot;
+      }) || null
+    );
+  }
+
+  function buildWatchlistFranchiseLookup(watchlistAnime = []) {
+    const list = Array.isArray(watchlistAnime) ? watchlistAnime : [];
+    const watchlistIds = list
+      .map((w) => Number(w.anilistId))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    const rootMap = watchlistIds.length
+      ? buildBatchFranchiseRootMapFromCache(watchlistIds)
+      : new Map();
+    return {
+      watchlistAnime: list,
+      rootMap,
+      find(item) {
+        return findWatchlistFranchiseDuplicateSource(item, list, rootMap);
+      },
+    };
+  }
+
   async function findAnimeParentOnList(childAnilistId, watchlistAnime = []) {
     const group = await resolveAnimeSeriesGroup(Number(childAnilistId), {
       persist: false,
       allowLive: false,
+      groupingOnly: true,
     });
     if (!group.ok || !group.shouldMerge) return null;
 
@@ -4998,6 +5168,8 @@
     probeWatchlistItemAnilistId,
     collectAnimeFranchiseTvIds,
     findFranchiseParentOnWatchlist,
+    findWatchlistFranchiseDuplicateSource,
+    buildWatchlistFranchiseLookup,
     isAnilistRateLimited,
     getAnilistRateLimitResumeAt: () => _anilistCooldownUntil,
     getAnilistSeasonChainIds,

@@ -4645,6 +4645,45 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   color: var(--text-muted);
 }
 
+/* Cover still finishing in the background after a fast bulk-import add
+   (see queueImportedItemEnrichment) — same shimmer language as list-loading
+   skeletons so it reads as "in progress", not broken. */
+.card__poster.card__poster--pending {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.05) 0%,
+    rgba(255, 255, 255, 0.14) 50%,
+    rgba(255, 255, 255, 0.05) 100%
+  );
+  background-size: 200% 100%;
+  animation: list-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.badge--pending {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  animation: badge-pending-pulse 1.6s ease-in-out infinite;
+}
+
+html[data-theme="light"] .badge--pending {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+@keyframes badge-pending-pulse {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 .app[data-layout="hover"] .card__media {
   display: none;
 }
