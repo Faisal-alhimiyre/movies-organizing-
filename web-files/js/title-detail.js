@@ -365,22 +365,32 @@
     return window.WatchlistApp?.parseRuntimeMinutes?.(item?.runtime) ?? null;
   }
 
-  function formatMovieClock(minutes) {
-    const total = Math.max(0, Math.floor(Number(minutes) || 0));
-    const h = Math.floor(total / 60);
-    const m = total % 60;
-    if (h > 0) return `${h}:${String(m).padStart(2, "0")}`;
-    return t("seasons.epRuntime", { n: total });
+  function movieRuntimeSeconds(item) {
+    const minutes = movieRuntimeMinutes(item);
+    if (!minutes || minutes <= 0) return null;
+    return minutes * 60;
+  }
+
+  /** Format a duration in seconds as m:ss or h:mm:ss. */
+  function formatMovieClock(totalSeconds) {
+    const total = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if (h > 0) {
+      return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    }
+    return `${m}:${String(s).padStart(2, "0")}`;
   }
 
   function movieProgressMarkup(item, itemId) {
-    const runtime = movieRuntimeMinutes(item);
-    if (!runtime) return "";
+    const runtimeSec = movieRuntimeSeconds(item);
+    if (!runtimeSec) return "";
 
     const entry = getWatchEntry(itemId);
     const pos = window.WatchlistProgress?.getMoviePosition?.(entry) ?? 0;
-    const watchedMin = Math.round(pos * runtime);
-    const progressPct = runtime > 0 ? (watchedMin / runtime) * 100 : 0;
+    const watchedSec = Math.round(pos * runtimeSec);
+    const progressPct = runtimeSec > 0 ? (watchedSec / runtimeSec) * 100 : 0;
 
     return `
       <div class="td-movie-progress" data-td-part="movie-progress">
@@ -390,17 +400,17 @@
           data-td-action="movie-progress"
           data-td-id="${esc(itemId)}"
           min="0"
-          max="${runtime}"
+          max="${runtimeSec}"
           step="1"
-          value="${watchedMin}"
+          value="${watchedSec}"
           style="--progress: ${progressPct}%"
           aria-label="${esc(t("detail.movieProgressLabel"))}"
           aria-valuemin="0"
-          aria-valuemax="${runtime}"
-          aria-valuenow="${watchedMin}" />
+          aria-valuemax="${runtimeSec}"
+          aria-valuenow="${watchedSec}" />
         <div class="td-movie-progress__times" aria-hidden="true">
-          <span class="td-movie-progress__elapsed text-num" data-td-part="movie-elapsed">${esc(formatMovieClock(watchedMin))}</span>
-          <span class="td-movie-progress__total text-num">${esc(formatMovieClock(runtime))}</span>
+          <span class="td-movie-progress__elapsed text-num" data-td-part="movie-elapsed">${esc(formatMovieClock(watchedSec))}</span>
+          <span class="td-movie-progress__total text-num">${esc(formatMovieClock(runtimeSec))}</span>
         </div>
       </div>`;
   }
@@ -416,9 +426,9 @@
 
   function movieProgressStateFromSlider(slider) {
     const runtime = Number(slider?.max) || 0;
-    const watchedMin = Number(slider?.value) || 0;
+    const watchedSec = Number(slider?.value) || 0;
     if (runtime <= 0) return "unwatched";
-    const fraction = watchedMin / runtime;
+    const fraction = watchedSec / runtime;
     if (fraction >= 0.97) return "watched";
     if (fraction > 0) return "inProgress";
     return "unwatched";
@@ -473,14 +483,14 @@
   function previewMovieProgressUi(slider) {
     if (!slider) return;
     const runtime = Number(slider.max);
-    const watchedMin = Number(slider.value);
+    const watchedSec = Number(slider.value);
     if (!Number.isFinite(runtime) || runtime <= 0) return;
 
     const elapsed = slider
       .closest(".td-movie-progress")
       ?.querySelector("[data-td-part='movie-elapsed']");
-    if (elapsed) elapsed.textContent = formatMovieClock(watchedMin);
-    slider.setAttribute("aria-valuenow", String(watchedMin));
+    if (elapsed) elapsed.textContent = formatMovieClock(watchedSec);
+    slider.setAttribute("aria-valuenow", String(watchedSec));
     updateMovieProgressFill(slider);
 
     const itemId = slider.dataset.tdId || _activeItemId;
@@ -505,11 +515,11 @@
   function saveMovieProgressFromSlider(slider) {
     const itemId = slider?.dataset?.tdsId || slider?.dataset?.tdId || _activeItemId;
     const item = findItem(itemId);
-    const runtime = movieRuntimeMinutes(item);
-    if (!itemId || !runtime) return null;
+    const runtimeSec = movieRuntimeSeconds(item);
+    if (!itemId || !runtimeSec) return null;
 
-    const watchedMin = Number(slider.value);
-    const fraction = watchedMin / runtime;
+    const watchedSec = Number(slider.value);
+    const fraction = watchedSec / runtimeSec;
     const P = window.WatchlistProgress;
 
     if (fraction >= 0.97) {
@@ -594,7 +604,7 @@
   async function finalizeMovieProgress(slider) {
     const itemId = slider?.dataset?.tdsId || slider?.dataset?.tdId || _activeItemId;
     const item = findItem(itemId);
-    const runtime = movieRuntimeMinutes(item);
+    const runtime = movieRuntimeSeconds(item);
     if (!itemId || !runtime) return;
 
     const progressState = movieProgressStateFromSlider(slider);

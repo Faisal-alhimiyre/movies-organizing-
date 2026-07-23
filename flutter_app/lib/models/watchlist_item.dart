@@ -235,7 +235,7 @@ class WatchProgress {
     if (moviePosRaw is num && moviePosRaw.isFinite) {
       final pos = moviePosRaw.toDouble().clamp(0.0, 1.0);
       if (pos > 0) {
-        moviePosition = (pos * 1000).round() / 1000;
+        moviePosition = (pos * 1e6).round() / 1e6;
       }
     }
 

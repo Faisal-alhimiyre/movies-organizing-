@@ -54,7 +54,7 @@
     if (raw.completed === true) result.completed = true;
     if (typeof raw.moviePosition === "number" && Number.isFinite(raw.moviePosition)) {
       const pos = Math.max(0, Math.min(1, raw.moviePosition));
-      if (pos > 0) result.moviePosition = Math.round(pos * 1000) / 1000;
+      if (pos > 0) result.moviePosition = Math.round(pos * 1e6) / 1e6;
     }
     if (raw.episodeRatings && typeof raw.episodeRatings === "object") {
       const cleaned = {};
@@ -245,7 +245,7 @@
     const newProgress = {
       version: PROGRESS_VERSION,
       episodes: [...episodes],
-      moviePosition: Math.round(pos * 1000) / 1000,
+      moviePosition: Math.round(pos * 1e6) / 1e6,
     };
     if (rawProg?.episodeRatings && typeof rawProg.episodeRatings === "object") {
       newProgress.episodeRatings = { ...rawProg.episodeRatings };

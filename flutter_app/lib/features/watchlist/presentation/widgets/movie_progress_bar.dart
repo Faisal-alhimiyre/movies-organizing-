@@ -29,6 +29,12 @@ class _MovieProgressBarState extends State<MovieProgressBar> {
 
   int? get _runtimeMinutes => parseRuntimeMinutes(widget.item.runtime);
 
+  int? get _runtimeSeconds {
+    final minutes = _runtimeMinutes;
+    if (minutes == null || minutes <= 0) return null;
+    return minutes * 60;
+  }
+
   double get _fraction {
     if (_dragFraction != null) return _dragFraction!;
     return getMoviePosition(widget.entry);
@@ -36,12 +42,12 @@ class _MovieProgressBarState extends State<MovieProgressBar> {
 
   @override
   Widget build(BuildContext context) {
-    final runtime = _runtimeMinutes;
-    if (runtime == null || runtime <= 0) return const SizedBox.shrink();
+    final runtimeSec = _runtimeSeconds;
+    if (runtimeSec == null || runtimeSec <= 0) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
     final accent = theme.colorScheme.primary;
-    final watchedMin = (_fraction * runtime).round().clamp(0, runtime);
+    final watchedSec = (_fraction * runtimeSec).round().clamp(0, runtimeSec);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -65,18 +71,18 @@ class _MovieProgressBarState extends State<MovieProgressBar> {
               trackHeight: 4,
             ),
             child: Slider(
-              value: watchedMin.toDouble(),
+              value: watchedSec.toDouble(),
               min: 0,
-              max: runtime.toDouble(),
-              divisions: runtime,
+              max: runtimeSec.toDouble(),
               label: widget.l10n.detailMovieProgressLabel,
               onChanged: (value) {
                 setState(() {
-                  _dragFraction = value / runtime;
+                  _dragFraction = value.round().clamp(0, runtimeSec) / runtimeSec;
                 });
               },
               onChangeEnd: (value) {
-                final fraction = value / runtime;
+                final seconds = value.round().clamp(0, runtimeSec);
+                final fraction = seconds / runtimeSec;
                 setState(() => _dragFraction = null);
                 widget.onChanged(setMoviePosition(widget.entry, fraction));
               },
@@ -89,13 +95,13 @@ class _MovieProgressBarState extends State<MovieProgressBar> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                _formatMovieClock(watchedMin),
+                _formatMovieClock(watchedSec),
                 style: theme.textTheme.labelSmall?.copyWith(
                   fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
               Text(
-                _formatMovieClock(runtime),
+                _formatMovieClock(runtimeSec),
                 style: theme.textTheme.labelSmall?.copyWith(
                   fontFeatures: const [FontFeature.tabularFigures()],
                   color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
@@ -108,13 +114,15 @@ class _MovieProgressBarState extends State<MovieProgressBar> {
     );
   }
 
-  String _formatMovieClock(int minutes) {
-    final total = minutes.clamp(0, 9999);
-    final h = total ~/ 60;
-    final m = total % 60;
+  /// Format a duration in seconds as m:ss or h:mm:ss (matches web).
+  String _formatMovieClock(int totalSeconds) {
+    final total = totalSeconds.clamp(0, 999999);
+    final h = total ~/ 3600;
+    final m = (total % 3600) ~/ 60;
+    final s = total % 60;
     if (h > 0) {
-      return '$h:${m.toString().padLeft(2, '0')}';
+      return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
     }
-    return formatRuntimeMinutes(total, arabic: widget.l10n.isArabic);
+    return '$m:${s.toString().padLeft(2, '0')}';
   }
 }

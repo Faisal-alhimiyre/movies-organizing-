@@ -152,7 +152,7 @@ WatchEntry? setMoviePosition(WatchEntry? entry, double fraction) {
   }
 
   final base = entry?.progress ?? WatchProgress.empty;
-  final rounded = (pos * 1000).round() / 1000;
+  final rounded = (pos * 1e6).round() / 1e6;
   return WatchEntry(
     rating: entry?.rating,
     note: entry?.note,
