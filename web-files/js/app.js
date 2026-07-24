@@ -2293,7 +2293,12 @@
     const prog = P?.getProgress(entry);
     if (prog?.completed === true) return false;
     if (Array.isArray(prog?.episodes) && prog.episodes.length > 0) return false;
-    if (prog?.seasonTotals && Object.keys(prog.seasonTotals).length > 0) return false;
+    // seasonTotals is a cached episode-count (written whenever a season's
+    // episode list loads) — it is NOT a watched signal on its own. Treating
+    // it as "meaningful" here kept fully-unmarked entries alive forever,
+    // which made isItemWatched()/the card badge report "Watched" even after
+    // every episode in the season was unmarked (confirmed via runtime logs:
+    // episodes: [] but seasonTotals present still returned false/not-empty).
     if (prog?.episodeRatings && Object.keys(prog.episodeRatings).length > 0) return false;
     if (typeof prog?.moviePosition === "number" && prog.moviePosition > 0) return false;
     if (hasWatchRating(entry)) return false;
@@ -13489,6 +13494,7 @@
     init,
     renderExternalRatings,
     updateRatingModalActions,
+    openRatingModal,
     quickToggleWatched,
     markItemUnwatched,
     markItemWatched,
@@ -13510,7 +13516,8 @@
       commitWatchChange(
         id,
         () => {
-          if (entry == null || isWatchEntryEmpty(entry)) {
+          const emptyResult = entry == null || isWatchEntryEmpty(entry);
+          if (emptyResult) {
             delete state.watched[id];
           } else {
             state.watched[id] = entry;

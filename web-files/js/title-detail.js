@@ -1700,14 +1700,17 @@
       }
 
       case "rate": {
+        // Call openRatingModal directly — the list card only has
+        // data-action="rate" after a score already exists, so routing
+        // through triggerCardAction made first-time Rate a no-op.
         if (!isTitleFullyWatched(itemId)) break;
-        triggerCardAction(itemId, "rate");
+        window.WatchlistApp?.openRatingModal?.(itemId);
         break;
       }
 
       case "add-note": {
-        // Open the rating modal in note-only mode (picker hidden by openRatingModal)
-        triggerCardAction(itemId, "rate");
+        // Note-only mode (picker hidden by openRatingModal when not fully watched)
+        window.WatchlistApp?.openRatingModal?.(itemId);
         break;
       }
 

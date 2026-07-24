@@ -1360,6 +1360,23 @@
     }
   }
 
+  /**
+   * Like omdbPayloadForImdbId, but when the cached payload has no rating,
+   * retries once with a live refetch before giving up. The generic title
+   * cache (metadata.js CACHE_KEY) treats a payload as "good enough" once it
+   * has ageRating/runtime/season/episode counts — it never checks for a
+   * rating — so a payload cached during a flaky/rate-limited OMDb response
+   * can get stuck without a rating forever otherwise (confirmed via
+   * runtime logs: Hunter x Hunter (2011) / tt2098220 resolved every time
+   * but its cached OMDb payload never carried a rating).
+   */
+  async function omdbPayloadForImdbIdRequireRating(imdbId) {
+    const meta = await omdbPayloadForImdbId(imdbId);
+    if (meta?.rating) return meta;
+    const fresh = await omdbPayloadForImdbId(imdbId, { refresh: true });
+    return fresh || meta;
+  }
+
   async function searchOmdbImdbByTitle(title, year = null, options = {}) {
     const variants = omdbTitleVariants(title);
     if (!variants.length) return null;
@@ -2027,7 +2044,7 @@
       for (const passTitle of titlePasses) {
         const found = await searchOmdbImdbByTitle(passTitle, year, { omdbOnly: true });
         if (!found) continue;
-        const meta = await omdbPayloadForImdbId(found);
+        const meta = await omdbPayloadForImdbIdRequireRating(found);
         if (!meta) continue;
         if (meta.rating) {
           bestRated = found;
@@ -2040,7 +2057,7 @@
         for (const passTitle of titlePasses) {
           const found = await searchOmdbImdbByTitle(passTitle, year);
           if (!found) continue;
-          const meta = await omdbPayloadForImdbId(found);
+          const meta = await omdbPayloadForImdbIdRequireRating(found);
           if (!meta) continue;
           if (meta.rating) {
             bestRated = found;
