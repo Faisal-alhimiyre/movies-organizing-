@@ -495,18 +495,7 @@
     const sn = seasonNum ?? _selectedSeason ?? _episodesResult?.seasonNum ?? null;
     const slot = ensureSeasonsDom();
     const openDetailItemId = window.WatchlistTitleDetail?.activeItemId?.() ?? null;
-    const trace = window.WatchlistWatchTrace;
 
-    trace?.log("refreshWatchUiAfterSave:start", {
-      itemId,
-      seasonNum: sn,
-      openDetailItemId,
-      detailItemIdMatches: openDetailItemId === itemId,
-      slotConnected: Boolean(slot && document.contains(slot)),
-      savedEntry: trace?.snapshot(savedEntry),
-      resolvedEntry: trace?.snapshot(entry),
-      getEntryFallback: savedEntry == null,
-    });
 
     logWatchUi("refreshWatchUiAfterSave", {
       itemId,
@@ -518,7 +507,6 @@
     });
 
     if (!slot) {
-      trace?.log("refreshWatchUiAfterSave:abort", { itemId, reason: "no-slot" });
       logWatchUi("abort", { reason: "no-slot" });
       return;
     }
@@ -565,13 +553,6 @@
 
     refreshAllEpisodeRows(entry);
 
-    trace?.log("refreshWatchUiAfterSave:done", {
-      itemId,
-      seasonNum: sn,
-      episodeUpdates,
-      seasonCardUpdates,
-      detailBadge: trace?.readDetailBadge?.(),
-    });
 
     logWatchUi("refreshWatchUiAfterSave-done", { episodeUpdates, seasonCardUpdates });
   }
@@ -1606,19 +1587,6 @@
     if (!meta || !_item) return;
 
     try {
-      // Log configuration status for debugging (never logs key values)
-      if (!window.__tdsConfigLogged) {
-        window.__tdsConfigLogged = true;
-        const WM = window.WatchlistMetadata;
-        console.info(
-          "[title-seasons] API config —",
-          "TMDb:", WM?.hasTmdbKey?.() ? "yes" : "no",
-          "| OMDb:", WM?.hasOmdbKey?.() ? "yes" : "no",
-          "| AniList: yes (public)",
-          "| TVDB:", (window.WATCHLIST_CONFIG?.supabaseUrl && window.WatchlistTvdb) ? "yes" : "no",
-        );
-      }
-
       // Resolve the series identity (IMDb → TMDb/OMDb, AniList, MAL → AniList)
       await ensureAnimeItemLink();
       const resolution = await meta.resolveSeriesId(_item);

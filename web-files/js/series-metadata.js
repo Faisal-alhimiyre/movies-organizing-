@@ -28,6 +28,7 @@
  *   metadata:v7:season:omdb:<imdbId>:<n>              24 hours  (v7 rejects zero ratings)
  *   metadata:v8:season:ratings:tmdb:<id>:<n>:<locale>  24 hours  (TMDB episode ratings)
  *   metadata:v5:episodes:anilist:<id>                 24 hours
+ *   metadata:v16:episodes:anilist:<id>:<season>       24 hours  (v16: drop poisoned v15)
  *   metadata:v8:series:tvdb:<id>:<locale>              7 days   (TheTVDB + locale)
  *   metadata:v12:season:tvdb:<id>:<n>:<locale>         24 hours  (episode still fix)
  */
@@ -2539,15 +2540,6 @@
         tvdbEpisodes,
         seasonNumber
       );
-      console.info(
-        "[series-metadata] TVDB mega-runner expand:",
-        episodes.length,
-        "→",
-        workingEpisodes.length,
-        "episodes (tvdb",
-        tvdbId,
-        ")"
-      );
     }
 
     const expandedFromTvdb = workingEpisodes.length > episodes.length;
@@ -2571,16 +2563,6 @@
       );
       return result;
     }
-
-    console.info(
-      "[series-metadata] TVDB enrich:",
-      tvdbEpisodes.length,
-      "episodes for anilist",
-      seasonAnilistId,
-      "→ tvdb",
-      tvdbId,
-      longRunner ? "(absolute)" : `(season ${tvdbSeasonNum})`
-    );
 
     tvdbEpisodes = tvdbEpisodes.slice(0, workingEpisodes.length);
 
@@ -3683,7 +3665,7 @@
       Number.isFinite(rootAnilistId) &&
       aid === rootAnilistId;
 
-    const cacheKey = `metadata:v15:episodes:anilist:${aid}:${appSeasonNumber}`;
+    const cacheKey = `metadata:v16:episodes:anilist:${aid}:${appSeasonNumber}`;
     if (!cachePoisoned) {
       const cached = readCached(cacheKey, TTL_EPISODES);
       if (cached?.payload) {
@@ -4184,7 +4166,12 @@
   }
 
   // ─── One-time cache eviction ──────────────────────────────────
-  const CACHE_EVICT_VERSION = "v28";
+  // v29: drop poisoned AniList episode cache (v15 and older). Delete+re-add
+  // of a title does NOT clear this — it is keyed by AniList id. Home-screen
+  // PWAs pick this up automatically when they load the new build; no manual
+  // clear required. New writes use metadata:v16:episodes:anilist: so even
+  // if eviction is skipped, old keys are never read again.
+  const CACHE_EVICT_VERSION = "v29";
   (function evictObsoleteEpisodeCache() {
     try {
       const flagKey = `watchlist-series-cache-evict-${CACHE_EVICT_VERSION}`;
@@ -4201,6 +4188,8 @@
         "metadata:v12:series:anilist:",
         "metadata:v12:episodes:anilist:",
         "metadata:v13:episodes:anilist:",
+        "metadata:v14:episodes:anilist:",
+        "metadata:v15:episodes:anilist:",
         "metadata:v16:season:tvdb:",
         "metadata:v17:season:tvdb:",
         "metadata:v18:season:tvdb:",
@@ -4209,6 +4198,7 @@
         "metadata:v8:series:tvdb:",
         "metadata:v22:season:tvdb:",
         "metadata:v23:season:tvdb:",
+        "metadata:v24:season:tvdb:",
         "metadata:v9:resolve:imdb:anilist:",
         "metadata:v11:resolve:imdb:anilist:",
         "metadata:v7:resolve:tvdb:anilist:",
@@ -4780,49 +4770,12 @@
    * Fetch badge fields (age, runtime, seasons, episodes) for a title.
    * Used on add and login backfill.
    */
-  let badgeDebugTvLogged = false;
-  let badgeDebugAnimeLogged = false;
-
   async function fetchTitleBadgeMeta(item, locale = "en") {
     const patches = {};
     const ct = item?.contentType;
     const WM = window.WatchlistMetadata;
     const imdbId = getImdbIdFromItem(item);
     const tmdbId = parseInt(String(item?.tmdbId || "").trim(), 10);
-    const debug =
-      (ct === "tvSeries" && !badgeDebugTvLogged) ||
-      (ct === "anime" && !badgeDebugAnimeLogged);
-    const debugPayload = {
-      title: item?.title,
-      contentType: ct,
-      providerId: imdbId || (Number.isFinite(tmdbId) ? `tmdb:${tmdbId}` : null) || item?.anilistId,
-      providerUsed: [],
-      fieldsRequested: [],
-      fieldsReturned: [],
-      fieldsSaved: [],
-      skipped: [],
-    };
-
-    if (ct === "movies") {
-      debugPayload.fieldsRequested = ["ageRating", "runtime", "imdbRating", "tmdbRating"];
-    } else if (ct === "tvSeries") {
-      debugPayload.fieldsRequested = [
-        "ageRating",
-        "runtime",
-        "seasonCount",
-        "episodeCount",
-        "episodeDuration",
-      ];
-    } else if (ct === "anime") {
-      debugPayload.fieldsRequested = [
-        "ageRating",
-        "episodeCount",
-        "seasonCount",
-        "episodeDuration",
-        "sourceGenres",
-        "imdbRating",
-      ];
-    }
 
     let meta = null;
     if (
@@ -4832,70 +4785,35 @@
     ) {
       const mediaType = ct === "movies" ? "movie" : "tv";
       meta = await WM.fetchTmdbDetails?.(mediaType, tmdbId, locale);
-      if (meta) debugPayload.providerUsed.push(`TMDb ${mediaType}/${tmdbId}`);
     }
 
     if (!meta && imdbId) {
       meta = await WM.getMetadata(imdbId);
-      if (meta) debugPayload.providerUsed.push(`OMDb ${imdbId}`);
     } else if (!meta && item?.link && WM?.isSupportedLink?.(item.link)) {
       meta = await WM.resolveMetadataFromLink(item.link);
-      if (meta) debugPayload.providerUsed.push("resolveMetadataFromLink");
     }
 
     if (meta) {
-      if (meta.ageRating) {
-        patches.ageRating = meta.ageRating;
-        debugPayload.fieldsReturned.push("ageRating");
-      }
-      if (meta.runtime) {
-        patches.runtime = meta.runtime;
-        debugPayload.fieldsReturned.push("runtime");
-      }
+      if (meta.ageRating) patches.ageRating = meta.ageRating;
+      if (meta.runtime) patches.runtime = meta.runtime;
       if (ct === "tvSeries" || ct === "anime") {
-        if (meta.seasonCount) {
-          patches.seasonCount = meta.seasonCount;
-          debugPayload.fieldsReturned.push("seasonCount");
-        }
-        if (meta.episodeCount) {
-          patches.episodeCount = meta.episodeCount;
-          debugPayload.fieldsReturned.push("episodeCount");
-        }
+        if (meta.seasonCount) patches.seasonCount = meta.seasonCount;
+        if (meta.episodeCount) patches.episodeCount = meta.episodeCount;
       }
-      if (meta.rating && ct === "movies") {
-        patches.imdbRating = meta.rating;
-        debugPayload.fieldsReturned.push("imdbRating");
-      }
-    } else {
-      debugPayload.skipped.push("no_primary_metadata");
+      if (meta.rating && ct === "movies") patches.imdbRating = meta.rating;
     }
 
     if (imdbId && !item?.imdbRating && ct === "movies") {
       const rating = meta?.rating || (await WM.getMetadata(imdbId))?.rating;
-      if (rating) {
-        patches.imdbRating = rating;
-        debugPayload.fieldsReturned.push("imdbRating");
-        if (!debugPayload.providerUsed.includes(`OMDb ${imdbId}`)) {
-          debugPayload.providerUsed.push(`OMDb ${imdbId}`);
-        }
-      }
+      if (rating) patches.imdbRating = rating;
     }
 
     if (ct === "tvSeries" || ct === "anime") {
       const counts = await fetchTitleSeriesCounts(item, locale);
-      if (counts) debugPayload.providerUsed.push("fetchTitleSeriesCounts");
       if (ct === "anime") {
-        if (counts?.episodeCount > 0) {
-          patches.episodeCount = counts.episodeCount;
-          debugPayload.fieldsReturned.push("episodeCount");
-        }
-        if (counts?.seasonCount > 0) {
-          patches.seasonCount = counts.seasonCount;
-          debugPayload.fieldsReturned.push("seasonCount");
-        } else {
-          patches.seasonCount = 1;
-          debugPayload.fieldsReturned.push("seasonCount");
-        }
+        if (counts?.episodeCount > 0) patches.episodeCount = counts.episodeCount;
+        if (counts?.seasonCount > 0) patches.seasonCount = counts.seasonCount;
+        else patches.seasonCount = 1;
 
         const anilistId =
           item?.anilistId ||
@@ -4935,60 +4853,29 @@
           if (imdbMeta?.rating && needsRating) {
             patches.imdbRating = imdbMeta.rating;
             patches.imdbId = linkedImdb;
-            debugPayload.fieldsReturned.push("imdbRating");
-            debugPayload.providerUsed.push(`OMDb ${linkedImdb}`);
           } else if (linkedImdb && linkedImdb !== imdbId) {
             patches.imdbId = linkedImdb;
             if (imdbMeta?.rating && needsRating) {
               patches.imdbRating = imdbMeta.rating;
-              debugPayload.fieldsReturned.push("imdbRating");
             }
-            debugPayload.providerUsed.push(`OMDb ${linkedImdb}`);
           }
 
           if (!isAnilistRateLimited() && !window.WatchlistMetadata?.getAnilistQueueStatus?.()?.paused) {
             const anilist = await WM.fetchAnilistById(anilistId);
             if (anilist?.genres?.length) {
               patches.sourceGenres = anilist.genres;
-              debugPayload.fieldsReturned.push("sourceGenres");
             }
-            debugPayload.providerUsed.push(`AniList ${anilistId}`);
           }
         }
       } else {
-        if (counts?.seasonCount > 0) {
-          patches.seasonCount = counts.seasonCount;
-          debugPayload.fieldsReturned.push("seasonCount");
-        }
+        if (counts?.seasonCount > 0) patches.seasonCount = counts.seasonCount;
         if (counts?.episodeCount > 0) {
           patches.episodeCount = counts.episodeCount;
-          debugPayload.fieldsReturned.push("episodeCount");
         } else {
           const total = await fetchTitleEpisodeTotal(item, locale);
-          if (total > 0) {
-            patches.episodeCount = total;
-            debugPayload.fieldsReturned.push("episodeCount");
-          }
+          if (total > 0) patches.episodeCount = total;
         }
       }
-    }
-
-    for (const key of Object.keys(patches)) {
-      if (patches[key] != null && patches[key] !== "") {
-        debugPayload.fieldsSaved.push(key);
-      }
-    }
-    if (patches.imdbId) debugPayload.providerId = patches.imdbId;
-
-    const missing = debugPayload.fieldsRequested.filter(
-      (field) => !debugPayload.fieldsReturned.includes(field)
-    );
-    if (missing.length) debugPayload.missingBadges = missing;
-
-    if (debug) {
-      if (ct === "tvSeries") badgeDebugTvLogged = true;
-      if (ct === "anime") badgeDebugAnimeLogged = true;
-      console.warn("[badge-enrich:debug]", debugPayload);
     }
 
     return Object.keys(patches).length ? patches : null;

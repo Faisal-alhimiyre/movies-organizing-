@@ -857,7 +857,7 @@ describe("AniList season ID resolution", () => {
     expect(result.episodes?.[0]?.title).not.toBe("POISONED ROOT S1 EP");
 
     const cache = JSON.parse(localStorage.getItem("watchlist-series-cache-v5"));
-    expect(cache[`metadata:v15:episodes:anilist:${S2_ID}:2`]).toBeDefined();
+    expect(cache[`metadata:v16:episodes:anilist:${S2_ID}:2`]).toBeDefined();
     expect(cache[poisonKey]?.payload?.episodes?.[0]?.title).toBe("POISONED ROOT S1 EP");
   });
 

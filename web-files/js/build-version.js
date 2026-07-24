@@ -3,5 +3,5 @@
  * Bump this when shipping JS/CSS/SW changes; keep index.html ?v= in sync.
  */
 (function (global) {
-  global.WATCHLIST_BUILD_VERSION = "154";
+  global.WATCHLIST_BUILD_VERSION = "155";
 })(typeof self !== "undefined" ? self : window);
