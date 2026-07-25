@@ -354,6 +354,12 @@
     const listId = state.activeListId;
     if (!listId) return;
 
+    // #region agent log
+    const __syncT0 = Date.now();
+    console.log('[dbg:913c94][H1] cloud-sync:start', {listId,itemCount:state.items.length});
+    fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',runId:'slow-load',hypothesisId:'H1',location:'app.js:runBackgroundCloudSync',message:'cloud-sync:start',data:{listId,itemCount:state.items.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
     state.syncStatus = "pending";
     updateStats();
 
@@ -363,9 +369,17 @@
       await reconcileWithCloud();
       if (state.activeListId !== listId) return;
 
+      // #region agent log
+      const __lsT0 = Date.now();
+      // #endregion
       const { data, watched } = storageKeys();
       localStorage.setItem(data, JSON.stringify(state.data));
       localStorage.setItem(watched, JSON.stringify(state.watched));
+      // #region agent log
+      const __lsMs = Date.now() - __lsT0;
+      console.log('[dbg:913c94][H1] cloud-sync:localStorage-write', {ms:__lsMs,itemCount:state.items.length});
+      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',runId:'slow-load',hypothesisId:'H1',location:'app.js:runBackgroundCloudSync:ls',message:'cloud-sync:localStorage-write',data:{ms:__lsMs,itemCount:state.items.length},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
 
       if (state.syncStatus === "pending") {
         state.syncStatus = "saved";
@@ -375,7 +389,11 @@
       renderListSwitcher();
       updateGenreOptions();
       updateStats();
-      void runMetadataBackfill();
+      // #region agent log
+      console.log('[dbg:913c94][H1] cloud-sync:done', {ms:Date.now()-__syncT0,syncStatus:state.syncStatus});
+      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',runId:'slow-load',hypothesisId:'H1',location:'app.js:runBackgroundCloudSync:done',message:'cloud-sync:done',data:{ms:Date.now()-__syncT0,syncStatus:state.syncStatus},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      scheduleMetadataBackfill();
       if (!cacheRecoveryProbed) {
         cacheRecoveryProbed = true;
         void probeWatchlistCacheRecovery(listId);
@@ -4134,6 +4152,42 @@
     });
   }
 
+  /**
+   * After a metadata backfill patch: persist + update one card.
+   * Avoids full-list render(), which tears down every poster <img> and
+   * restarts lazy-loads (confirmed via slow-load logs: withPoster=125 but
+   * phone showed black posters while backfill called render()).
+   */
+  function persistBackfillItem(itemId, { fullRender = false } = {}) {
+    state.data = itemsToNested(state.items);
+    saveData();
+    if (fullRender) {
+      render();
+      return;
+    }
+    syncListCard(itemId);
+  }
+
+  /** Let first-paint posters load before background badge/rating API work. */
+  function scheduleMetadataBackfill() {
+    // #region agent log
+    console.log('[dbg:913c94][H3-fix] scheduleMetadataBackfill');
+    fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',runId:'post-fix',hypothesisId:'H3',location:'app.js:scheduleMetadataBackfill',message:'scheduleMetadataBackfill',data:{},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    const run = () => {
+      // #region agent log
+      console.log('[dbg:913c94][H3-fix] scheduleMetadataBackfill:fire');
+      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',runId:'post-fix',hypothesisId:'H3',location:'app.js:scheduleMetadataBackfill:fire',message:'scheduleMetadataBackfill:fire',data:{},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      void runMetadataBackfill();
+    };
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(run, { timeout: 4000 });
+    } else {
+      window.setTimeout(run, 1500);
+    }
+  }
+
   async function backfillMissingYears() {
     if (yearsBackfillRunning) return;
 
@@ -4169,7 +4223,8 @@
           if (updated % 3 === 0) {
             state.data = itemsToNested(state.items);
             saveData();
-            render();
+            if (isReleaseSortActive()) render();
+            else syncListCard(item.id);
           }
         }
       } catch (error) {
@@ -4187,7 +4242,10 @@
     if (updated > 0) {
       state.data = itemsToNested(state.items);
       saveData();
-      render();
+      if (isReleaseSortActive()) render();
+      else {
+        for (const item of queue) syncListCard(item.id);
+      }
     } else if (isReleaseSortActive()) {
       render();
     }
@@ -4228,9 +4286,9 @@
       }
       if (changed) {
         updated += 1;
-        state.data = itemsToNested(state.items);
-        saveData();
-        render();
+        persistBackfillItem(item.id, {
+          fullRender: state.ratingFilterSource !== "all",
+        });
         return true;
       }
       return false;
@@ -4299,11 +4357,9 @@
         }
         if (changed) {
           updated += 1;
-          if (state.ratingFilterSource !== "all" && updated % 3 === 0) {
-            state.data = itemsToNested(state.items);
-            saveData();
-            render();
-          }
+          persistBackfillItem(item.id, {
+            fullRender: state.ratingFilterSource !== "all" && updated % 3 === 0,
+          });
         }
       } catch (error) {
         console.warn("[ratings] imdb backfill failed:", item.title, error);
@@ -4320,7 +4376,7 @@
     if (updated > 0) {
       state.data = itemsToNested(state.items);
       saveData();
-      render();
+      if (state.ratingFilterSource !== "all") render();
     } else if (state.ratingFilterSource !== "all") {
       render();
     }
@@ -4398,7 +4454,7 @@
     if (updated > 0) {
       state.data = itemsToNested(state.items);
       saveData();
-      render();
+      for (const item of queue) syncListCard(item.id);
     }
   }
 
@@ -4898,6 +4954,12 @@
     const listId = state.activeListId;
     if (!listId) return;
 
+    // #region agent log
+    console.log('[dbg:913c94][H3] backfillEpisodeTotals:start', {queueLen:queue.length,titles:queue.slice(0,8).map(i=>i.title)});
+    fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',runId:'slow-load',hypothesisId:'H3',location:'app.js:backfillEpisodeTotals',message:'backfillEpisodeTotals:start',data:{queueLen:queue.length},timestamp:Date.now()})}).catch(()=>{});
+    const __bfT0 = Date.now();
+    // #endregion
+
     episodeTotalsBackfillRunning = true;
     let updated = 0;
     const locale = window.WatchlistI18n?.getLang?.() || "en";
@@ -4920,25 +4982,49 @@
 
     episodeTotalsBackfillRunning = false;
 
+    // #region agent log
+    console.log('[dbg:913c94][H3] backfillEpisodeTotals:done', {ms:Date.now()-__bfT0,updated,queueLen:queue.length});
+    fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',runId:'slow-load',hypothesisId:'H3',location:'app.js:backfillEpisodeTotals:done',message:'backfillEpisodeTotals:done',data:{ms:Date.now()-__bfT0,updated,queueLen:queue.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
     if (updated > 0) {
       state.data = itemsToNested(state.items);
       saveData();
-      render();
+      // #region agent log
+      console.log('[dbg:913c94][H3-fix] backfillEpisodeTotals:syncListCard-only', {updated,queueLen:queue.length});
+      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',runId:'post-fix',hypothesisId:'H3',location:'app.js:backfillEpisodeTotals:persist',message:'backfillEpisodeTotals:syncListCard-only',data:{updated,queueLen:queue.length},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      for (const item of queue) syncListCard(item.id);
     }
   }
 
   async function runMetadataBackfill() {
+    // #region agent log
+    const __mbT0 = Date.now();
+    const needsBadge = state.items.filter(itemNeedsBadgeEnrichment).length;
+    const needsEp = state.items.filter(itemNeedsEpisodeTotalBackfill).length;
+    console.log('[dbg:913c94][H3] runMetadataBackfill:start', {needsBadge,needsEp,itemCount:state.items.length});
+    fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',runId:'slow-load',hypothesisId:'H3',location:'app.js:runMetadataBackfill',message:'runMetadataBackfill:start',data:{needsBadge,needsEp,itemCount:state.items.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (isReleaseSortActive()) {
       await backfillMissingYears();
       await backfillMissingRatings();
       await backfillTitleMeta();
       await backfillEpisodeTotals();
+      // #region agent log
+      console.log('[dbg:913c94][H3] runMetadataBackfill:done', {ms:Date.now()-__mbT0});
+      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',runId:'slow-load',hypothesisId:'H3',location:'app.js:runMetadataBackfill:done',message:'runMetadataBackfill:done',data:{ms:Date.now()-__mbT0},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       return;
     }
     await backfillMissingRatings();
     await backfillMissingYears();
     await backfillTitleMeta();
     await backfillEpisodeTotals();
+    // #region agent log
+    console.log('[dbg:913c94][H3] runMetadataBackfill:done', {ms:Date.now()-__mbT0});
+    fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',runId:'slow-load',hypothesisId:'H3',location:'app.js:runMetadataBackfill:done',message:'runMetadataBackfill:done',data:{ms:Date.now()-__mbT0},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
   }
 
   function loadCardLayout() {
@@ -6575,12 +6661,30 @@
   }
 
   function render() {
+    // #region agent log
+    const __rT0 = Date.now();
+    // #endregion
+    const healT0 = Date.now();
     healAllPosterUrls({ persist: true });
+    const healMs = Date.now() - healT0;
     updateClearFiltersButton();
     updateFilterFieldHighlights();
     updateGenreOptions();
     const filtered = getFilteredItems();
     updateStats();
+
+    // #region agent log
+    let withPoster = 0, emptyPoster = 0, brokenPoster = 0, pending = 0;
+    for (const it of filtered) {
+      const p = cardDisplayPoster(it);
+      if (it.posterBroken) brokenPoster += 1;
+      else if (p) withPoster += 1;
+      else emptyPoster += 1;
+      if (it.enrichmentPending) pending += 1;
+    }
+    console.log('[dbg:913c94][H2/H4] render:poster-stats', {healMs,filtered:filtered.length,withPoster,emptyPoster,brokenPoster,pending,syncStatus:state.syncStatus});
+    fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',runId:'slow-load',hypothesisId:'H2',location:'app.js:render',message:'render:poster-stats',data:{healMs,filtered:filtered.length,withPoster,emptyPoster,brokenPoster,pending,syncStatus:state.syncStatus,renderMs:Date.now()-__rT0},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     if (state.items.length === 0) {
       els.main.innerHTML = renderEmptyListState();
@@ -6633,6 +6737,10 @@
 
     els.main.innerHTML = html;
     applyPostRender();
+    // #region agent log
+    console.log('[dbg:913c94][H4] render:done', {ms:Date.now()-__rT0,healMs,filtered:filtered.length});
+    fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',runId:'slow-load',hypothesisId:'H4',location:'app.js:render:done',message:'render:done',data:{ms:Date.now()-__rT0,healMs,filtered:filtered.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
   }
 
   function formKindForItem(contentType, existingKind) {
@@ -13282,7 +13390,7 @@
     if (cloudConfigured && hasLocal) {
       void runBackgroundCloudSync();
     } else {
-      void runMetadataBackfill();
+      scheduleMetadataBackfill();
     }
     await consumePendingShare();
 

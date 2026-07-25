@@ -4177,6 +4177,9 @@
       const flagKey = `watchlist-series-cache-evict-${CACHE_EVICT_VERSION}`;
       if (localStorage.getItem(flagKey)) return;
 
+      // #region agent log
+      const __evictT0 = Date.now();
+      // #endregion
       const cache = readSeriesCache();
       let changed = false;
       const dropPrefixes = [
@@ -4223,6 +4226,12 @@
       _anilistFranchiseRootCache.clear();
       _rootTitleFingerprint.clear();
       localStorage.setItem(flagKey, "1");
+      // #region agent log
+      const __evictMs = Date.now() - __evictT0;
+      const __cacheKeys = Object.keys(cache).length;
+      console.log('[dbg:913c94][H5] series-cache-evict', {ms:__evictMs,changed,cacheKeys:__cacheKeys});
+      fetch('http://127.0.0.1:7857/ingest/18e5be1e-b6e0-488e-891b-c9272ecad6a3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'913c94'},body:JSON.stringify({sessionId:'913c94',runId:'slow-load',hypothesisId:'H5',location:'series-metadata.js:evict',message:'series-cache-evict',data:{ms:__evictMs,changed,cacheKeys:__cacheKeys},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
     } catch { /* storage unavailable — skip */ }
   })();
 
