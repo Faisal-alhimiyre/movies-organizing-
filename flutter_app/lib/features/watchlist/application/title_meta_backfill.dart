@@ -61,6 +61,10 @@ WatchlistItem mergeTitleMetaFromDetail(
     link: item.link,
     imdbLink: item.imdbLink,
     poster: item.poster,
+    cardPoster: item.cardPoster,
+    selectedSeason: item.selectedSeason,
+    selectedSeasonName: item.selectedSeasonName,
+    noSpecials: item.noSpecials,
     imdbRating: item.imdbRating ??
         (meta.rating.isNotEmpty ? meta.rating : null),
     anilistRating: item.anilistRating ??

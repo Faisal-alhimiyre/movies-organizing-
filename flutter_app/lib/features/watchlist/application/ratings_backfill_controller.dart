@@ -161,7 +161,7 @@ class RatingsBackfillController extends Notifier<RatingsBackfillProgress> {
               anilistRating: result!.anilistRating,
             );
             updated += 1;
-            if (updated % 3 == 0) {
+            if (updated % 15 == 0) {
               await controller.replaceItems(
                 items,
                 expectedListId: listId,
@@ -195,7 +195,7 @@ class RatingsBackfillController extends Notifier<RatingsBackfillProgress> {
               imdbRating: result!.imdbRating,
             );
             updated += 1;
-            if (updated % 3 == 0) {
+            if (updated % 15 == 0) {
               await controller.replaceItems(
                 items,
                 expectedListId: listId,

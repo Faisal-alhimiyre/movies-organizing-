@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/theme/theme_extensions.dart';
+import '../../../../core/utils/item_links.dart';
 import '../../../../core/utils/rating_utils.dart';
 import '../../../../core/utils/watch_progress.dart';
 import '../../../../l10n/l10n.dart';
@@ -18,6 +19,167 @@ import '../../../../models/metadata_detail.dart';
 import '../../../../core/utils/watchlist_parser.dart';
 
 enum _SeasonsDetailTab { seasons, specials, movies }
+
+/// Similar recommendations for standalone movies (web Similar tab).
+class MovieSimilarPanel extends ConsumerStatefulWidget {
+  const MovieSimilarPanel({
+    super.key,
+    required this.l10n,
+    required this.item,
+  });
+
+  final L10n l10n;
+  final WatchlistItem item;
+
+  @override
+  ConsumerState<MovieSimilarPanel> createState() => _MovieSimilarPanelState();
+}
+
+class _MovieSimilarPanelState extends ConsumerState<MovieSimilarPanel> {
+  bool _loading = true;
+  RelatedMoviesResult? _result;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  @override
+  void didUpdateWidget(covariant MovieSimilarPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.item.id != widget.item.id) {
+      unawaited(_load());
+    }
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _result = null;
+    });
+    final svc = ref.read(seriesMetadataServiceProvider);
+    final locale = widget.l10n.isArabic ? 'ar' : 'en';
+    // Movies are not series — build resolution from IMDb link (skip resolveSeriesId).
+    final imdbId = getImdbIdFromItem(widget.item);
+    final resolution = imdbId != null && imdbId.isNotEmpty
+        ? SeriesIdResolution.omdb(imdbId)
+        : SeriesIdResolution.none();
+    if (!mounted) return;
+    final result = await svc.fetchSimilarTitles(
+      resolution: resolution,
+      item: widget.item,
+      locale: locale,
+    );
+    if (!mounted) return;
+    setState(() {
+      _result = result;
+      _loading = false;
+    });
+  }
+
+  Future<void> _openSimilar(BuildContext context, RelatedMovie movie) async {
+    final details = MetadataDetail(
+      source: movie.source,
+      title: movie.title,
+      anilistId: movie.anilistId,
+      link: movie.anilistId != null
+          ? 'https://anilist.co/anime/${movie.anilistId}/'
+          : '',
+      poster: movie.poster,
+      year: movie.year,
+      plot: movie.overview.isNotEmpty ? movie.overview : movie.title,
+      runtime:
+          movie.runtimeMinutes != null ? '${movie.runtimeMinutes} min' : '',
+      contentType: 'movies',
+      anilistRating: movie.score != null ? '${movie.score!.round()}' : '',
+    );
+
+    final item = buildItemFromMetadata(
+      details: details,
+      contentType: 'movies',
+      genre: widget.item.genre,
+    );
+
+    final snapshot = ref.read(watchlistControllerProvider).value;
+    if (snapshot == null) return;
+
+    if (findDuplicateTitle(snapshot.items, item) != null) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(widget.l10n.message('watchlist.duplicate'))),
+      );
+      return;
+    }
+
+    await ref.read(watchlistControllerProvider.notifier).upsertItem(item);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${widget.l10n.message('search.added')}: ${item.title}'),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final movies = _result?.movies ?? const <RelatedMovie>[];
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: Text(
+              widget.l10n.detailSimilarSectionTitle,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.75),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (_loading)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Column(
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 10),
+                  Text(
+                    widget.l10n.detailSimilarLoading,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            )
+          else if (movies.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Text(
+                widget.l10n.detailSimilarEmpty,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.65),
+                ),
+              ),
+            )
+          else
+            _RelatedMoviesPanel(
+              l10n: widget.l10n,
+              theme: theme,
+              tc: theme.extension<AppTypeColors>(),
+              loading: false,
+              movies: movies,
+              onTap: (movie) => unawaited(_openSimilar(context, movie)),
+            ),
+        ],
+      ),
+    );
+  }
+}
 
 /// Season header block shown above summary when a season is selected (web `td-season-detail`).
 class SeasonPresentation {
@@ -561,6 +723,20 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
         _seasonPosterUrl(patchedSeason),
       );
     }
+
+    // TMDB ratings after first paint — do not block episode list.
+    unawaited(() async {
+      final enriched = await svc.enrichSeasonEpisodeRatings(
+        resolution: resolution,
+        result: result,
+        seasonNumber: seasonNumber,
+        locale: locale,
+      );
+      if (!mounted || loadToken != _seasonLoadToken) return;
+      if (identical(enriched, result)) return;
+      setState(() => _episodes = enriched);
+      _patchSeasonFromEpisodeResult(seasonNumber, enriched);
+    }());
   }
 
   SeasonSummary? _seasonSummaryFor(int seasonNumber, SeriesIdResolution resolution) {
@@ -1252,6 +1428,7 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
                     theme: theme,
                     series: _series!,
                     episodes: _episodes,
+                    seriesImdbRating: widget.item.imdbRating,
                     selectedSeasonNum: _selectedSeasonNum,
                     activeTab: _activeTab,
                     specialsAvailable: _specialsAvailable,
@@ -1435,6 +1612,7 @@ class _SeasonContent extends StatelessWidget {
     required this.theme,
     required this.series,
     required this.episodes,
+    this.seriesImdbRating,
     required this.selectedSeasonNum,
     required this.activeTab,
     required this.specialsAvailable,
@@ -1465,6 +1643,7 @@ class _SeasonContent extends StatelessWidget {
   final ThemeData theme;
   final SeriesMetadataResult series;
   final SeasonEpisodesResult? episodes;
+  final String? seriesImdbRating;
   final int? selectedSeasonNum;
   final _SeasonsDetailTab activeTab;
   final bool specialsAvailable;
@@ -1588,6 +1767,10 @@ class _SeasonContent extends StatelessWidget {
         season: selSeason,
         entry: entry,
         episodes: list,
+        seasonRating: episodes?.seasonRating,
+        seasonRatingSource: episodes?.seasonRatingSource,
+        seriesImdbRating: seriesImdbRating,
+        regularSeasonCount: _regularSeasons.length,
         l10n: l10n,
         tc: tc,
         theme: theme,
@@ -1752,6 +1935,29 @@ class _RelatedMoviesPanel extends StatelessWidget {
   final List<RelatedMovie> movies;
   final ValueChanged<RelatedMovie> onTap;
 
+  String _typeLabel(RelatedMovie movie) {
+    if (movie.contentType == 'anime' || movie.source == 'anilist') {
+      return l10n.typeAnime;
+    }
+    if (movie.contentType == 'tvSeries') return l10n.typeSeries;
+    return l10n.typeMovie;
+  }
+
+  String? _scoreLabel(RelatedMovie movie) {
+    final raw = movie.score;
+    if (raw == null || raw <= 0) return null;
+    final isAnilist =
+        movie.source == 'anilist' || movie.contentType == 'anime';
+    if (isAnilist) {
+      final pct = (raw > 10 ? raw : raw * 10).round();
+      return '$pct%';
+    }
+    final score = raw > 10 ? raw / 10 : raw;
+    return score == score.roundToDouble()
+        ? score.toInt().toString()
+        : score.toStringAsFixed(1);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (loading) {
@@ -1767,33 +1973,175 @@ class _RelatedMoviesPanel extends StatelessWidget {
     return Column(
       children: [
         for (final movie in movies)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: movie.poster.isNotEmpty
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: Image.network(
-                      movie.poster,
-                      width: 44,
-                      height: 66,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const SizedBox(
-                        width: 44,
-                        height: 66,
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: theme.colorScheme.outline.withValues(alpha: 0.35),
+                ),
+                borderRadius: BorderRadius.circular(12),
+                color: theme.colorScheme.surfaceContainerHighest
+                    .withValues(alpha: 0.25),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => onTap(movie),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (movie.poster.isNotEmpty)
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.network(
+                                  movie.poster,
+                                  width: 56,
+                                  height: 84,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) =>
+                                      const SizedBox(width: 56, height: 84),
+                                ),
+                              )
+                            else
+                              const SizedBox(width: 56, height: 84),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    movie.title,
+                                    style: theme.textTheme.titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.w700),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Wrap(
+                                    spacing: 6,
+                                    runSpacing: 4,
+                                    children: [
+                                      _InfoChip(label: _typeLabel(movie)),
+                                      if (movie.year.isNotEmpty)
+                                        _InfoChip(label: movie.year),
+                                      if (movie.ageRating.isNotEmpty)
+                                        _InfoChip(
+                                          label: l10n.ageRatingLabel(
+                                            movie.ageRating,
+                                          ),
+                                        )
+                                      else if (movie.adult)
+                                        _InfoChip(label: l10n.ageRatingAges17),
+                                      if (movie.contentType == 'tvSeries' ||
+                                          movie.contentType == 'anime') ...[
+                                        if (movie.episodeCount != null &&
+                                            movie.episodeCount! > 0)
+                                          _InfoChip(
+                                            label: l10n.episodesBadge(
+                                              movie.episodeCount!,
+                                            ),
+                                          ),
+                                        if ((movie.seasonCount ??
+                                                (movie.contentType == 'anime'
+                                                    ? 1
+                                                    : null)) !=
+                                            null)
+                                          _InfoChip(
+                                            label: l10n.seasonsBadge(
+                                              movie.seasonCount ?? 1,
+                                            ),
+                                          ),
+                                      ],
+                                      if (movie.runtimeMinutes != null)
+                                        _InfoChip(
+                                          label: '${movie.runtimeMinutes} min',
+                                        ),
+                                      if (_scoreLabel(movie) != null)
+                                        _InfoChip(
+                                          label: _scoreLabel(movie)!,
+                                          emphasize: true,
+                                        ),
+                                    ],
+                                  ),
+                                  if (movie.genres.isNotEmpty) ...[
+                                    const SizedBox(height: 6),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 4,
+                                      children: [
+                                        for (var i = 0;
+                                            i < movie.genres.length && i < 4;
+                                            i++)
+                                          _InfoChip(
+                                            label: movie.genres[i],
+                                            secondary: i > 0,
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  )
-                : const SizedBox(width: 44, height: 66),
-            title: Text(movie.title),
-            subtitle: Text(
-              [
-                if (movie.year.isNotEmpty) movie.year,
-                if (movie.runtimeMinutes != null) '${movie.runtimeMinutes} min',
-              ].join(' · '),
+                    IconButton(
+                      tooltip: l10n.detailRelatedMovieAdd,
+                      onPressed: () => onTap(movie),
+                      icon: const Icon(Icons.add_circle_outline),
+                    ),
+                  ],
+                ),
+              ),
             ),
-            onTap: () => onTap(movie),
           ),
       ],
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({
+    required this.label,
+    this.secondary = false,
+    this.emphasize = false,
+  });
+
+  final String label;
+  final bool secondary;
+  final bool emphasize;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bg = emphasize
+        ? const Color(0xFFF5C518).withValues(alpha: 0.18)
+        : secondary
+            ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55)
+            : theme.colorScheme.primary.withValues(alpha: 0.14);
+    final fg = emphasize
+        ? const Color(0xFFF5C518)
+        : theme.colorScheme.onSurface.withValues(alpha: secondary ? 0.7 : 0.9);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        child: Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: fg,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2220,6 +2568,10 @@ class _SeasonActionsBar extends StatelessWidget {
     required this.season,
     required this.entry,
     required this.episodes,
+    this.seasonRating,
+    this.seasonRatingSource,
+    this.seriesImdbRating,
+    this.regularSeasonCount = 0,
     required this.l10n,
     required this.tc,
     required this.theme,
@@ -2229,6 +2581,10 @@ class _SeasonActionsBar extends StatelessWidget {
   final SeasonSummary season;
   final WatchEntry? entry;
   final List<EpisodeDetail> episodes;
+  final double? seasonRating;
+  final String? seasonRatingSource;
+  final String? seriesImdbRating;
+  final int regularSeasonCount;
   final L10n l10n;
   final AppTypeColors? tc;
   final ThemeData theme;
@@ -2238,8 +2594,13 @@ class _SeasonActionsBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final watchedColor = tc?.watched ?? const Color(0xFF58C322);
     final seasonEps = episodesForSeason(episodes, season.seasonNumber);
-    final sourceAvg = _seasonAverageExternalRating(seasonEps);
-    final avgSource = _episodeExternalRatingSource(seasonEps);
+    final resolved = _resolveSeasonExternalRating(
+      seasonNum: season.seasonNumber,
+      seasonRating: seasonRating,
+      seasonRatingSource: seasonRatingSource,
+      seriesImdbRating: seriesImdbRating,
+      regularSeasonCount: regularSeasonCount,
+    );
 
     final seasonRef = SeasonRef(
       seasonNumber: season.seasonNumber,
@@ -2284,12 +2645,10 @@ class _SeasonActionsBar extends StatelessWidget {
               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ),
-          if (sourceAvg != null) ...[
+          if (resolved != null) ...[
             const Spacer(),
             _SeasonAvgBadge(
-              label: avgSource == 'imdb'
-                  ? l10n.seasonsSeasonAvgOmdb(sourceAvg)
-                  : l10n.seasonsSeasonAvgSource(sourceAvg),
+              label: l10n.seasonsSeasonRatingSource(resolved.value),
               tc: tc,
               theme: theme,
             ),
@@ -3185,7 +3544,8 @@ class _EpisodeRatingDialogState extends State<_EpisodeRatingDialog> {
 
 double? _episodeExternalRating(EpisodeDetail ep) {
   final source = ep.episodeRatingSource ?? '';
-  if (source != 'imdb' && source != 'tmdb') return null;
+  // TMDB only — OMDb episode scores are not used.
+  if (source != 'tmdb') return null;
   final rating = ep.episodeRating;
   if (rating == null || !rating.isFinite || rating <= 0 || rating > 10) {
     return null;
@@ -3197,19 +3557,46 @@ String? _episodeExternalRatingSource(List<EpisodeDetail> episodes) {
   for (final ep in episodes) {
     if (_episodeExternalRating(ep) == null) continue;
     final source = ep.episodeRatingSource ?? '';
-    if (source == 'imdb' || source == 'tmdb') return source;
+    if (source == 'tmdb') return source;
   }
   return null;
 }
 
-double? _seasonAverageExternalRating(List<EpisodeDetail> episodes) {
-  final vals = episodes
-      .where((e) => e.isAired)
-      .map(_episodeExternalRating)
-      .whereType<double>()
-      .toList();
-  if (vals.isEmpty) return null;
-  return (vals.reduce((a, b) => a + b) / vals.length * 10).round() / 10;
+double? _parseSeriesImdbRating(String? raw) {
+  if (raw == null || raw.trim().isEmpty) return null;
+  final n = double.tryParse(raw.trim().replaceAll(',', '.'));
+  if (n == null || !n.isFinite || n <= 0 || n > 10) return null;
+  return (n * 10).round() / 10;
+}
+
+({double value, String source})? _resolveSeasonExternalRating({
+  required int seasonNum,
+  double? seasonRating,
+  String? seasonRatingSource,
+  String? seriesImdbRating,
+  int regularSeasonCount = 0,
+}) {
+  if (seasonNum <= 0) return null;
+
+  // One-season titles: series IMDb badge is the season score.
+  if (regularSeasonCount == 1) {
+    final seriesImdb = _parseSeriesImdbRating(seriesImdbRating);
+    if (seriesImdb != null) {
+      return (value: seriesImdb, source: 'imdb');
+    }
+  }
+
+  if (seasonRating != null &&
+      seasonRating.isFinite &&
+      seasonRating > 0 &&
+      seasonRating <= 10) {
+    return (
+      value: (seasonRating * 10).round() / 10,
+      source: seasonRatingSource ?? 'tmdb',
+    );
+  }
+
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

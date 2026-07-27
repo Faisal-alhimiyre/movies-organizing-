@@ -11,6 +11,19 @@
 
   const FUNCTION_NAME = "tvdb-metadata";
 
+  function isServiceDebugEnabled() {
+    try {
+      return localStorage.getItem("watchlist-debug-add") === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function logServiceWarn(label, err) {
+    if (!isServiceDebugEnabled()) return;
+    console.warn(label, err?.message || err);
+  }
+
   // ── Supabase project endpoint ─────────────────────────────────────────
   function getFunctionUrl() {
     const url = (window.WATCHLIST_CONFIG?.supabaseUrl || "").replace(/\/$/, "");
@@ -62,7 +75,7 @@
       if (!result || result.error || !result.tvdbId) return null;
       return result;
     } catch (err) {
-      console.warn("[tvdb-service] resolveId failed:", err.message);
+      logServiceWarn("[tvdb-service] resolveId failed:", err);
       return null;
     }
   }
@@ -84,7 +97,7 @@
       if (!result || result.error) return null;
       return result;
     } catch (err) {
-      console.warn("[tvdb-service] fetchSeries failed:", err.message);
+      logServiceWarn("[tvdb-service] fetchSeries failed:", err);
       return null;
     }
   }
@@ -106,7 +119,7 @@
       if (!result || result.error || !Array.isArray(result.seasons)) return null;
       return result.seasons;
     } catch (err) {
-      console.warn("[tvdb-service] fetchSeasons failed:", err.message);
+      logServiceWarn("[tvdb-service] fetchSeasons failed:", err);
       return null;
     }
   }
@@ -133,7 +146,7 @@
       if (!result || result.error || !Array.isArray(result.episodes)) return null;
       return result.episodes;
     } catch (err) {
-      console.warn("[tvdb-service] fetchEpisodes failed:", err.message);
+      logServiceWarn("[tvdb-service] fetchEpisodes failed:", err);
       return null;
     }
   }
@@ -159,7 +172,7 @@
             : {},
       };
     } catch (err) {
-      console.warn("[tvdb-service] fetchEpisodeTotals failed:", err.message);
+      logServiceWarn("[tvdb-service] fetchEpisodeTotals failed:", err);
       return null;
     }
   }
@@ -242,7 +255,7 @@
     } catch (err) {
       const msg = String(err?.message || err);
       if (!msg.includes("unsupported_action")) {
-        console.warn("[tvdb-service] fetchAllEpisodes failed:", msg);
+        logServiceWarn("[tvdb-service] fetchAllEpisodes failed:", msg);
       }
     }
 

@@ -99,7 +99,7 @@ class PosterBackfillController extends Notifier<bool> {
           if (index != -1) {
             items[index] = enriched;
             updated += 1;
-            if (updated % 3 == 0) {
+            if (updated % 15 == 0) {
               await controller.replaceItems(
                 items,
                 expectedListId: listId,

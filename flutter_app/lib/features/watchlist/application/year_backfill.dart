@@ -82,12 +82,21 @@ WatchlistItem applyYearBackfillResult(
     summary: item.summary,
     kind: item.kind,
     link: item.link,
+    imdbLink: item.imdbLink,
     poster: item.poster,
+    cardPoster: item.cardPoster,
+    selectedSeason: item.selectedSeason,
+    selectedSeasonName: item.selectedSeasonName,
+    noSpecials: item.noSpecials,
     imdbRating: item.imdbRating,
     anilistRating: item.anilistRating ??
         (anilistRating != null && anilistRating.isNotEmpty
             ? anilistRating
             : null),
+    ageRating: item.ageRating,
+    runtime: item.runtime,
+    seasonCount: item.seasonCount,
+    episodeCount: item.episodeCount,
     year: year ?? item.year,
     addedAt: item.addedAt,
     secondaryGenres: item.secondaryGenres,

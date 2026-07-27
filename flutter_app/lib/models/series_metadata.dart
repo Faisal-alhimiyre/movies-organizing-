@@ -432,6 +432,8 @@ class SeasonEpisodesResult {
     this.episodes,
     this.seasonPoster,
     this.seasonOverview,
+    this.seasonRating,
+    this.seasonRatingSource,
     this.isStale = false,
     this.debugMessage,
   });
@@ -445,6 +447,12 @@ class SeasonEpisodesResult {
   /// Season overview from the season-details API (TMDB `overview`).
   final String? seasonOverview;
 
+  /// Season-level score from TMDB `vote_average` (not an episode average).
+  final double? seasonRating;
+
+  /// `"tmdb"` when [seasonRating] came from TMDB season details.
+  final String? seasonRatingSource;
+
   /// True when the data came from a stale cache entry.
   final bool isStale;
 
@@ -452,6 +460,32 @@ class SeasonEpisodesResult {
   final String? debugMessage;
 
   bool get isUsable => episodes?.isNotEmpty == true;
+
+  SeasonEpisodesResult copyWith({
+    MetadataResultState? state,
+    List<EpisodeDetail>? episodes,
+    String? seasonPoster,
+    String? seasonOverview,
+    double? seasonRating,
+    String? seasonRatingSource,
+    bool? isStale,
+    String? debugMessage,
+    bool clearSeasonRating = false,
+  }) {
+    return SeasonEpisodesResult(
+      state: state ?? this.state,
+      episodes: episodes ?? this.episodes,
+      seasonPoster: seasonPoster ?? this.seasonPoster,
+      seasonOverview: seasonOverview ?? this.seasonOverview,
+      seasonRating:
+          clearSeasonRating ? null : (seasonRating ?? this.seasonRating),
+      seasonRatingSource: clearSeasonRating
+          ? null
+          : (seasonRatingSource ?? this.seasonRatingSource),
+      isStale: isStale ?? this.isStale,
+      debugMessage: debugMessage ?? this.debugMessage,
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -468,7 +502,14 @@ class RelatedMovie {
     this.overview = '',
     this.runtimeMinutes,
     this.anilistId,
+    this.tmdbId,
     this.score,
+    this.genres = const [],
+    this.contentType = 'movies',
+    this.adult = false,
+    this.ageRating = '',
+    this.seasonCount,
+    this.episodeCount,
   });
 
   final String source;
@@ -478,7 +519,14 @@ class RelatedMovie {
   final String overview;
   final int? runtimeMinutes;
   final int? anilistId;
+  final int? tmdbId;
   final double? score;
+  final List<String> genres;
+  final String contentType;
+  final bool adult;
+  final String ageRating;
+  final int? seasonCount;
+  final int? episodeCount;
 
   Map<String, dynamic> toJson() => {
         'source': source,
@@ -488,7 +536,14 @@ class RelatedMovie {
         'overview': overview,
         if (runtimeMinutes != null) 'runtimeMinutes': runtimeMinutes,
         if (anilistId != null) 'anilistId': anilistId,
+        if (tmdbId != null) 'tmdbId': tmdbId,
         if (score != null) 'score': score,
+        if (genres.isNotEmpty) 'genres': genres,
+        'contentType': contentType,
+        if (adult) 'adult': adult,
+        if (ageRating.isNotEmpty) 'ageRating': ageRating,
+        if (seasonCount != null) 'seasonCount': seasonCount,
+        if (episodeCount != null) 'episodeCount': episodeCount,
       };
 
   factory RelatedMovie.fromJson(Map<String, dynamic> json) => RelatedMovie(
@@ -499,7 +554,18 @@ class RelatedMovie {
         overview: json['overview']?.toString() ?? '',
         runtimeMinutes: json['runtimeMinutes'] as int?,
         anilistId: json['anilistId'] as int?,
+        tmdbId: json['tmdbId'] as int?,
         score: (json['score'] as num?)?.toDouble(),
+        genres: (json['genres'] as List?)
+                ?.map((e) => e.toString())
+                .where((e) => e.isNotEmpty)
+                .toList() ??
+            const [],
+        contentType: json['contentType']?.toString() ?? 'movies',
+        adult: json['adult'] == true,
+        ageRating: json['ageRating']?.toString() ?? '',
+        seasonCount: json['seasonCount'] as int?,
+        episodeCount: json['episodeCount'] as int?,
       );
 }
 

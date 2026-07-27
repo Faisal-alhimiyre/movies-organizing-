@@ -179,6 +179,10 @@ async function actionSeasonRatings(
   const json = await tmdbGet(`tv/${tmdbId}/season/${season}`, { language: lang });
   if (!json) return { error: "api_failure" };
 
+  const seasonVote = n(json.vote_average);
+  const seasonRating =
+    seasonVote != null && seasonVote > 0 ? roundRating(seasonVote) : null;
+
   const rawEps = Array.isArray(json.episodes) ? json.episodes : [];
   const episodes = rawEps
     .map((ep) => {
@@ -196,7 +200,7 @@ async function actionSeasonRatings(
     })
     .filter(Boolean);
 
-  return { tmdbId, season, episodes };
+  return { tmdbId, season, seasonRating, episodes };
 }
 
 /** Full details for a single movie or TV show — used when no client-side TMDB key */
@@ -617,6 +621,35 @@ async function actionSimilar(
   }
 
   const IMG = "https://image.tmdb.org/t/p/w342";
+  const GENRE_NAMES: Record<number, string> = {
+    28: "Action",
+    12: "Adventure",
+    16: "Animation",
+    35: "Comedy",
+    80: "Crime",
+    99: "Documentary",
+    18: "Drama",
+    10751: "Family",
+    14: "Fantasy",
+    36: "History",
+    27: "Horror",
+    10402: "Music",
+    9648: "Mystery",
+    10749: "Romance",
+    878: "Sci-Fi",
+    10770: "TV Movie",
+    53: "Thriller",
+    10752: "War",
+    37: "Western",
+    10759: "Action & Adventure",
+    10762: "Kids",
+    10763: "News",
+    10764: "Reality",
+    10765: "Sci-Fi & Fantasy",
+    10766: "Soap",
+    10767: "Talk",
+    10768: "War & Politics",
+  };
   const results = rows.slice(0, 24).map((row) => {
     const id = n(row.id) || 0;
     const title = s(row.title || row.name);
@@ -624,6 +657,13 @@ async function actionSimilar(
     const year = date.length >= 4 ? date.substring(0, 4) : "";
     const posterPath = s(row.poster_path);
     const vote = n(row.vote_average);
+    const genreIds = Array.isArray(row.genre_ids)
+      ? (row.genre_ids as unknown[]).map((g) => Number(g)).filter((g) => Number.isFinite(g) && g > 0)
+      : [];
+    const genres = genreIds
+      .map((gid) => GENRE_NAMES[gid])
+      .filter((name): name is string => Boolean(name))
+      .slice(0, 4);
     return {
       source: "tmdb",
       tmdbId: id,
@@ -633,9 +673,59 @@ async function actionSimilar(
       overview: s(row.overview),
       poster: posterPath ? `${IMG}${posterPath}` : "",
       score: vote != null && vote > 0 ? Math.round(vote * 10) : null,
+      genres,
+      genreIds,
+      adult: row.adult === true,
+      ageRating: "",
+      seasonCount: null as number | null,
+      episodeCount: null as number | null,
       contentType: mediaType === "movie" ? "movies" : "tvSeries",
     };
   }).filter((r) => r.title);
+
+  // One edge round-trip: fill age / seasons / episodes for TV similar cards.
+  if (mediaType === "tv" && results.length) {
+    const slice = results.slice(0, 12);
+    await Promise.all(
+      slice.map(async (entry) => {
+        const id = entry.tmdbId;
+        if (!id) return;
+        const details = await tmdbGet(`tv/${id}`, {
+          language: lang,
+          append_to_response: "content_ratings",
+        });
+        if (!details) return;
+        const seasons = n(details.number_of_seasons);
+        const episodes = n(details.number_of_episodes);
+        if (seasons && seasons > 0) entry.seasonCount = seasons;
+        if (episodes && episodes > 0) entry.episodeCount = episodes;
+        if (details.adult === true) entry.adult = true;
+
+        const ratings = Array.isArray(
+          (details.content_ratings as Record<string, unknown> | undefined)?.results,
+        )
+          ? ((details.content_ratings as Record<string, unknown>).results as Record<
+              string,
+              unknown
+            >[])
+          : [];
+        const prefer = ["US", "GB", "CA", "AU"];
+        for (const iso of prefer) {
+          const hit = ratings.find(
+            (r) => s(r.iso_3166_1).toUpperCase() === iso && s(r.rating),
+          );
+          if (hit) {
+            entry.ageRating = s(hit.rating);
+            break;
+          }
+        }
+        if (!entry.ageRating) {
+          const any = ratings.find((r) => s(r.rating));
+          if (any) entry.ageRating = s(any.rating);
+        }
+      }),
+    );
+  }
 
   return { ok: true, mediaType, tmdbId, results };
 }

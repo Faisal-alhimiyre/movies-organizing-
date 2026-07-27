@@ -745,6 +745,10 @@
 
   // ─── attach / detach ─────────────────────────────────────────────────────
 
+  function isMovieItem(item) {
+    return item?.contentType === "movies";
+  }
+
   function attach(slotEl, item, callbacks) {
     detach();
     _slot      = slotEl;
@@ -752,8 +756,17 @@
     _callbacks = callbacks;
     _token     = Symbol();
 
+    if (isMovieItem(item)) {
+      _slot.hidden = false;
+      _activeTab = "similar";
+      _slot.innerHTML = buildMovieSimilarRootHtml();
+      bindSlotEvents();
+      void loadMovieSimilarBootstrap();
+      return;
+    }
+
     if (!isTvOrAnime(item)) {
-      // Movies and film-series never show the seasons section
+      // Film-series and unknown types never show the seasons section
       if (_slot) _slot.hidden = true;
       return;
     }
@@ -764,6 +777,63 @@
     void window.WatchlistAniFiller?.ensureLoaded?.();
     bindSlotEvents();
     loadSeriesMetadata();
+  }
+
+  function buildMovieSimilarRootHtml() {
+    return `
+      <div class="tds-root tds-root--movie-similar" aria-live="polite">
+        <div class="tds-section-header">
+          <h3 class="tds-section-title">${esc(t("detail.similarSectionTitle"))}</h3>
+        </div>
+        <div class="tds-tab-panel" id="tdsPanelSimilar" role="region" data-tds-panel="similar">
+          <div class="tds-movies-loading" data-tds-part="similar-loading">
+            <span class="tds-spinner" role="status" aria-label="${esc(t("detail.similarLoading"))}"></span>
+            <span>${esc(t("detail.similarLoading"))}</span>
+          </div>
+          <p class="tds-movies-empty" data-tds-part="similar-empty" hidden>${esc(t("detail.similarEmpty"))}</p>
+          <div class="tds-movies-list" data-tds-part="similar-list" hidden role="list"></div>
+        </div>
+      </div>`;
+  }
+
+  async function loadMovieSimilarBootstrap() {
+    const tok = _token;
+    const meta = window.WatchlistSeriesMetadata;
+    if (!meta || !_item) return;
+
+    _similarLoading = true;
+    renderSimilarPanel();
+
+    try {
+      const WM = window.WatchlistMetadata;
+      const rawImdb = String(_item?.imdbId || "").trim().toLowerCase();
+      const linkImdb =
+        (/^tt\d{6,10}$/.test(rawImdb) ? rawImdb : null) ||
+        (/^\d{6,10}$/.test(rawImdb) ? `tt${rawImdb}` : null) ||
+        WM?.extractImdbId?.(_item?.imdbLink) ||
+        WM?.extractImdbId?.(_item?.link) ||
+        null;
+      const fromLink = WM?.extractTmdbId?.(_item?.link);
+      const tmdbId =
+        Number(_item?.tmdbId) ||
+        (fromLink?.tmdbId ? Number(fromLink.tmdbId) : null) ||
+        null;
+
+      // Movies are not series — build a movie resolution directly (skip resolveSeriesId).
+      _resolution = {
+        source: tmdbId ? "tmdb" : linkImdb ? "omdb" : "none",
+        tmdbId: Number.isFinite(tmdbId) && tmdbId > 0 ? tmdbId : null,
+        imdbId: linkImdb,
+        isNegative: !(tmdbId || linkImdb),
+      };
+      await loadSimilarTitles(tok);
+    } catch {
+      if (!isValid(tok)) return;
+      _similarResult = { titles: [] };
+      _similarLoaded = true;
+      _similarLoading = false;
+      renderSimilarPanel();
+    }
   }
 
   function detach() {
@@ -1330,6 +1400,20 @@
     });
   }
 
+  function relatedMovieTypeLabel(movie) {
+    const ct = movie?.contentType || "";
+    if (ct === "anime" || movie?.source === "anilist") return t("type.anime");
+    if (ct === "tvSeries") return t("type.series");
+    return t("type.movie");
+  }
+
+  function relatedMovieTypeClass(movie) {
+    const ct = movie?.contentType || "";
+    if (ct === "anime" || movie?.source === "anilist") return "anime";
+    if (ct === "tvSeries") return "series";
+    return "movie";
+  }
+
   function relatedMovieScoreBadge(movie) {
     const raw = movie?.score;
     if (raw == null || raw === "") return "";
@@ -1357,22 +1441,89 @@
 
   function relatedMovieMetaHtml(movie) {
     const parts = [];
+    parts.push(
+      `<span class="badge badge--${esc(relatedMovieTypeClass(movie))}">${esc(
+        relatedMovieTypeLabel(movie)
+      )}</span>`
+    );
     if (movie.year) {
       parts.push(
         `<span class="badge badge--year text-num">${esc(String(movie.year))}</span>`
       );
     }
-    if (movie.runtimeMinutes) {
+
+    const ct = movie?.contentType || "";
+    const metaBadges =
+      window.WatchlistMetadata?.buildTitleMetaBadges?.(
+        {
+          contentType: ct || "movies",
+          ageRating:
+            movie.ageRating ||
+            (movie.adult === true ? "R" : ""),
+          seasonCount: movie.seasonCount || null,
+          episodeCount: movie.episodeCount || null,
+          runtime: movie.runtimeMinutes
+            ? `${movie.runtimeMinutes} min`
+            : movie.runtime || "",
+          mediaType:
+            ct === "anime"
+              ? movie.format === "MOVIE"
+                ? "movie"
+                : "tv"
+              : ct === "movies"
+                ? "movie"
+                : "tv",
+          omdbType:
+            ct === "anime"
+              ? movie.format === "MOVIE"
+                ? "movie"
+                : "series"
+              : ct === "movies"
+                ? "movie"
+                : "series",
+        },
+        ct || "movies"
+      ) || [];
+
+    for (const badge of metaBadges) {
+      const titleAttr =
+        badge.kind === "age" && badge.title
+          ? ` title="${esc(badge.title)}"`
+          : "";
       parts.push(
-        `<span class="badge badge--duration">${esc(
-          t("seasons.epRuntime", { n: movie.runtimeMinutes })
+        `<span class="badge badge--${esc(badge.kind)}"${titleAttr}>${esc(
+          badge.label
         )}</span>`
       );
     }
+
+    // Fallback age when metadata helper has nothing but adult flag is set.
+    if (
+      movie.adult === true &&
+      !metaBadges.some((b) => b.kind === "age")
+    ) {
+      parts.push(
+        `<span class="badge badge--age">${esc(t("ageRating.ages17"))}</span>`
+      );
+    }
+
     const scoreBadge = relatedMovieScoreBadge(movie);
     if (scoreBadge) parts.push(scoreBadge);
-    if (!parts.length) return "";
     return `<div class="tds-movie-card__meta tds-movie-card__meta--badges">${parts.join("")}</div>`;
+  }
+
+  function relatedMovieGenresHtml(movie) {
+    const genres = Array.isArray(movie?.genres)
+      ? movie.genres.map((g) => String(g || "").trim()).filter(Boolean)
+      : [];
+    if (!genres.length) return "";
+    return `<div class="tds-movie-card__genres">${genres
+      .slice(0, 4)
+      .map((g, i) => {
+        const cls = i === 0 ? "badge--genre-primary" : "badge--genre-secondary";
+        return `<span class="badge ${cls}">${esc(g)}</span>`;
+      })
+      .join("")}</div>`;
   }
 
   function relatedMovieCardHtml(movie, index, action = "open-related-movie") {
@@ -1387,26 +1538,39 @@
         }));
     const poster = movie.poster || getItemPoster() || "";
     const meta = relatedMovieMetaHtml(movie);
-    const overview = String(movie.overview || "").trim();
-    const snippet = overview.length > 140 ? `${overview.slice(0, 137)}…` : overview;
-    const ctaKey = onList ? "detail.relatedMovieOnList" : "detail.relatedMovieAdd";
+    const genres = relatedMovieGenresHtml(movie);
+    const addAction =
+      action === "open-similar-title" ? "add-similar-title" : "add-related-movie";
+    const addLabel = onList
+      ? t("detail.relatedMovieOnList")
+      : t("detail.relatedMovieAdd");
 
-    return `<button type="button" class="tds-movie-card" role="listitem"
-      data-tds-action="${esc(action)}" data-tds-movie-index="${index}"
-      ${onList ? ' data-tds-on-list="true"' : ""}
-      aria-label="${esc(movie.title)}">
-      <div class="tds-movie-card__poster-wrap">
-        ${poster
-          ? `<img class="tds-movie-card__poster" src="${esc(poster)}" alt="" loading="lazy" />`
-          : `<div class="tds-movie-card__poster tds-movie-card__poster--empty" aria-hidden="true">🎬</div>`}
-      </div>
-      <div class="tds-movie-card__body">
-        <p class="tds-movie-card__title">${esc(movie.title)}</p>
-        ${meta}
-        ${snippet ? `<p class="tds-movie-card__summary">${esc(snippet)}</p>` : ""}
-        <p class="tds-movie-card__cta">${esc(t(ctaKey))}</p>
-      </div>
-    </button>`;
+    return `<div class="tds-movie-card${onList ? " tds-movie-card--on-list" : ""}" role="listitem"
+      ${onList ? ' data-tds-on-list="true"' : ""}>
+      <button type="button" class="tds-movie-card__main"
+        data-tds-action="${esc(action)}" data-tds-movie-index="${index}"
+        aria-label="${esc(movie.title)}">
+        <div class="tds-movie-card__poster-wrap">
+          ${poster
+            ? `<img class="tds-movie-card__poster" src="${esc(poster)}" alt="" loading="lazy" />`
+            : `<div class="tds-movie-card__poster tds-movie-card__poster--empty" aria-hidden="true">🎬</div>`}
+        </div>
+        <div class="tds-movie-card__body">
+          <p class="tds-movie-card__title">${esc(movie.title)}</p>
+          ${meta}
+          ${genres}
+        </div>
+      </button>
+      <button type="button"
+        class="tds-movie-card__add${onList ? " tds-movie-card__add--on-list" : ""}"
+        data-tds-action="${esc(addAction)}"
+        data-tds-movie-index="${index}"
+        ${onList ? "disabled" : ""}
+        aria-label="${esc(addLabel)}"
+        title="${esc(addLabel)}">
+        <span aria-hidden="true">${onList ? "✓" : "+"}</span>
+      </button>
+    </div>`;
   }
 
   function renderMoviesPanel() {
@@ -1512,7 +1676,11 @@
             : defaultContentType === "tvSeries"
               ? "series"
               : "movie",
-        genres: _item?.genre ? [_item.genre] : [],
+        genres: Array.isArray(entry.genres) && entry.genres.length
+          ? entry.genres
+          : _item?.genre
+            ? [_item.genre]
+            : [],
         tmdbId: entry.tmdbId || entry.pick?.tmdbId || null,
       };
     }
@@ -1601,7 +1769,16 @@
         _resolution = { ..._resolution, imdbId: linkImdb };
       }
 
-      void loadRelatedMovies(tok);
+      // Defer related movies so first series paint / episode load is not blocked.
+      if (typeof requestIdleCallback === "function") {
+        requestIdleCallback(() => {
+          if (isValid(tok)) void loadRelatedMovies(tok);
+        }, { timeout: 3000 });
+      } else {
+        window.setTimeout(() => {
+          if (isValid(tok)) void loadRelatedMovies(tok);
+        }, 600);
+      }
 
       const locale = getLocale();
       const poster = getItemPoster();
@@ -1809,7 +1986,16 @@
   function runPendingSpecialsCheck() {
     if (!_pendingSpecialsCheck) return;
     _pendingSpecialsCheck = false;
-    void silentlyCheckSpecials();
+    const run = () => {
+      if (!isValid(_token)) return;
+      void silentlyCheckSpecials();
+    };
+    // After first episode paint — do not compete with season open network.
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(run, { timeout: 2500 });
+    } else {
+      window.setTimeout(run, 400);
+    }
   }
 
   /** Remove specials from metadata and hide the Specials tab when season 0 is empty. */
@@ -2153,18 +2339,12 @@
       newMarkText,
     });
     if (avgEl) {
-      const seasonEpisodes = (_episodesResult?.seasonNum === seasonNum && Array.isArray(_episodesResult?.episodes))
-        ? _episodesResult.episodes
-        : [];
-      const sourceAvg = seasonAverageExternalRating(seasonEpisodes);
-      const avgSource = episodeExternalRatingSource(seasonEpisodes);
-      avgEl.textContent = sourceAvg != null
-        ? (avgSource === "imdb"
-            ? t("seasons.seasonAvgOmdb", { rating: formatRatingValue(sourceAvg) })
-            : t("seasons.seasonAvgSource", { rating: formatRatingValue(sourceAvg) }))
+      const resolved = resolveSeasonExternalRating(seasonNum);
+      avgEl.textContent = resolved != null
+        ? t("seasons.seasonRatingSource", { rating: formatRatingValue(resolved.value) })
         : "";
-      avgEl.classList.toggle("tds-season-avg-badge", sourceAvg != null);
-      avgEl.hidden = sourceAvg == null;
+      avgEl.classList.toggle("tds-season-avg-badge", resolved != null);
+      avgEl.hidden = resolved == null;
     }
     actionsEl.hidden = _activeTab !== (isSpecials ? "specials" : "seasons");
   }
@@ -2412,20 +2592,11 @@
 
   function episodeExternalRating(ep) {
     const source = String(ep?.episodeRatingSource || "");
-    // IMDb/OMDb ratings (preferred) and TMDB vote_average as fallback.
-    if (source !== "imdb" && source !== "tmdb") return null;
+    // TMDB vote_average only — OMDb episode scores are not used.
+    if (source !== "tmdb") return null;
     const num = Number(ep?.episodeRating);
     if (!Number.isFinite(num) || num <= 0 || num > 10) return null;
     return Math.round(num * 10) / 10;
-  }
-
-  function episodeExternalRatingSource(episodes) {
-    for (const ep of episodes || []) {
-      if (episodeExternalRating(ep) == null) continue;
-      const source = String(ep?.episodeRatingSource || "");
-      if (source === "imdb" || source === "tmdb") return source;
-    }
-    return null;
   }
 
   function episodeUserRating(entry, seasonNum, epNum) {
@@ -2434,13 +2605,46 @@
     return Math.round(num * 10) / 10;
   }
 
-  function seasonAverageExternalRating(episodes) {
-    const vals = (episodes || [])
-      .filter((ep) => ep.isAired !== false)
-      .map((ep) => episodeExternalRating(ep))
-      .filter((v) => v != null);
-    if (!vals.length) return null;
-    return vals.reduce((sum, n) => sum + n, 0) / vals.length;
+  function parseSeriesImdbRating(item) {
+    const raw = item?.imdbRating;
+    if (raw == null || raw === "") return null;
+    const num = Number(String(raw).replace(",", "."));
+    if (!Number.isFinite(num) || num <= 0 || num > 10) return null;
+    return Math.round(num * 10) / 10;
+  }
+
+  function regularSeasonCount() {
+    return (_seriesResult?.seasons || []).filter(
+      (s) => Number(s.seasonNumber) > 0 && !s.isSpecials
+    ).length;
+  }
+
+  /**
+   * Season badge: never average sparse episode ratings.
+   * One-season titles use the series IMDb badge (matches title score).
+   * Multi-season titles use TMDB season vote_average only.
+   */
+  function resolveSeasonExternalRating(seasonNum) {
+    if (Number(seasonNum) <= 0) return null;
+
+    if (regularSeasonCount() === 1) {
+      const seriesImdb = parseSeriesImdbRating(_item);
+      if (seriesImdb != null) {
+        return { value: seriesImdb, source: "imdb" };
+      }
+    }
+
+    if (Number(_episodesResult?.seasonNum) === Number(seasonNum)) {
+      const api = Number(_episodesResult.seasonRating);
+      if (Number.isFinite(api) && api > 0 && api <= 10) {
+        return {
+          value: Math.round(api * 10) / 10,
+          source: String(_episodesResult.seasonRatingSource || "tmdb"),
+        };
+      }
+    }
+
+    return null;
   }
 
   function seasonAverageUserRating(entry, episodes) {
@@ -3157,6 +3361,14 @@
         break;
       }
       case "open-similar-title": {
+        void openSimilarTitle(target.dataset.tdsMovieIndex);
+        break;
+      }
+      case "add-related-movie": {
+        void openRelatedMovie(target.dataset.tdsMovieIndex);
+        break;
+      }
+      case "add-similar-title": {
         void openSimilarTitle(target.dataset.tdsMovieIndex);
         break;
       }

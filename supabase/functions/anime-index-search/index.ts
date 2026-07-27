@@ -392,7 +392,9 @@ Deno.serve(async (req) => {
   }
 
   if (action === "batchSearch") {
-    const requests = Array.isArray(body.requests) ? body.requests : [];
+    const rawRequests = Array.isArray(body.requests) ? body.requests : [];
+    // Hard cap — unbounded batches amplify latency for every client.
+    const requests = rawRequests.slice(0, 40);
     const limit = Math.min(15, Math.max(1, n(body.limit) ?? 10));
     const resultsById: Record<string, unknown> = {};
 

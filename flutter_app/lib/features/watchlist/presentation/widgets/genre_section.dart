@@ -9,6 +9,124 @@ import '../../../../models/watchlist_item.dart';
 import '../../application/card_layout_controller.dart';
 import 'title_card.dart';
 
+/// Builds viewport-lazy genre section slivers for [CustomScrollView].
+List<Widget> buildGenreSectionSlivers({
+  required BuildContext context,
+  required WidgetRef ref,
+  required GenreGroup group,
+  required Map<String, WatchEntry> watched,
+  required L10n l10n,
+  required ValueChanged<WatchlistItem> onItemTap,
+  void Function(WatchlistItem item, TitleCardAction action)? onItemAction,
+}) {
+  final layout = ref.watch(cardLayoutProvider);
+  final theme = Theme.of(context);
+  final tc = theme.extension<AppTypeColors>()!;
+  final themeId = ref.watch(themeIdProvider);
+  final isMobile = AppBreakpoints.isMobile(context);
+  final metrics = _GenreSectionMetrics(isMobile: isMobile);
+  final showHeader = !group.isFlatSorted && group.genre.isNotEmpty;
+  final isPoster = layout == CardLayoutId.poster;
+  final vp = MediaQuery.sizeOf(context).width;
+
+  final int cols;
+  final double gap;
+  if (isPoster) {
+    if (vp <= 420) {
+      cols = 2;
+      gap = 5.6;
+    } else if (vp <= 640) {
+      cols = 3;
+      gap = 6.4;
+    } else if (vp <= 900) {
+      cols = 4;
+      gap = 10;
+    } else {
+      cols = (vp / 220).floor().clamp(4, 7);
+      gap = 18.4;
+    }
+  } else {
+    if (vp <= 420) {
+      cols = 1;
+      gap = 6.4;
+    } else if (vp <= 640) {
+      cols = 2;
+      gap = 7.2;
+    } else {
+      cols = (vp / 280).floor().clamp(2, 5);
+      gap = 17.6;
+    }
+  }
+
+  final SliverGridDelegate gridDelegate;
+  if (isPoster) {
+    final cardWidth = (vp - gap * (cols - 1) - 32) / cols;
+    const footerH = 58.0;
+    gridDelegate = SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: cols,
+      crossAxisSpacing: gap,
+      mainAxisSpacing: gap,
+      mainAxisExtent: cardWidth * 1.5 + footerH,
+    );
+  } else {
+    gridDelegate = SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: cols,
+      crossAxisSpacing: gap,
+      mainAxisSpacing: gap,
+      childAspectRatio: cols == 1 ? 3.0 : 1.35,
+    );
+  }
+
+  final gridSliver = SliverPadding(
+    padding: EdgeInsets.only(
+      left: 16,
+      right: 16,
+      bottom: metrics.sectionBottom,
+    ),
+    sliver: SliverGrid(
+      gridDelegate: gridDelegate,
+      delegate: SliverChildBuilderDelegate(
+        (context, index) {
+          final item = group.items[index];
+          return TitleCard(
+            key: ValueKey(item.id),
+            item: item,
+            watched: watched[item.id],
+            l10n: l10n,
+            layout: layout,
+            onTap: () => onItemTap(item),
+            onAction: onItemAction == null
+                ? null
+                : (action) => onItemAction(item, action),
+          );
+        },
+        childCount: group.items.length,
+        addAutomaticKeepAlives: false,
+      ),
+    ),
+  );
+
+  if (!showHeader) return [gridSliver];
+
+  return [
+    SliverToBoxAdapter(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 0, 16, metrics.headerBottom),
+        child: _GenreSectionHeader(
+          group: group,
+          l10n: l10n,
+          theme: theme,
+          tc: tc,
+          themeId: themeId,
+          metrics: metrics,
+        ),
+      ),
+    ),
+    gridSliver,
+  ];
+}
+
+/// Box-child wrapper (widget tests). Prefer [buildGenreSectionSlivers] in lists.
 class GenreSection extends ConsumerWidget {
   const GenreSection({
     super.key,
@@ -27,108 +145,17 @@ class GenreSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final layout = ref.watch(cardLayoutProvider);
-    final theme = Theme.of(context);
-    final tc = theme.extension<AppTypeColors>()!;
-    final themeId = ref.watch(themeIdProvider);
-    final isMobile = AppBreakpoints.isMobile(context);
-    final metrics = _GenreSectionMetrics(isMobile: isMobile);
-    final showHeader = !group.isFlatSorted && group.genre.isNotEmpty;
-
-    return Padding(
-      padding: EdgeInsets.only(bottom: metrics.sectionBottom),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (showHeader) ...[
-            Padding(
-              padding: EdgeInsets.only(bottom: metrics.headerBottom),
-              child: _GenreSectionHeader(
-                group: group,
-                l10n: l10n,
-                theme: theme,
-                tc: tc,
-                themeId: themeId,
-                metrics: metrics,
-              ),
-            ),
-          ],
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final contentWidth = constraints.maxWidth;
-              final vp = MediaQuery.sizeOf(context).width;
-              final isPoster = layout == CardLayoutId.poster;
-
-              final int cols;
-              final double gap;
-              if (isPoster) {
-                if (vp <= 420) {
-                  cols = 2;
-                  gap = 5.6;
-                } else if (vp <= 640) {
-                  cols = 3;
-                  gap = 6.4;
-                } else if (vp <= 900) {
-                  cols = 4;
-                  gap = 10;
-                } else {
-                  cols = (contentWidth / 220).floor().clamp(4, 7);
-                  gap = 18.4;
-                }
-              } else {
-                if (vp <= 420) {
-                  cols = 1;
-                  gap = 6.4;
-                } else if (vp <= 640) {
-                  cols = 2;
-                  gap = 7.2;
-                } else {
-                  cols = (contentWidth / 280).floor().clamp(2, 5);
-                  gap = 17.6;
-                }
-              }
-
-              final SliverGridDelegate gridDelegate;
-              if (isPoster) {
-                final cardWidth = (contentWidth - gap * (cols - 1)) / cols;
-                const footerH = 58.0;
-                gridDelegate = SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: cols,
-                  crossAxisSpacing: gap,
-                  mainAxisSpacing: gap,
-                  mainAxisExtent: cardWidth * 1.5 + footerH,
-                );
-              } else {
-                gridDelegate = SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: cols,
-                  crossAxisSpacing: gap,
-                  mainAxisSpacing: gap,
-                  childAspectRatio: cols == 1 ? 3.0 : 1.35,
-                );
-              }
-
-              return GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: gridDelegate,
-                itemCount: group.items.length,
-                itemBuilder: (context, index) {
-                  final item = group.items[index];
-                  return TitleCard(
-                    item: item,
-                    watched: watched[item.id],
-                    l10n: l10n,
-                    layout: layout,
-                    onTap: () => onItemTap(item),
-                    onAction: onItemAction == null
-                        ? null
-                        : (action) => onItemAction!(item, action),
-                  );
-                },
-              );
-            },
-          ),
-        ],
+    return CustomScrollView(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      slivers: buildGenreSectionSlivers(
+        context: context,
+        ref: ref,
+        group: group,
+        watched: watched,
+        l10n: l10n,
+        onItemTap: onItemTap,
+        onItemAction: onItemAction,
       ),
     );
   }

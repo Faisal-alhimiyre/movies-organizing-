@@ -143,7 +143,6 @@
 
   function logAnimeCoverFetch(payload = {}) {
     const shouldLog =
-      payload.reason === "provider_cache_missing_poster" ||
       isBulkAddTraceTitle(payload.title) ||
       isAddPipelineDebugEnabled();
     if (!shouldLog) return;

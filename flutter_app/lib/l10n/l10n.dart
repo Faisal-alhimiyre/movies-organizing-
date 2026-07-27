@@ -187,12 +187,31 @@ class L10n {
   String get detailTabSeasons => _ar ? 'المواسم' : 'Seasons';
   String get detailTabSpecials => _ar ? 'حلقات خاصة' : 'Specials';
   String get detailTabMovies => _ar ? 'أفلام' : 'Movies';
+  String get detailTabSimilar => _ar ? 'مشابه' : 'Similar';
+  String get detailSimilarSectionTitle =>
+      _ar ? 'أفلام أخرى قد تعجبك' : 'Other movies that you might like';
+  String get detailSimilarLoading =>
+      _ar ? 'جاري تحميل العناوين المشابهة…' : 'Loading similar titles…';
+  String get detailSimilarEmpty =>
+      _ar ? 'لا توجد عناوين مشابهة.' : 'No similar titles found.';
   String get detailRelatedMoviesEmpty => _ar
       ? 'لا توجد أفلام مرتبطة بهذا العنوان'
       : 'no movies related to this title';
+  String get detailRelatedMovieAdd =>
+      _ar ? 'اضغط للإضافة إلى قائمتك' : 'Tap to add to your list';
+  String get detailRelatedMovieOnList => _ar ? 'في قائمتك' : 'In your list';
   String get detailRelatedSpecialsEmpty => _ar
       ? 'لا توجد حلقات خاصة لهذا العنوان.'
       : 'No specials for this title.';
+  String get ageRatingAges17 => _ar ? 'سن 17+' : 'Ages 17+';
+  String get typeMovie => _ar ? 'فيلم' : 'Movie';
+  String get typeSeries => _ar ? 'مسلسل' : 'TV Series';
+  String seasonsBadge(int count) => _ar
+      ? (count == 1 ? 'موسم واحد' : '$count مواسم')
+      : (count == 1 ? '1 season' : '$count seasons');
+  String episodesBadge(int count) => _ar
+      ? (count == 1 ? 'حلقة واحدة' : '$count حلقات')
+      : (count == 1 ? '1 episode' : '$count episodes');
   String get detailMovieProgressHint => _ar
       ? 'اختر أين توقفت'
       : 'Select where you left off';
@@ -245,6 +264,9 @@ class L10n {
   String seasonsEpisodeRatingYours(double rating) => _ar
       ? 'تقييمك ${formatWatchRating(rating)}/10'
       : 'You ${formatWatchRating(rating)}/10';
+  String seasonsSeasonRatingSource(double rating) => _ar
+      ? 'تقييم الموسم ${formatWatchRating(rating)}/10'
+      : "Season's rating ${formatWatchRating(rating)}/10";
   String seasonsSeasonAvgSource(double rating) => _ar
       ? 'متوسط الموسم ${formatWatchRating(rating)}/10'
       : 'Season avg ${formatWatchRating(rating)}/10';

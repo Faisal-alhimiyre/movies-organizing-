@@ -3860,10 +3860,14 @@ html[data-theme] .header__toolbar .btn--primary:hover {
 }
 
 .title-search-confirm__plot {
-  margin: 0;
+  margin: 0.35rem 0 0;
+  padding: 0.7rem 0.8rem;
   font-size: 0.82rem;
   line-height: 1.45;
-  color: var(--text-muted);
+  color: var(--text-secondary, #c8c8c8);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border, #363636);
+  border-radius: 10px;
 }
 
 .title-search-confirm__fields {

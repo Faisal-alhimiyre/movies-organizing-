@@ -45,7 +45,6 @@ async function acquireToken(forceRefresh = false): Promise<string> {
     console.error("[tvdb-metadata] TVDB_API_KEY secret is not set");
     throw new Error("TVDB_API_KEY is not configured");
   }
-  console.log("[tvdb-metadata] login attempt, key length:", apiKey.length);
 
   const pin = Deno.env.get("TVDB_PIN");
   const loginBody: Record<string, string> = { apikey: apiKey };
@@ -138,19 +137,25 @@ async function enrichEpisodeStills(
 ): Promise<void> {
   const missing = episodes.filter((ep) => !ep.still && ep.tvdbEpId);
   if (!missing.length) return;
-  await Promise.all(
-    missing.slice(0, 48).map(async (ep) => {
-      try {
-        const data = (await tvdbGet(`/episodes/${ep.tvdbEpId}`)) as {
-          data?: { image?: unknown };
-        };
-        const url = imgUrl(data?.data?.image);
-        if (url) ep.still = url;
-      } catch {
-        // leave empty — renderer shows placeholder
-      }
-    }),
-  );
+  // Cap parallelism — 48 concurrent episode fetches saturates mobile season open.
+  const STILL_CONCURRENCY = 8;
+  const capped = missing.slice(0, 48);
+  for (let i = 0; i < capped.length; i += STILL_CONCURRENCY) {
+    const batch = capped.slice(i, i + STILL_CONCURRENCY);
+    await Promise.all(
+      batch.map(async (ep) => {
+        try {
+          const data = (await tvdbGet(`/episodes/${ep.tvdbEpId}`)) as {
+            data?: { image?: unknown };
+          };
+          const url = imgUrl(data?.data?.image);
+          if (url) ep.still = url;
+        } catch {
+          // leave empty — renderer shows placeholder
+        }
+      }),
+    );
+  }
 }
 
 function isAired(dateStr: string | null): boolean {

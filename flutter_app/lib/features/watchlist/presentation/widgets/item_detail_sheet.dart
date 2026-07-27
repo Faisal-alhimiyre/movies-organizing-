@@ -194,9 +194,9 @@ class _ItemDetailSheetState extends ConsumerState<ItemDetailSheet> {
     MetadataDetail? meta;
     final imdbId = getImdbIdFromItem(widget.item);
     if (imdbId != null) {
-      meta = await metadata.getMetadata(imdbId, forceRefresh: true);
+      meta = await metadata.getMetadata(imdbId, forceRefresh: false);
     } else if (MetadataService.isSupportedLink(link)) {
-      meta = await metadata.resolveMetadataFromLink(link, forceRefresh: true);
+      meta = await metadata.resolveMetadataFromLink(link, forceRefresh: false);
     }
     if (!mounted || meta == null) return;
 
@@ -713,7 +713,9 @@ class _DetailContent extends StatelessWidget {
             embedded: true,
             onSeasonPresentation: onSeasonPresentation,
             onHeaderReset: onHeaderReset,
-          ),
+          )
+        else if (item.contentType == 'movies')
+          MovieSimilarPanel(l10n: l10n, item: item),
       ],
     );
   }

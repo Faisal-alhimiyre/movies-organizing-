@@ -1,0 +1,35 @@
+---
+description: Usability first — forbid laggy features and noisy background work
+alwaysApply: true
+---
+
+# Usability first (no lag, no background noise)
+
+**Top priority:** the website must stay fast and usable. Features are secondary when they hurt that.
+
+## Forbidden without an explicit user ask + a light plan
+
+- Features that add **continuous or bursty background work** (polling, mass API enrichment, per-item refetch storms, full-list re-renders to update one field)
+- Always-on **debug / trace / verbose console logging** in production paths
+- “Nice to have” metadata completeness that **blocks first paint**, freezes scroll, or tears down lazy-loaded images
+- New network calls on every card / every episode / every keystroke unless clearly throttled and idle-deferred
+
+## Required approach
+
+1. **Ship the interaction first** — open detail, mark watched, scroll the list must feel instant.
+2. **Work around incomplete data** — show blanks, cache, defer, or use a lighter API field rather than hammering sources to fill every gap.
+3. **Idle / timeout backfill only** — background enrichment must not call full `render()` or rebuild the whole list when a patch/`syncListCard` is enough.
+4. **Prefer one cached bulk call** over N per-episode/per-title calls.
+5. If a feature needs heavy work, **propose the cost** (APIs, re-renders, battery) and wait for approval before implementing.
+
+## Good vs bad
+
+```text
+❌ BAD: On load, refetch ratings for every episode; log each result; full re-render after each patch
+✅ GOOD: Use cached season payload; show rating only when present; idle-backfill missing fields; patch one card
+
+❌ BAD: Add a “complete IMDb coverage” loop that hits OMDb per episode
+✅ GOOD: Accept sparse episode ratings; use season-level API score when available
+```
+
+When in doubt: **skip the feature or degrade gracefully** rather than add background noise.

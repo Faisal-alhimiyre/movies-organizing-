@@ -279,7 +279,7 @@ class SupabaseSyncRepository {
 
       return true;
     } catch (error, stackTrace) {
-      debugPrint('[sync] pushSnapshot failed: $error\n$stackTrace');
+      if (kDebugMode) debugPrint('[sync] pushSnapshot failed: $error\n$stackTrace');
       return false;
     }
   }
@@ -305,7 +305,7 @@ class SupabaseSyncRepository {
 
       return (ok: true, shareId: shareId, error: null);
     } catch (error, stackTrace) {
-      debugPrint('[sync] publishShareSnapshot failed: $error\n$stackTrace');
+      if (kDebugMode) debugPrint('[sync] publishShareSnapshot failed: $error\n$stackTrace');
       return (ok: false, shareId: null, error: 'publish_failed');
     }
   }
@@ -385,7 +385,7 @@ class SupabaseSyncRepository {
 
       return true;
     } catch (error, stackTrace) {
-      debugPrint('[sync] createListRow failed: $error\n$stackTrace');
+      if (kDebugMode) debugPrint('[sync] createListRow failed: $error\n$stackTrace');
       return false;
     }
   }
@@ -420,7 +420,7 @@ class SupabaseSyncRepository {
 
       return true;
     } catch (error, stackTrace) {
-      debugPrint('[sync] updateListMeta failed: $error\n$stackTrace');
+      if (kDebugMode) debugPrint('[sync] updateListMeta failed: $error\n$stackTrace');
       return false;
     }
   }
@@ -434,7 +434,7 @@ class SupabaseSyncRepository {
       await client.from(listsTable).delete().eq('list_id', listId);
       return true;
     } catch (error, stackTrace) {
-      debugPrint('[sync] deleteList failed: $error\n$stackTrace');
+      if (kDebugMode) debugPrint('[sync] deleteList failed: $error\n$stackTrace');
       return false;
     }
   }
@@ -447,7 +447,7 @@ class SupabaseSyncRepository {
       await client.from(accountsTable).delete().eq('account_id', accountId);
       return true;
     } catch (error, stackTrace) {
-      debugPrint('[sync] deleteAccount failed: $error\n$stackTrace');
+      if (kDebugMode) debugPrint('[sync] deleteAccount failed: $error\n$stackTrace');
       return false;
     }
   }
@@ -480,7 +480,7 @@ class SupabaseSyncRepository {
       await client.from(accountsTable).delete().eq('account_id', oldAccountId);
       return true;
     } catch (error, stackTrace) {
-      debugPrint('[sync] migrateAccount failed: $error\n$stackTrace');
+      if (kDebugMode) debugPrint('[sync] migrateAccount failed: $error\n$stackTrace');
       return false;
     }
   }

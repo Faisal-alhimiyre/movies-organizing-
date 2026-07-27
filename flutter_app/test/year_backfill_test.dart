@@ -82,4 +82,25 @@ void main() {
     expect(updated.year, 2020);
     expect(updated.anilistRating, '90');
   });
+
+  test('applyYearBackfillResult preserves cardPoster and season fields', () {
+    final base = WatchlistItem(
+      id: 'id',
+      contentType: 'tvSeries',
+      genre: 'Drama',
+      title: 'Test',
+      link: 'https://www.imdb.com/title/tt1234567/',
+      poster: 'https://example.com/poster.jpg',
+      cardPoster: 'https://example.com/season-poster.jpg',
+      selectedSeason: 3,
+      selectedSeasonName: 'Season 3',
+      imdbLink: 'https://www.imdb.com/title/tt1234567/',
+    );
+    final updated = applyYearBackfillResult(base, year: 2011);
+    expect(updated.cardPoster, 'https://example.com/season-poster.jpg');
+    expect(updated.selectedSeason, 3);
+    expect(updated.selectedSeasonName, 'Season 3');
+    expect(updated.imdbLink, 'https://www.imdb.com/title/tt1234567/');
+    expect(updated.poster, 'https://example.com/poster.jpg');
+  });
 }

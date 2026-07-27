@@ -7,7 +7,7 @@ import 'year_backfill.dart';
 const posterEnrichmentThrottle = Duration(milliseconds: 280);
 
 bool hasValidPoster(WatchlistItem item) {
-  final poster = item.poster?.trim();
+  final poster = item.displayPoster?.trim();
   return poster != null && poster.startsWith('http');
 }
 

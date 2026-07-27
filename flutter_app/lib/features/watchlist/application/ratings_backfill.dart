@@ -43,7 +43,12 @@ WatchlistItem applyRatingsBackfillResult(
     summary: item.summary,
     kind: item.kind,
     link: item.link,
+    imdbLink: item.imdbLink,
     poster: item.poster,
+    cardPoster: item.cardPoster,
+    selectedSeason: item.selectedSeason,
+    selectedSeasonName: item.selectedSeasonName,
+    noSpecials: item.noSpecials,
     imdbRating: item.imdbRating ??
         (imdbRating != null && imdbRating.isNotEmpty ? imdbRating : null),
     anilistRating: item.anilistRating ??

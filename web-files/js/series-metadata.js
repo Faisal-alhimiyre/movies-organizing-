@@ -26,7 +26,7 @@
  *   metadata:v5:seasons:tmdb:<id>:<locale>             7 days   (alias, same entry)
  *   metadata:v6:season:tmdb:<id>:<n>:<locale>         24 hours  (v6 fixes episode stills)
  *   metadata:v7:season:omdb:<imdbId>:<n>              24 hours  (v7 rejects zero ratings)
- *   metadata:v8:season:ratings:tmdb:<id>:<n>:<locale>  24 hours  (TMDB episode ratings)
+ *   metadata:v9:season:ratings:tmdb:<id>:<n>:<locale>  24 hours  (TMDB episode + season ratings)
  *   metadata:v5:episodes:anilist:<id>                 24 hours
  *   metadata:v16:episodes:anilist:<id>:<season>       24 hours  (v16: drop poisoned v15)
  *   metadata:v8:series:tvdb:<id>:<locale>              7 days   (TheTVDB + locale)
@@ -136,6 +136,52 @@
     }
   }
   const TMDB_API_BASE = "https://api.themoviedb.org/3";
+
+  /** TMDB genre_ids → English labels (list endpoints only return IDs). */
+  const TMDB_GENRE_NAMES = Object.freeze({
+    28: "Action",
+    12: "Adventure",
+    16: "Animation",
+    35: "Comedy",
+    80: "Crime",
+    99: "Documentary",
+    18: "Drama",
+    10751: "Family",
+    14: "Fantasy",
+    36: "History",
+    27: "Horror",
+    10402: "Music",
+    9648: "Mystery",
+    10749: "Romance",
+    878: "Sci-Fi",
+    10770: "TV Movie",
+    53: "Thriller",
+    10752: "War",
+    37: "Western",
+    10759: "Action & Adventure",
+    10762: "Kids",
+    10763: "News",
+    10764: "Reality",
+    10765: "Sci-Fi & Fantasy",
+    10766: "Soap",
+    10767: "Talk",
+    10768: "War & Politics",
+  });
+
+  function genresFromTmdbIds(ids) {
+    if (!Array.isArray(ids)) return [];
+    const out = [];
+    const seen = new Set();
+    for (const raw of ids) {
+      const id = Number(raw);
+      const name = TMDB_GENRE_NAMES[id];
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      out.push(name);
+      if (out.length >= 4) break;
+    }
+    return out;
+  }
 
   // ─── TTLs (milliseconds) ──────────────────────────────────────
   const TTL_SERIES = 7 * 24 * 60 * 60 * 1000;        // 7 days
@@ -292,11 +338,23 @@
     const enByKey = new Map(
       enResult.episodes.map((ep) => [ep.progressKey || `${ep.seasonNumber}:${ep.episodeNumber}`, ep])
     );
+    const seasonRating =
+      parseExternalRating(localResult.seasonRating) ??
+      parseExternalRating(enResult.seasonRating);
     return {
       ...localResult,
       seasonOverview: cleanEpisodeOverviewText(
         pickLocalizedOverview(localResult.seasonOverview, enResult.seasonOverview)
       ),
+      ...(seasonRating != null
+        ? {
+            seasonRating,
+            seasonRatingSource:
+              localResult.seasonRatingSource ||
+              enResult.seasonRatingSource ||
+              "tmdb",
+          }
+        : {}),
       episodes: localResult.episodes.map((ep) => {
         const key = ep.progressKey || `${ep.seasonNumber}:${ep.episodeNumber}`;
         const enEp = enByKey.get(key);
@@ -2152,7 +2210,8 @@
     if (!result?.episodes?.length || !hasTmdbRatingsAccess()) return result;
 
     const needsRating = (result.episodes || []).some(episodeNeedsExternalRating);
-    if (!needsRating) return result;
+    const needsSeasonRating = parseExternalRating(result.seasonRating) == null;
+    if (!needsRating && !needsSeasonRating) return result;
 
     let tmdbId = resolution?.tmdbId;
     if (!tmdbId) {
@@ -2177,12 +2236,22 @@
     }
     if (!tmdbId) return result;
 
-    const byEpisode = await fetchEpisodeRatingMap(tmdbId, seasonNumber, locale);
-    if (!byEpisode?.size) return result;
+    const ratingPayload = await fetchEpisodeRatingMap(tmdbId, seasonNumber, locale);
+    if (!ratingPayload) return result;
 
-    return {
-      ...result,
-      episodes: (result.episodes || []).map((ep) => {
+    const byEpisode = ratingPayload.byEpisode;
+    const seasonRating =
+      parseExternalRating(result.seasonRating) ??
+      parseExternalRating(ratingPayload.seasonRating);
+
+    let next = { ...result };
+    if (seasonRating != null) {
+      next.seasonRating = seasonRating;
+      next.seasonRatingSource = result.seasonRatingSource || "tmdb";
+    }
+
+    if (byEpisode?.size) {
+      next.episodes = (result.episodes || []).map((ep) => {
         if (!episodeNeedsExternalRating(ep)) return ep;
         const num = Number(ep?.episodeNumber);
         const tmdbRating = byEpisode.get(num);
@@ -2192,8 +2261,10 @@
           episodeRating: tmdbRating,
           episodeRatingSource: "tmdb",
         };
-      }),
-    };
+      });
+    }
+
+    return next;
   }
 
   async function enrichEpisodeRatings(
@@ -2206,7 +2277,7 @@
     seasonSummary = null,
     preResolvedImdb = null
   ) {
-    // TMDB first — complete per-episode ratings. OMDb season bulk is often incomplete.
+    // TMDB for ratings. Skip OMDb when TMDB already covered ratings + air/titles.
     let enriched = await enrichEpisodesWithTmdbRatings(
       result,
       resolution,
@@ -2217,15 +2288,28 @@
       seasonSummary,
       preResolvedImdb
     );
-    enriched = await enrichEpisodesWithOmdbRatings(
-      enriched,
-      resolution,
-      seasonNumber,
-      item,
-      seasonSummary,
-      locale,
-      preResolvedImdb
-    );
+    const eps = enriched?.episodes || [];
+    const needsOmdbFill = eps.some((ep) => {
+      if (!ep.airDate) return true;
+      if (
+        locale !== "ar" &&
+        (!ep.title || isGenericEpisodeTitle(ep.title, Number(ep.episodeNumber)))
+      ) {
+        return true;
+      }
+      return false;
+    });
+    if (needsOmdbFill) {
+      enriched = await enrichEpisodesWithOmdbRatings(
+        enriched,
+        resolution,
+        seasonNumber,
+        item,
+        seasonSummary,
+        locale,
+        preResolvedImdb
+      );
+    }
     return enriched;
   }
 
@@ -2644,12 +2728,19 @@
   }
 
   async function fetchEpisodeRatingMap(tmdbId, seasonNumber, locale) {
-    const cacheKey = `metadata:v8:season:ratings:tmdb:${tmdbId}:${seasonNumber}:${locale}`;
+    // v9: also caches season-level vote_average from the same TMDB season call.
+    const cacheKey = `metadata:v9:season:ratings:tmdb:${tmdbId}:${seasonNumber}:${locale}`;
     const cached = readCached(cacheKey, TTL_EPISODES);
     const fromCache = ratingMapFromCacheObject(cached?.byEpisode);
-    if (fromCache) return fromCache;
+    if (fromCache || parseExternalRating(cached?.seasonRating) != null) {
+      return {
+        byEpisode: fromCache || new Map(),
+        seasonRating: parseExternalRating(cached?.seasonRating),
+      };
+    }
 
     let byEpisode = null;
+    let seasonRating = null;
 
     if (getTmdbKey()) {
       const json = await fetchTmdb(`tv/${tmdbId}/season/${seasonNumber}`, {
@@ -2658,40 +2749,57 @@
       if (json?.episodes?.length) {
         byEpisode = buildTmdbRatingMap(json.episodes);
       }
-      if (!byEpisode?.size && locale !== "en") {
+      seasonRating = parseExternalRating(json?.vote_average);
+      if ((!byEpisode?.size || seasonRating == null) && locale !== "en") {
         const enJson = await fetchTmdb(`tv/${tmdbId}/season/${seasonNumber}`, {
           language: "en-US",
         });
-        if (enJson?.episodes?.length) {
+        if (!byEpisode?.size && enJson?.episodes?.length) {
           byEpisode = buildTmdbRatingMap(enJson.episodes);
+        }
+        if (seasonRating == null) {
+          seasonRating = parseExternalRating(enJson?.vote_average);
         }
       }
     } else if (window.WatchlistTmdb?.fetchSeasonRatings) {
-      let rows = await window.WatchlistTmdb.fetchSeasonRatings(
+      let payload = await window.WatchlistTmdb.fetchSeasonRatings(
         tmdbId,
         seasonNumber,
         locale
       );
-      if (!rows?.length && locale !== "en") {
-        rows = await window.WatchlistTmdb.fetchSeasonRatings(
+      if ((!payload?.episodes?.length || payload.seasonRating == null) && locale !== "en") {
+        const enPayload = await window.WatchlistTmdb.fetchSeasonRatings(
           tmdbId,
           seasonNumber,
           "en"
         );
+        if (enPayload) {
+          payload = {
+            episodes: payload?.episodes?.length ? payload.episodes : enPayload.episodes,
+            seasonRating: payload?.seasonRating ?? enPayload.seasonRating,
+          };
+        }
       }
-      if (rows?.length) {
-        byEpisode = buildTmdbRatingMap(rows);
+      if (payload?.episodes?.length) {
+        byEpisode = buildTmdbRatingMap(payload.episodes);
       }
+      seasonRating = parseExternalRating(payload?.seasonRating);
     }
 
-    if (!byEpisode?.size) return null;
+    if (!byEpisode?.size && seasonRating == null) return null;
 
     writeSeriesCacheEntry(
       cacheKey,
-      { byEpisode: Object.fromEntries(byEpisode) },
+      {
+        ...(byEpisode?.size ? { byEpisode: Object.fromEntries(byEpisode) } : {}),
+        ...(seasonRating != null ? { seasonRating } : {}),
+      },
       TTL_EPISODES
     );
-    return byEpisode;
+    return {
+      byEpisode: byEpisode || new Map(),
+      seasonRating,
+    };
   }
 
   function hasTmdbRatingsAccess() {
@@ -2757,13 +2865,8 @@
 
         let next = { ...ep };
 
-        if (episodeNeedsExternalRating(ep)) {
-          const omdbRating = Number(omdbEp.episodeRating);
-          if (Number.isFinite(omdbRating) && omdbRating > 0 && omdbRating <= 10) {
-            next.episodeRating = Math.round(omdbRating * 10) / 10;
-            next.episodeRatingSource = "imdb";
-          }
-        }
+        // Do not use OMDb for episode scores — season bulk ratings are sparse/misleading.
+        // Keep OMDb only for air dates / English titles when needed.
 
         if (!next.airDate && omdbEp.airDate) {
           next.airDate = omdbEp.airDate;
@@ -2830,6 +2933,7 @@
   function normalizeTmdbSeasonEpisodes(json, tmdbId, season, fallbackPoster = "") {
     const posterPath = json.poster_path;
     const seasonPoster = posterPath ? `${TMDB_IMAGE}${posterPath}` : fallbackPoster;
+    const seasonRating = parseExternalRating(json.vote_average);
     const rawEps = json.episodes || [];
     const episodes = rawEps
       .map((ep) => normalizeTmdbEpisode(ep, tmdbId, seasonPoster, fallbackPoster))
@@ -2839,6 +2943,9 @@
       episodes,
       seasonPoster,
       seasonOverview: cleanEpisodeOverviewText(json.overview || ""),
+      ...(seasonRating != null
+        ? { seasonRating, seasonRatingSource: "tmdb" }
+        : {}),
     };
   }
 
@@ -2885,6 +2992,10 @@
     type
     format
     episodes
+    duration
+    averageScore
+    isAdult
+    genres
     title { english romaji native }
     coverImage { large }
     description(asHtml: false)
@@ -3047,6 +3158,12 @@
     const title =
       node.title?.english || node.title?.romaji || node.title?.native || "";
     const duration = parsePositiveCount(node.duration);
+    const genres = Array.isArray(node.genres)
+      ? node.genres.map((g) => String(g || "").trim()).filter(Boolean).slice(0, 4)
+      : [];
+    const format = anilistSeasonFormat(node?.format);
+    const episodeCount = parsePositiveCount(node?.episodes);
+    const isMovie = format === "MOVIE" || format === "SPECIAL";
     return {
       source: "anilist",
       anilistId: Number(node.id),
@@ -3056,6 +3173,13 @@
       overview: stripHtml(node.description || ""),
       runtimeMinutes: duration,
       score: node.averageScore != null ? Number(node.averageScore) : null,
+      genres,
+      ageRating: node?.isAdult ? "R" : "",
+      episodeCount: episodeCount || null,
+      seasonCount: isMovie ? null : 1,
+      adult: node?.isAdult === true,
+      contentType: "anime",
+      format,
       pick: { anilistId: Number(node.id), source: "anilist" },
     };
   }
@@ -3246,6 +3370,11 @@
     const title =
       node?.title?.english || node?.title?.romaji || node?.title?.native || "";
     const duration = parsePositiveCount(node?.duration);
+    const genres = Array.isArray(node?.genres)
+      ? node.genres.map((g) => String(g || "").trim()).filter(Boolean).slice(0, 4)
+      : [];
+    const episodeCount = parsePositiveCount(node?.episodes);
+    const isMovie = format === "MOVIE" || format === "SPECIAL";
     return {
       source: "anilist",
       anilistId: Number(node.id),
@@ -3255,6 +3384,11 @@
       overview: stripHtml(node?.description || ""),
       runtimeMinutes: duration,
       score: node?.averageScore != null ? Number(node.averageScore) : null,
+      genres,
+      ageRating: node?.isAdult ? "R" : "",
+      episodeCount: episodeCount || null,
+      seasonCount: isMovie ? null : 1,
+      adult: node?.isAdult === true,
       contentType: "anime",
       format,
       pick: { anilistId: Number(node.id), source: "anilist" },
@@ -3402,6 +3536,8 @@
                 episodes
                 duration
                 averageScore
+                isAdult
+                genres
                 title { english romaji native }
                 coverImage { large }
                 description(asHtml: false)
@@ -3436,62 +3572,249 @@
     };
   }
 
-  async function fetchTmdbSimilarTitles(resolution, item, locale) {
-    const Tmdb = window.WatchlistTmdb;
-    if (!Tmdb?.fetchSimilar || !Tmdb.isAvailable?.()) {
-      return { state: ResultState.NO_SEASONS, titles: [] };
-    }
+  function resolveItemImdbId(item, resolution) {
+    const fromRes = String(resolution?.imdbId || "").trim().toLowerCase();
+    if (/^tt\d{6,10}$/.test(fromRes)) return fromRes;
 
-    const imdbId =
-      resolution?.imdbId ||
-      window.WatchlistMetadata?.extractImdbId?.(item?.imdbLink) ||
-      window.WatchlistMetadata?.extractImdbId?.(item?.link) ||
-      "";
-    const tmdbId = Number(resolution?.tmdbId) || Number(item?.tmdbId) || null;
-    const mediaType = item?.contentType === "movies" ? "movie" : "tv";
-    const cacheKey = `metadata:v1:similar:tmdb:${mediaType}:${tmdbId || imdbId || "x"}:${locale}`;
-    const cached = readCached(cacheKey, TTL_SERIES);
-    if (cached?.titles) {
+    const raw = String(item?.imdbId || "").trim().toLowerCase();
+    if (/^tt\d{6,10}$/.test(raw)) return raw;
+    if (/^\d{6,10}$/.test(raw)) return `tt${raw}`;
+
+    const WM = window.WatchlistMetadata;
+    return (
+      WM?.extractImdbId?.(item?.imdbLink) ||
+      WM?.extractImdbId?.(item?.link) ||
+      ""
+    );
+  }
+
+  function resolveItemTmdbId(item, resolution, preferMediaType) {
+    const fromRes = Number(resolution?.tmdbId);
+    if (Number.isFinite(fromRes) && fromRes > 0) {
+      return { tmdbId: fromRes, mediaType: preferMediaType };
+    }
+    const fromItem = Number(item?.tmdbId);
+    if (Number.isFinite(fromItem) && fromItem > 0) {
+      return { tmdbId: fromItem, mediaType: preferMediaType };
+    }
+    const parsed = window.WatchlistMetadata?.extractTmdbId?.(item?.link);
+    if (parsed?.tmdbId) {
       return {
-        state: cached.titles.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
+        tmdbId: Number(parsed.tmdbId),
+        mediaType: parsed.mediaType === "movie" ? "movie" : parsed.mediaType === "tv" ? "tv" : preferMediaType,
+      };
+    }
+    return { tmdbId: null, mediaType: preferMediaType };
+  }
+
+  function mapTmdbSimilarRows(rows, mediaType, selfTmdbId) {
+    const IMG = "https://image.tmdb.org/t/p/w342";
+    const seen = new Set();
+    const titles = [];
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const id = Number(row.id || row.tmdbId) || 0;
+      if (!id || seen.has(id) || id === selfTmdbId) continue;
+      seen.add(id);
+      const title = String(row.title || row.name || "").trim();
+      if (!title) continue;
+      const date = String(row.release_date || row.first_air_date || "");
+      const year = date.length >= 4 ? date.substring(0, 4) : String(row.year || "");
+      const posterPath = String(row.poster_path || "");
+      const poster = row.poster
+        ? String(row.poster)
+        : posterPath
+          ? `${IMG}${posterPath}`
+          : "";
+      const vote = Number(row.vote_average);
+      const score =
+        row.score != null
+          ? Number(row.score)
+          : Number.isFinite(vote) && vote > 0
+            ? Math.round(vote * 10)
+            : null;
+      const genres = Array.isArray(row.genres) && row.genres.length
+        ? row.genres.map((g) => String(g || "").trim()).filter(Boolean)
+        : genresFromTmdbIds(row.genre_ids || row.genreIds);
+      const seasonCount =
+        parsePositiveCount(row.seasonCount ?? row.number_of_seasons) || null;
+      const episodeCount =
+        parsePositiveCount(row.episodeCount ?? row.number_of_episodes) || null;
+      const ageRating = String(row.ageRating || row.contentRating || "").trim();
+      const runtimeMinutes =
+        parsePositiveCount(row.runtimeMinutes ?? row.runtime) || null;
+      titles.push({
+        source: "tmdb",
+        tmdbId: id,
+        title,
+        poster,
+        year,
+        overview: String(row.overview || ""),
+        score,
+        genres,
+        ageRating,
+        seasonCount,
+        episodeCount,
+        runtimeMinutes,
+        adult: row.adult === true,
+        contentType: mediaType === "movie" ? "movies" : "tvSeries",
+        pick: {
+          source: "tmdb",
+          tmdbId: id,
+          tmdbType: mediaType,
+          title,
+          year,
+        },
+      });
+      if (titles.length >= 24) break;
+    }
+    return titles;
+  }
+
+  function pickTmdbContentRating(details) {
+    const results = details?.content_ratings?.results;
+    if (!Array.isArray(results)) return "";
+    const prefer = ["US", "GB", "CA", "AU"];
+    for (const iso of prefer) {
+      const hit = results.find(
+        (r) => String(r?.iso_3166_1 || "").toUpperCase() === iso
+      );
+      const rating = String(hit?.rating || "").trim();
+      if (rating) return rating;
+    }
+    for (const row of results) {
+      const rating = String(row?.rating || "").trim();
+      if (rating) return rating;
+    }
+    return "";
+  }
+
+  async function enrichTmdbTvSimilarMeta(titles, locale) {
+    if (!Array.isArray(titles) || !titles.length || !getTmdbKey()) return titles;
+    const lang = String(locale || "en").startsWith("ar") ? "ar-SA" : "en-US";
+    const slice = titles.slice(0, 12);
+    await Promise.all(
+      slice.map(async (entry) => {
+        const id = Number(entry?.tmdbId);
+        if (!Number.isFinite(id) || id <= 0) return;
+        if (entry.seasonCount && entry.episodeCount && entry.ageRating) return;
+        const details = await fetchTmdb(`tv/${id}`, {
+          language: lang,
+          append_to_response: "content_ratings",
+        });
+        if (!details) return;
+        const seasons = parsePositiveCount(details.number_of_seasons);
+        const episodes = parsePositiveCount(details.number_of_episodes);
+        const age = pickTmdbContentRating(details);
+        if (seasons) entry.seasonCount = seasons;
+        if (episodes) entry.episodeCount = episodes;
+        if (age) entry.ageRating = age;
+        if (details.adult === true) entry.adult = true;
+      })
+    );
+    return titles;
+  }
+
+  async function fetchTmdbSimilarViaDirectApi(tmdbId, mediaType, locale) {
+    if (!getTmdbKey() || !tmdbId) return null;
+    const lang = String(locale || "en").startsWith("ar") ? "ar-SA" : "en-US";
+    const [similarJson, recJson] = await Promise.all([
+      fetchTmdb(`${mediaType}/${tmdbId}/similar`, { language: lang, page: "1" }),
+      fetchTmdb(`${mediaType}/${tmdbId}/recommendations`, {
+        language: lang,
+        page: "1",
+      }),
+    ]);
+    const rows = [
+      ...(Array.isArray(recJson?.results) ? recJson.results : []),
+      ...(Array.isArray(similarJson?.results) ? similarJson.results : []),
+    ];
+    let titles = mapTmdbSimilarRows(rows, mediaType, tmdbId);
+    if (mediaType === "tv" && titles?.length) {
+      titles = await enrichTmdbTvSimilarMeta(titles, locale);
+    }
+    return titles;
+  }
+
+  async function resolveTmdbIdForSimilar(imdbId, mediaType) {
+    if (!imdbId) return null;
+    if (getTmdbKey()) {
+      const findJson = await fetchTmdb(`find/${imdbId}`, {
+        external_source: "imdb_id",
+      });
+      const movieHit = Array.isArray(findJson?.movie_results)
+        ? findJson.movie_results[0]
+        : null;
+      const tvHit = Array.isArray(findJson?.tv_results)
+        ? findJson.tv_results[0]
+        : null;
+      if (mediaType === "movie" && movieHit?.id) return Number(movieHit.id);
+      if (mediaType === "tv" && tvHit?.id) return Number(tvHit.id);
+      if (movieHit?.id) return Number(movieHit.id);
+      if (tvHit?.id) return Number(tvHit.id);
+      return null;
+    }
+    const Tmdb = window.WatchlistTmdb;
+    if (Tmdb?.resolveByImdb && mediaType === "tv") {
+      return Tmdb.resolveByImdb(imdbId);
+    }
+    return null;
+  }
+
+  async function fetchTmdbSimilarTitles(resolution, item, locale) {
+    const preferMediaType = item?.contentType === "movies" ? "movie" : "tv";
+    const imdbId = resolveItemImdbId(item, resolution);
+    let { tmdbId, mediaType } = resolveItemTmdbId(item, resolution, preferMediaType);
+
+    const cacheKey = `metadata:v4:similar:tmdb:${mediaType}:${tmdbId || imdbId || "x"}:${locale}`;
+    const cached = readCached(cacheKey, TTL_SERIES);
+    if (Array.isArray(cached?.titles) && cached.titles.length) {
+      return {
+        state: ResultState.AVAILABLE,
         titles: cached.titles,
         isStale: isStale(cacheKey, TTL_SERIES),
       };
     }
 
-    const result = await Tmdb.fetchSimilar({
-      tmdbId: Number.isFinite(tmdbId) && tmdbId > 0 ? tmdbId : null,
-      mediaType,
-      imdbId,
-      locale,
-    });
-    if (!result?.ok) {
-      return { state: ResultState.OFFLINE_NO_CACHE, titles: [] };
+    if ((!tmdbId || tmdbId <= 0) && imdbId) {
+      tmdbId = await resolveTmdbIdForSimilar(imdbId, mediaType);
     }
 
-    const titles = (result.results || []).map((row) => ({
-      source: "tmdb",
-      tmdbId: Number(row.tmdbId) || null,
-      title: row.title || "",
-      poster: row.poster || "",
-      year: row.year || "",
-      overview: row.overview || "",
-      score: row.score != null ? Number(row.score) : null,
-      contentType: row.contentType || (mediaType === "movie" ? "movies" : "tvSeries"),
-      pick: {
-        source: "tmdb",
-        tmdbId: Number(row.tmdbId) || null,
-        tmdbType: row.tmdbType || mediaType,
-        title: row.title || "",
-        year: row.year || "",
-      },
-    })).filter((t) => t.title);
+    // Prefer direct TMDB when a client key is configured (no edge deploy needed).
+    if (tmdbId && getTmdbKey()) {
+      const titles = await fetchTmdbSimilarViaDirectApi(tmdbId, mediaType, locale);
+      if (titles?.length) {
+        writeSeriesCacheEntry(cacheKey, { titles }, TTL_SERIES);
+        return { state: ResultState.AVAILABLE, titles };
+      }
+    }
 
-    writeSeriesCacheEntry(cacheKey, { titles }, TTL_SERIES);
-    return {
-      state: titles.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
-      titles,
-    };
+    const Tmdb = window.WatchlistTmdb;
+    if (Tmdb?.fetchSimilar && Tmdb.isAvailable?.()) {
+      const result = await Tmdb.fetchSimilar({
+        tmdbId: Number.isFinite(tmdbId) && tmdbId > 0 ? tmdbId : null,
+        mediaType,
+        imdbId,
+        locale,
+      });
+      if (result?.ok) {
+        const titles = mapTmdbSimilarRows(
+          result.results || [],
+          mediaType,
+          tmdbId
+        );
+        if (titles.length) {
+          writeSeriesCacheEntry(cacheKey, { titles }, TTL_SERIES);
+          return { state: ResultState.AVAILABLE, titles };
+        }
+        return { state: ResultState.NO_SEASONS, titles: [] };
+      }
+    }
+
+    if (!imdbId && !tmdbId) {
+      return { state: ResultState.INVALID_ID, titles: [] };
+    }
+    return { state: ResultState.OFFLINE_NO_CACHE, titles: [] };
   }
 
   /**
@@ -3500,6 +3823,10 @@
    */
   async function fetchSimilarTitles(resolution, item, locale = "en") {
     if (!resolution || resolution.isNegative) {
+      // For movies, allow fallback — fetchTmdbSimilarTitles extracts IDs from the item directly.
+      if (item?.contentType === "movies") {
+        return fetchTmdbSimilarTitles(resolution || {}, item, locale);
+      }
       return { state: ResultState.INVALID_ID, titles: [] };
     }
 
@@ -3815,7 +4142,6 @@
         const epNum = parsePositiveCount(ep.Episode);
         if (!epNum) return null;
         const released = na(ep.Released);
-        const episodeRating = parseOmdbRating(ep.imdbRating);
         return {
           source: "omdb",
           seasonNumber: season,
@@ -3827,8 +4153,9 @@
           airDate: released || null,
           isAired: released ? isAired(released) : true,
           progressKey: `${season}:${epNum}`,
-          episodeRating,
-          episodeRatingSource: episodeRating != null ? "imdb" : null,
+          // OMDb season bulk ratings are incomplete — do not surface as episode scores.
+          episodeRating: null,
+          episodeRatingSource: null,
         };
       })
       .filter(Boolean);
@@ -3838,6 +4165,12 @@
     const s = String(raw || "").trim();
     if (!s || /^n\/a$/i.test(s)) return null;
     const n = Number(s.replace(",", "."));
+    if (!Number.isFinite(n) || n <= 0 || n > 10) return null;
+    return Math.round(n * 10) / 10;
+  }
+
+  function parseExternalRating(raw) {
+    const n = Number(raw);
     if (!Number.isFinite(n) || n <= 0 || n > 10) return null;
     return Math.round(n * 10) / 10;
   }
@@ -3940,6 +4273,12 @@
       episodes: result.episodes,
       ...(result.seasonPoster ? { seasonPoster: result.seasonPoster } : {}),
       ...(result.seasonOverview ? { seasonOverview: result.seasonOverview } : {}),
+      ...(parseExternalRating(result.seasonRating) != null
+        ? {
+            seasonRating: parseExternalRating(result.seasonRating),
+            seasonRatingSource: result.seasonRatingSource || "tmdb",
+          }
+        : {}),
     };
   }
 
@@ -3968,6 +4307,12 @@
       episodes,
       seasonPoster: payload.seasonPoster || null,
       seasonOverview: payload.seasonOverview || null,
+      ...(parseExternalRating(payload.seasonRating) != null
+        ? {
+            seasonRating: parseExternalRating(payload.seasonRating),
+            seasonRatingSource: payload.seasonRatingSource || "tmdb",
+          }
+        : {}),
       isStale,
     };
   }
@@ -5218,7 +5563,10 @@
           return { anilistId: pickId, source: "anime_title_index" };
         }
       } catch (error) {
-        console.warn("[anime-group-debug] offline index lookup failed:", title, error);
+        // Silent on expected offline/lookup misses — enable watchlist-debug-add for noise.
+        if (typeof localStorage !== "undefined" && localStorage.getItem("watchlist-debug-add") === "1") {
+          console.warn("[anime-group-debug] offline index lookup failed:", title, error);
+        }
       }
     }
 
@@ -5234,7 +5582,9 @@
           return { anilistId: malResolved, source: "mal_link" };
         }
       } catch (error) {
-        console.warn("[anime-group-debug] MAL→AniList lookup failed:", title, error);
+        if (typeof localStorage !== "undefined" && localStorage.getItem("watchlist-debug-add") === "1") {
+          console.warn("[anime-group-debug] MAL→AniList lookup failed:", title, error);
+        }
       }
     }
 
@@ -5249,7 +5599,9 @@
           return { anilistId: liveId, source: "anilist_search" };
         }
       } catch (error) {
-        console.warn("[anime-group-debug] AniList title search failed:", title, error);
+        if (typeof localStorage !== "undefined" && localStorage.getItem("watchlist-debug-add") === "1") {
+          console.warn("[anime-group-debug] AniList title search failed:", title, error);
+        }
       }
     }
 

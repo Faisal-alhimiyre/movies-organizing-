@@ -11,6 +11,19 @@
 
   const FUNCTION_NAME = "tmdb-metadata";
 
+  function isServiceDebugEnabled() {
+    try {
+      return localStorage.getItem("watchlist-debug-add") === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function logServiceWarn(label, err) {
+    if (!isServiceDebugEnabled()) return;
+    console.warn(label, err?.message || err);
+  }
+
   function getFunctionUrl() {
     const url = (window.WATCHLIST_CONFIG?.supabaseUrl || "").replace(/\/$/, "");
     if (!url) return null;
@@ -56,14 +69,14 @@
       const tmdbId = Number(result?.tmdbId);
       return Number.isFinite(tmdbId) && tmdbId > 0 ? tmdbId : null;
     } catch (err) {
-      console.warn("[tmdb-service] resolveByImdb failed:", err.message);
+      logServiceWarn("[tmdb-service] resolveByImdb failed:", err);
       return null;
     }
   }
 
   /**
-   * Fetch per-episode ratings for one season.
-   * @returns {Promise<Array<{ episodeNumber: number, rating: number|null, voteCount: number }>|null>}
+   * Fetch season-level + per-episode ratings for one season (one edge call).
+   * @returns {Promise<{ episodes: Array<{ episodeNumber: number, rating: number|null, voteCount: number }>, seasonRating: number|null }|null>}
    */
   async function fetchSeasonRatings(tmdbId, season, locale = "en") {
     if (!tmdbId || season == null) return null;
@@ -75,9 +88,16 @@
         locale,
       });
       if (!result || result.error || !Array.isArray(result.episodes)) return null;
-      return result.episodes;
+      const seasonVote = Number(result.seasonRating);
+      return {
+        episodes: result.episodes,
+        seasonRating:
+          Number.isFinite(seasonVote) && seasonVote > 0 && seasonVote <= 10
+            ? Math.round(seasonVote * 10) / 10
+            : null,
+      };
     } catch (err) {
-      console.warn("[tmdb-service] fetchSeasonRatings failed:", err.message);
+      logServiceWarn("[tmdb-service] fetchSeasonRatings failed:", err);
       return null;
     }
   }
@@ -107,7 +127,7 @@
       }
       return { ok: true, results: result.results || [], total: result.total || 0 };
     } catch (err) {
-      console.warn("[tmdb-service] search failed:", err.message);
+      logServiceWarn("[tmdb-service] search failed:", err);
       return { ok: false, error: err.message, results: [] };
     }
   }
@@ -132,7 +152,7 @@
       if (!result || result.error || !result.details) return null;
       return result.details;
     } catch (err) {
-      console.warn("[tmdb-service] getDetails failed:", err.message);
+      logServiceWarn("[tmdb-service] getDetails failed:", err);
       return null;
     }
   }
@@ -153,7 +173,7 @@
       if (!result || result.error || !result.data) return null;
       return result.data;
     } catch (err) {
-      console.warn("[tmdb-service] fetchTv failed:", err.message);
+      logServiceWarn("[tmdb-service] fetchTv failed:", err);
       return null;
     }
   }
@@ -174,7 +194,7 @@
       }
       return { ok: true, results: result.results || [] };
     } catch (err) {
-      console.warn("[tmdb-service] imdbSuggest failed:", err.message);
+      logServiceWarn("[tmdb-service] imdbSuggest failed:", err);
       return { ok: false, error: err.message, results: [] };
     }
   }
@@ -202,7 +222,7 @@
       }
       return { ok: true, results: result.results || [] };
     } catch (err) {
-      console.warn("[tmdb-service] fetchSimilar failed:", err.message);
+      logServiceWarn("[tmdb-service] fetchSimilar failed:", err);
       return { ok: false, error: err.message, results: [] };
     }
   }

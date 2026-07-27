@@ -88,6 +88,7 @@
   let editingListId = null;
   let moveListItemId = null;
   let searchDebounceTimer = null;
+  let listSearchDebounceTimer = null;
   let formLinkLookupTimer = null;
   let addSaveInFlight = false;
   let searchPickLoading = false;
@@ -96,6 +97,8 @@
   let titleMetaBackfillRunning = false;
   let episodeTotalsBackfillRunning = false;
   let yearsBackfillRunning = false;
+  /** Single in-flight gate for years/ratings/title-meta/episode-totals idle work. */
+  let metadataBackfillRunning = false;
   let ptrRefreshing = false;
   let ptrLastDoneAt = 0;
   const PTR_COOLDOWN_MS = 2000;
@@ -302,11 +305,31 @@
   }
 
   function stopBackgroundListWrites() {
+    metadataBackfillRunning = false;
     ratingsBackfillRunning = false;
     titleMetaBackfillRunning = false;
     episodeTotalsBackfillRunning = false;
     yearsBackfillRunning = false;
     window.WatchlistSync?.cancelScheduledPush();
+  }
+
+  function isIdleBackfillDebugEnabled() {
+    try {
+      return localStorage.getItem("watchlist-debug-add") === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  /** Stop idle backfill on list switch, abort flags, or backgrounded tab. */
+  function shouldAbortIdleBackfill(listId) {
+    if (!canPersistActiveList(listId)) return true;
+    try {
+      if (typeof document !== "undefined" && document.hidden) return true;
+    } catch {
+      /* ignore */
+    }
+    return false;
   }
 
   function switchToList(nextListId) {
@@ -1684,7 +1707,7 @@
     const { data } = storageKeys();
     state.data = itemsToNested(state.items);
     try {
-      localStorage.setItem(data, JSON.stringify(state.data));
+    localStorage.setItem(data, JSON.stringify(state.data));
     } catch (err) {
       console.warn("[app] local save failed:", err);
       window.WatchlistStorageDiagnostics?.clearDisposableCaches?.();
@@ -2419,10 +2442,12 @@
   }
 
   /** Re-render one list card + header/filter chrome after any item or watch mutation. */
-  function syncListCard(itemId) {
+  function syncListCard(itemId, { invalidateTypeCache = true } = {}) {
     if (!itemId) {
       return;
     }
+    // Cosmetic backfill patches keep type-tab DOM cache; structural changes clear it.
+    if (invalidateTypeCache) clearTypeViewDomCache();
     closeAllCardMenus();
 
     const item = state.items.find((entry) => entry.id === itemId);
@@ -2431,12 +2456,30 @@
     const card = els.main?.querySelector(`.card[data-id="${CSS.escape(itemId)}"]`);
 
     if (stillVisible && item && card) {
+      const existingPoster = card.querySelector("img.card__poster[src]");
+      const existingPosterSrc = existingPoster
+        ? normalizePosterUrl(existingPoster.getAttribute("src") || existingPoster.src)
+        : "";
+      const desiredPoster = normalizePosterUrl(cardDisplayPoster(item));
+
       const tmp = document.createElement("div");
       tmp.innerHTML = renderCard(item);
       const newCard = tmp.firstElementChild;
       if (newCard) {
+        // Reuse the live <img> when the URL is unchanged so mobile does not re-download.
+        if (
+          existingPoster &&
+          desiredPoster &&
+          existingPosterSrc === desiredPoster
+        ) {
+          const newPosterSlot = newCard.querySelector(
+            "img.card__poster, [data-poster-slot], .card__poster--placeholder, .card__poster--broken"
+          );
+          if (newPosterSlot) newPosterSlot.replaceWith(existingPoster);
+        }
         card.replaceWith(newCard);
         bindPosterErrorHandlers();
+        bindPosterLoadTracking();
       }
     } else if (!stillVisible && card) {
       card.remove();
@@ -2480,6 +2523,31 @@
       (a, b) => (order.get(a.dataset.id) ?? 9999) - (order.get(b.dataset.id) ?? 9999)
     );
     for (const el of cards) container.appendChild(el);
+  }
+
+  /** Reorder all visible card groups to match current filter sort — no innerHTML wipe. */
+  function reorderVisibleCardsByCurrentSort() {
+    if (!els.main) return;
+    const filtered = getFilteredItems();
+    const groups = groupItems(filtered);
+    for (const group of groups) {
+      if (!group.items?.length) continue;
+      const firstId = group.items[0]?.id;
+      if (!firstId) continue;
+      const card = els.main.querySelector(`.card[data-id="${CSS.escape(firstId)}"]`);
+      const container = card?.closest(".cards, .cards--rating-sorted");
+      if (!container) continue;
+      const idsInContainer = new Set(
+        [...container.querySelectorAll(":scope > .card")].map((el) => el.dataset.id)
+      );
+      const sorted = group.items.filter((i) => idsInContainer.has(i.id));
+      const order = new Map(sorted.map((entry, index) => [entry.id, index]));
+      const cards = [...container.querySelectorAll(":scope > .card")];
+      cards.sort(
+        (a, b) => (order.get(a.dataset.id) ?? 9999) - (order.get(b.dataset.id) ?? 9999)
+      );
+      for (const el of cards) container.appendChild(el);
+    }
   }
 
   function refreshCardWatchState(itemId) {
@@ -3947,7 +4015,7 @@
         : null;
       const row = buildAnimeGroupDebugRow(item, resolved, group, probe);
       rows.push(row);
-      console.warn("[anime-group-debug]", row);
+      if (isIdleBackfillDebugEnabled()) console.warn("[anime-group-debug]", row);
     }
 
     const byRoot = new Map();
@@ -3958,7 +4026,7 @@
       byRoot.get(key).push(row.title);
     }
     for (const [rootId, titles] of byRoot.entries()) {
-      if (titles.length > 1) {
+      if (titles.length > 1 && isIdleBackfillDebugEnabled()) {
         console.warn("[anime-group-debug] franchise cluster", { rootAnilistId: rootId, titles });
       }
     }
@@ -4136,17 +4204,12 @@
 
   /**
    * After a metadata backfill patch: persist + update one card.
-   * Avoids full-list render(), which tears down every poster <img> and
-   * restarts lazy-loads on mobile.
+   * Never full-list render() — that tears down every poster <img> on mobile.
    */
-  function persistBackfillItem(itemId, { fullRender = false } = {}) {
+  function persistBackfillItem(itemId) {
     state.data = itemsToNested(state.items);
     saveData();
-    if (fullRender) {
-      render();
-      return;
-    }
-    syncListCard(itemId);
+    syncListCard(itemId, { invalidateTypeCache: false });
   }
 
   /** Let first-paint posters load before background badge/rating API work. */
@@ -4171,7 +4234,6 @@
     if (!listId) return;
 
     if (yearBackfillNeedsMovieApiKeys()) {
-      if (isReleaseSortActive()) render();
       return;
     }
 
@@ -4179,29 +4241,30 @@
     let done = 0;
     const total = queue.length;
     let updated = 0;
+    let failCount = 0;
+    const touchedIds = [];
     updateRatingsBackfillBanner({ running: true, done, total, phase: "year" });
-    if (isReleaseSortActive()) render();
 
     for (const item of queue) {
-      if (!yearsBackfillRunning || !canPersistActiveList(listId)) break;
+      if (!yearsBackfillRunning || shouldAbortIdleBackfill(listId)) break;
       try {
         const meta = await fetchYearForItem(item);
         const year = formatReleaseYearDisplay(meta?.year);
         if (year) {
           item.year = year;
           updated += 1;
+          touchedIds.push(item.id);
           if (!item.anilistRating && meta?.anilistRating) {
             item.anilistRating = meta.anilistRating;
           }
           if (updated % 3 === 0) {
             state.data = itemsToNested(state.items);
             saveData();
-            if (isReleaseSortActive()) render();
-            else syncListCard(item.id);
+            syncListCard(item.id, { invalidateTypeCache: false });
           }
         }
-      } catch (error) {
-        console.warn("[years] backfill failed:", item.title, error);
+      } catch {
+        failCount += 1;
       }
 
       done += 1;
@@ -4211,16 +4274,22 @@
 
     yearsBackfillRunning = false;
     updateRatingsBackfillBanner({ running: false });
+    if (isIdleBackfillDebugEnabled() && (updated || failCount)) {
+      console.warn("[years] backfill summary", { updated, failCount, total });
+    }
 
     if (updated > 0) {
       state.data = itemsToNested(state.items);
       saveData();
-      if (isReleaseSortActive()) render();
-      else {
-        for (const item of queue) syncListCard(item.id);
+      for (const id of touchedIds) syncListCard(id, { invalidateTypeCache: false });
+      if (isReleaseSortActive()) {
+        // One idle reorder pass — never wipe posters mid-backfill.
+        if (typeof requestIdleCallback === "function") {
+          requestIdleCallback(() => reorderVisibleCardsByCurrentSort(), { timeout: 2000 });
+        } else {
+          window.setTimeout(() => reorderVisibleCardsByCurrentSort(), 0);
+        }
       }
-    } else if (isReleaseSortActive()) {
-      render();
     }
   }
 
@@ -4240,9 +4309,9 @@
     const total = anilistQueue.length + imdbQueue.length;
     let done = 0;
     updateRatingsBackfillBanner({ running: true, done, total, phase: "anilist" });
-    if (state.ratingFilterSource !== "all") render();
 
     let updated = 0;
+    let failCount = 0;
 
     const applyAnilistBackfill = async (item) => {
       const meta = await fetchAnilistMetaForItem(item);
@@ -4259,27 +4328,27 @@
       }
       if (changed) {
         updated += 1;
-        persistBackfillItem(item.id, {
-          fullRender: state.ratingFilterSource !== "all",
-        });
+        persistBackfillItem(item.id);
         return true;
       }
       return false;
     };
 
     for (const item of anilistQueue) {
-      if (!ratingsBackfillRunning || !canPersistActiveList(listId)) break;
+      if (!ratingsBackfillRunning || shouldAbortIdleBackfill(listId)) break;
       const anilistPaused =
         window.WatchlistSeriesMetadata?.isAnilistRateLimited?.() ||
         window.WatchlistMetadata?.getAnilistQueueStatus?.()?.paused;
       if (anilistPaused) {
-        console.warn("[ratings] AniList paused — skipping AniList rating backfill");
+        if (isIdleBackfillDebugEnabled()) {
+          console.warn("[ratings] AniList paused — skipping AniList rating backfill");
+        }
         break;
       }
       try {
         await applyAnilistBackfill(item);
-      } catch (error) {
-        console.warn("[ratings] anilist backfill failed:", item.title, error);
+      } catch {
+        failCount += 1;
       }
       done += 1;
       updateRatingsBackfillBanner({ running: true, done, total, phase: "anilist" });
@@ -4291,7 +4360,7 @@
     }
 
     for (const item of imdbQueue) {
-      if (!ratingsBackfillRunning || !canPersistActiveList(listId)) break;
+      if (!ratingsBackfillRunning || shouldAbortIdleBackfill(listId)) break;
       try {
         if (!window.WatchlistMetadata?.hasOmdbKey?.()) break;
 
@@ -4330,12 +4399,10 @@
         }
         if (changed) {
           updated += 1;
-          persistBackfillItem(item.id, {
-            fullRender: state.ratingFilterSource !== "all" && updated % 3 === 0,
-          });
+          persistBackfillItem(item.id);
         }
-      } catch (error) {
-        console.warn("[ratings] imdb backfill failed:", item.title, error);
+      } catch {
+        failCount += 1;
       }
 
       done += 1;
@@ -4345,13 +4412,20 @@
 
     ratingsBackfillRunning = false;
     updateRatingsBackfillBanner({ running: false });
+    if (isIdleBackfillDebugEnabled() && (updated || failCount)) {
+      console.warn("[ratings] backfill summary", { updated, failCount, total });
+    }
 
     if (updated > 0) {
       state.data = itemsToNested(state.items);
       saveData();
-      if (state.ratingFilterSource !== "all") render();
-    } else if (state.ratingFilterSource !== "all") {
-      render();
+      if (state.ratingFilterSource !== "all") {
+        if (typeof requestIdleCallback === "function") {
+          requestIdleCallback(() => reorderVisibleCardsByCurrentSort(), { timeout: 2000 });
+        } else {
+          window.setTimeout(() => reorderVisibleCardsByCurrentSort(), 0);
+        }
+      }
     }
   }
 
@@ -4391,9 +4465,10 @@
 
     titleMetaBackfillRunning = true;
     let updated = 0;
+    let failCount = 0;
 
     for (const item of queue) {
-      if (!titleMetaBackfillRunning || !canPersistActiveList(listId)) break;
+      if (!titleMetaBackfillRunning || shouldAbortIdleBackfill(listId)) break;
       try {
         let meta = null;
         const imdbId = getImdbId(item);
@@ -4413,21 +4488,28 @@
             (!beforeRuntime && item.runtime)
           ) {
             updated += 1;
+            persistBackfillItem(item.id);
           }
         }
-      } catch (error) {
-        console.warn("[title-meta] backfill failed:", item.title, error);
+      } catch {
+        failCount += 1;
       }
 
       await new Promise((resolve) => setTimeout(resolve, 280));
     }
 
     titleMetaBackfillRunning = false;
+    if (isIdleBackfillDebugEnabled() && (updated || failCount)) {
+      console.warn("[title-meta] backfill summary", {
+        updated,
+        failCount,
+        total: queue.length,
+      });
+    }
 
     if (updated > 0) {
       state.data = itemsToNested(state.items);
       saveData();
-      for (const item of queue) syncListCard(item.id);
     }
   }
 
@@ -4609,12 +4691,14 @@
       if (!changed && !patches.imdbRating && !pendingCleared) return;
 
       persistEnrichmentSave(itemId);
-      syncListCard(itemId);
+      syncListCard(itemId, { invalidateTypeCache: false });
       if (window.WatchlistTitleDetail?.activeItemId?.() === itemId) {
         window.WatchlistTitleDetail.refresh?.();
       }
     } catch (error) {
-      console.warn("[badge-enrich] failed:", error);
+      if (isIdleBackfillDebugEnabled()) {
+        console.warn("[badge-enrich] failed:", error);
+      }
       finishEnrichmentPending(itemId);
     }
   }
@@ -4929,10 +5013,11 @@
 
     episodeTotalsBackfillRunning = true;
     let updated = 0;
+    let failCount = 0;
     const locale = window.WatchlistI18n?.getLang?.() || "en";
 
     for (const item of queue) {
-      if (!episodeTotalsBackfillRunning || !canPersistActiveList(listId)) break;
+      if (!episodeTotalsBackfillRunning || shouldAbortIdleBackfill(listId)) break;
       try {
         const patches = await window.WatchlistSeriesMetadata?.fetchTitleBadgeMeta?.(
           item,
@@ -4940,34 +5025,62 @@
         );
         if (patches && applyBadgePatches(item, patches)) {
           updated += 1;
+          persistBackfillItem(item.id);
         }
-      } catch (error) {
-        console.warn("[episode-total] backfill failed:", item.title, error);
+      } catch {
+        failCount += 1;
       }
       await new Promise((resolve) => setTimeout(resolve, 400));
     }
 
     episodeTotalsBackfillRunning = false;
+    if (isIdleBackfillDebugEnabled() && (updated || failCount)) {
+      console.warn("[episode-total] backfill summary", {
+        updated,
+        failCount,
+        total: queue.length,
+      });
+    }
 
     if (updated > 0) {
       state.data = itemsToNested(state.items);
       saveData();
-      for (const item of queue) syncListCard(item.id);
     }
   }
 
+  /**
+   * One idle worker for years / ratings / title-meta / episode-totals.
+   * Sequential phases, single in-flight, aborts on list switch or hidden tab.
+   */
   async function runMetadataBackfill() {
-    if (isReleaseSortActive()) {
-      await backfillMissingYears();
-      await backfillMissingRatings();
-      await backfillTitleMeta();
-      await backfillEpisodeTotals();
-      return;
+    if (metadataBackfillRunning) return;
+    try {
+      if (typeof document !== "undefined" && document.hidden) return;
+    } catch {
+      /* ignore */
     }
-    await backfillMissingRatings();
-    await backfillMissingYears();
-    await backfillTitleMeta();
-    await backfillEpisodeTotals();
+    metadataBackfillRunning = true;
+    try {
+      if (isReleaseSortActive()) {
+        await backfillMissingYears();
+        if (shouldAbortIdleBackfill(state.activeListId)) return;
+        await backfillMissingRatings();
+        if (shouldAbortIdleBackfill(state.activeListId)) return;
+        await backfillTitleMeta();
+        if (shouldAbortIdleBackfill(state.activeListId)) return;
+        await backfillEpisodeTotals();
+        return;
+      }
+      await backfillMissingRatings();
+      if (shouldAbortIdleBackfill(state.activeListId)) return;
+      await backfillMissingYears();
+      if (shouldAbortIdleBackfill(state.activeListId)) return;
+      await backfillTitleMeta();
+      if (shouldAbortIdleBackfill(state.activeListId)) return;
+      await backfillEpisodeTotals();
+    } finally {
+      metadataBackfillRunning = false;
+    }
   }
 
   function loadCardLayout() {
@@ -4997,6 +5110,7 @@
 
   function setCardLayout(layout) {
     if (!CARD_LAYOUTS.includes(layout)) return;
+    clearTypeViewDomCache();
     state.cardLayout = layout;
     saveCardLayout(layout);
     applyCardLayout();
@@ -5217,7 +5331,7 @@
 
     const fallback = SM.pickAnimeMainPosterFallback(item, seasons, options);
     if (!fallback?.poster) {
-      console.warn("[anime-poster-repair]", {
+      if (isPosterOverwriteDebugEnabled()) console.warn("[anime-poster-repair]", {
         title: item.title,
         currentPoster,
         posterBroken: wasBroken,
@@ -5248,7 +5362,7 @@
     const refreshCard = options.refreshCard !== false;
     if (refreshCard) syncListCard(item.id);
 
-    console.warn("[anime-poster-repair]", {
+    if (isPosterOverwriteDebugEnabled()) console.warn("[anime-poster-repair]", {
       title: item.title,
       currentPoster,
       posterBroken: wasBroken,
@@ -5317,7 +5431,7 @@
     });
     const anilistId = resolved?.anilistId;
     if (!anilistId) {
-      console.warn("[anime-poster-repair]", {
+      if (isPosterOverwriteDebugEnabled()) console.warn("[anime-poster-repair]", {
         title: item?.title,
         resolvedAnilistId: null,
         rootAnilistId: null,
@@ -5365,7 +5479,7 @@
       ]);
       if (!verified?.url) {
         animePosterRepairFailed.add(item.id);
-        console.warn("[anime-poster-repair]", {
+        if (isPosterOverwriteDebugEnabled()) console.warn("[anime-poster-repair]", {
           title: item.title,
           resolvedAnilistId: anilistId,
           rootAnilistId: group?.rootAnilistId ?? anilistId,
@@ -5391,7 +5505,7 @@
           { poster: verified.url, anilistId: Number(anilistId), source: "anilist" }
         );
       }
-      console.warn("[anime-poster-repair]", {
+      if (isPosterOverwriteDebugEnabled()) console.warn("[anime-poster-repair]", {
         title: item.title,
         resolvedAnilistId: anilistId,
         rootAnilistId: group?.rootAnilistId ?? anilistId,
@@ -5440,7 +5554,7 @@
         });
         if (repaired) {
           SM?.persistResolvedAnilistIdOnItem?.(item, anilistId, resolved?.source || "repair");
-          console.warn("[anime-poster-repair]", {
+          if (isPosterOverwriteDebugEnabled()) console.warn("[anime-poster-repair]", {
             title: item.title,
             resolvedAnilistId: anilistId,
             rootAnilistId: group?.rootAnilistId ?? anilistId,
@@ -5459,11 +5573,11 @@
       }
       return applyDirectAnilistPoster("direct_anilist");
     } catch (error) {
-      console.warn("[anime-poster-repair] fetch failed:", item.title, error);
+      if (isPosterOverwriteDebugEnabled()) console.warn("[anime-poster-repair] fetch failed:", item.title, error);
       try {
         return await applyDirectAnilistPoster("direct_anilist_fallback");
       } catch (fallbackError) {
-        console.warn("[anime-poster-repair]", {
+        if (isPosterOverwriteDebugEnabled()) console.warn("[anime-poster-repair]", {
           title: item.title,
           resolvedAnilistId: anilistId,
           rootAnilistId: group?.rootAnilistId ?? anilistId,
@@ -5480,11 +5594,15 @@
   }
 
   const animePosterRepairQueued = new Set();
+  /** At most one auto-repair attempt per item per session (avoids CDN error storms). */
+  const animePosterRepairAttempted = new Set();
 
   function queueAnimePosterRepair(itemId, options = {}) {
     if (!itemId || animePosterRepairQueued.has(itemId)) return;
+    if (!options.force && animePosterRepairAttempted.has(itemId)) return;
     const item = state.items.find((entry) => entry.id === itemId);
     if (!options.force && !itemAnimePosterNeedsRepair(item)) return;
+    animePosterRepairAttempted.add(itemId);
     animePosterRepairQueued.add(itemId);
     void repairAnimePosterForItem(item, options).finally(() => {
       animePosterRepairQueued.delete(itemId);
@@ -6162,6 +6280,48 @@
   }
 
   let posterUpgradeObserver = null;
+  /** Session memory of poster URLs that finished loading — reuse eager on re-render. */
+  const loadedPosterUrls = new Set();
+  /** Cached main-list HTML per type tab so switching tabs does not re-download posters. */
+  const typeViewDomCache = new Map();
+  /** First-paint budget: eager-load only the first few posters to avoid flooding mobile. */
+  let posterEagerBudget = 0;
+
+  function normalizePosterUrl(url) {
+    return String(url || "").trim();
+  }
+
+  function rememberLoadedPoster(url) {
+    const normalized = normalizePosterUrl(url);
+    if (normalized) loadedPosterUrls.add(normalized);
+  }
+
+  function posterAlreadyLoaded(url) {
+    return loadedPosterUrls.has(normalizePosterUrl(url));
+  }
+
+  function posterLoadingAttr(url) {
+    // iOS Safari often re-fetches lazy <img>s after DOM rebuild; eager helps reuse cache.
+    if (posterAlreadyLoaded(url)) return ' loading="eager"';
+    if (posterEagerBudget > 0) {
+      posterEagerBudget -= 1;
+      return ' loading="eager" fetchpriority="high"';
+    }
+    return ' loading="lazy"';
+  }
+
+  function clearTypeViewDomCache() {
+    typeViewDomCache.clear();
+  }
+
+  function filtersAllowTypeViewCache() {
+    return (
+      !String(state.search || "").trim() &&
+      state.watchedFilter === "all" &&
+      state.ratingFilterSource === "all" &&
+      (!state.selectedGenres || state.selectedGenres.length === 0)
+    );
+  }
 
   function ensurePosterUpgradeObserver() {
     if (posterUpgradeObserver || typeof IntersectionObserver === "undefined") return;
@@ -6219,11 +6379,24 @@
     );
     if (!slot || !posterUrl) return;
 
+    if (slot.tagName === "IMG") {
+      const current = normalizePosterUrl(slot.getAttribute("src"));
+      if (current === normalizePosterUrl(posterUrl)) {
+        rememberLoadedPoster(slot.currentSrc || slot.src || posterUrl);
+        return;
+      }
+    }
+
     const img = document.createElement("img");
     img.className = "card__poster";
-    img.loading = "lazy";
+    img.loading = posterAlreadyLoaded(posterUrl) ? "eager" : "lazy";
     img.alt = "";
     img.src = posterUrl;
+    img.addEventListener(
+      "load",
+      () => rememberLoadedPoster(img.currentSrc || img.src || posterUrl),
+      { once: true }
+    );
     img.addEventListener(
       "error",
       () => {
@@ -6273,7 +6446,8 @@
       item.posterBroken = true;
       saveData();
       if (item.contentType === "anime" && !animePosterRepairFailed.has(item.id)) {
-        queueAnimePosterRepair(item.id, { force: true });
+        // Soft retry only — force:true was cascading AniList+season fetches on flaky CDNs.
+        queueAnimePosterRepair(item.id);
       }
     }
 
@@ -6304,41 +6478,88 @@
     });
   }
 
+  function bindPosterLoadTracking() {
+    els.main?.querySelectorAll(".card__poster[src]").forEach((img) => {
+      if (img.dataset.posterLoadBound === "1") return;
+      img.dataset.posterLoadBound = "1";
+      const mark = () => rememberLoadedPoster(img.currentSrc || img.getAttribute("src"));
+      if (img.complete && img.naturalWidth > 0) {
+        mark();
+        return;
+      }
+      img.addEventListener("load", mark, { once: true });
+    });
+  }
+
   async function hydratePosters() {
     // Skip live poster hydration while bulk import is matching — it walks
     // every card and can fire metadata fetches for titles still finishing.
     if (isBulkImportActivelyMatching()) return;
-    const cards = els.main.querySelectorAll(".card--linked");
+    const cards = [...els.main.querySelectorAll(".card--linked")];
+
+    // Phase 1: sync DOM to known poster URLs without tearing down identical <img>s.
     for (const card of cards) {
       const item = state.items.find((entry) => entry.id === card.dataset.id);
       if (!item?.link || item.posterBroken) continue;
+      const desired = cardDisplayPoster(item);
+      if (!desired) continue;
+      setCardPoster(card, desired);
+    }
+    bindPosterLoadTracking();
 
-      if (item.poster) {
-        setCardPoster(card, cardDisplayPoster(item));
-        continue;
-      }
+    // Phase 2: only fill missing posters near the viewport (cap work on mobile).
+    const viewportPad = 200;
+    const nearViewport = (el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.bottom >= -viewportPad && rect.top <= window.innerHeight + viewportPad;
+    };
+    const missingCards = cards.filter((card) => {
+      if (!nearViewport(card)) return false;
+      const item = state.items.find((entry) => entry.id === card.dataset.id);
+      return Boolean(item?.link && !item.posterBroken && !cardDisplayPoster(item));
+    }).slice(0, 12);
+    if (!missingCards.length) return;
 
-      const imdbId = getImdbId(item);
-      let meta = null;
-      if (imdbId) {
-        meta = await window.WatchlistMetadata?.getMetadata(imdbId);
-      } else if (window.WatchlistMetadata?.isSupportedLink(item.link)) {
-        meta = await window.WatchlistMetadata?.resolveMetadataFromLink(item.link);
-      }
+    const fillMissing = async () => {
+      for (const card of missingCards) {
+        if (!els.main?.contains(card)) continue;
+        const item = state.items.find((entry) => entry.id === card.dataset.id);
+        if (!item?.link || item.posterBroken || cardDisplayPoster(item)) continue;
 
-      if (meta) {
-        window.WatchlistMetadata?.applyTitleMetaFromDetails(meta, item, item.contentType);
-        if (meta.poster) {
+        const imdbId = getImdbId(item);
+        let meta = null;
+        try {
+          if (imdbId) {
+            meta = await window.WatchlistMetadata?.getMetadata(imdbId);
+          } else if (window.WatchlistMetadata?.isSupportedLink(item.link)) {
+            meta = await window.WatchlistMetadata?.resolveMetadataFromLink(item.link);
+          }
+        } catch {
+          // Transient miss — leave placeholder; do not mark broken.
+          continue;
+        }
+
+        if (!els.main?.contains(card)) continue;
+
+        if (meta?.poster) {
+          window.WatchlistMetadata?.applyTitleMetaFromDetails(meta, item, item.contentType);
           item.poster =
             window.WatchlistMetadata?.upgradePosterForStorage?.(meta.poster, meta) ||
             meta.poster;
           setCardPoster(card, cardDisplayPoster(item));
-        } else {
-          markCardPosterBroken(card, item);
         }
-      } else {
-        markCardPosterBroken(card, item);
+        // No markCardPosterBroken on empty meta — avoid repair storms from flaky CDNs.
       }
+    };
+
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(() => {
+        void fillMissing();
+      }, { timeout: 2500 });
+    } else {
+      window.setTimeout(() => {
+        void fillMissing();
+      }, 400);
     }
   }
 
@@ -6349,6 +6570,7 @@
   function applyPostRender() {
     applyCardLayout();
     bindPosterErrorHandlers();
+    bindPosterLoadTracking();
     if (shouldHydratePosters()) {
       els.main.querySelectorAll(".card").forEach(observeCardPosterUpgrade);
       hydratePosters();
@@ -6385,11 +6607,11 @@
       : badges;
     return visible
       .map((badge) => {
-        const titleAttr =
-          badge.kind === "age" && badge.title
-            ? ` title="${escapeHtml(badge.title)}"`
-            : "";
-        return `<span class="badge badge--${badge.kind}"${titleAttr}>${escapeHtml(badge.label)}</span>`;
+          const titleAttr =
+            badge.kind === "age" && badge.title
+              ? ` title="${escapeHtml(badge.title)}"`
+              : "";
+          return `<span class="badge badge--${badge.kind}"${titleAttr}>${escapeHtml(badge.label)}</span>`;
       })
       .join("");
   }
@@ -6457,12 +6679,13 @@
       : "";
     const overlayBlock = `${overlaySections}${titleBlock}`;
 
+    const displayPoster = cardDisplayPoster(item);
     const posterBlock = hasLink
       ? `<div class="card__media">${
-          item.posterBroken && !cardDisplayPoster(item)
+          item.posterBroken && !displayPoster
             ? posterPlaceholderMarkup(true)
-            : cardDisplayPoster(item)
-              ? `<img class="card__poster" src="${escapeHtml(cardDisplayPoster(item))}" alt="" loading="lazy" />`
+            : displayPoster
+              ? `<img class="card__poster" src="${escapeHtml(displayPoster)}" alt=""${posterLoadingAttr(displayPoster)} />`
               : posterPlaceholderMarkup(false, Boolean(item.enrichmentPending))
         }<div class="card__overlay">${overlayBlock}</div></div>`
       : "";
@@ -6603,7 +6826,9 @@
     `;
   }
 
-  function render() {
+  function render({ preserveTypeViewCache = false } = {}) {
+    if (!preserveTypeViewCache) clearTypeViewDomCache();
+    posterEagerBudget = 18;
     healAllPosterUrls({ persist: true });
     updateClearFiltersButton();
     updateFilterFieldHighlights();
@@ -7513,15 +7738,15 @@
       );
       if (!details?.title) {
         details = await window.WatchlistMetadata.getDetailsForPick(pick, {
-          searchQuery: state.searchQuery,
-          preferAnime,
+        searchQuery: state.searchQuery,
+        preferAnime,
+      });
+      if (preferAnime && details) {
+        details = await window.WatchlistMetadata.ensureAnimeDetails(details, {
+          pick,
+          preferAnime: true,
+          forceAnime: true,
         });
-        if (preferAnime && details) {
-          details = await window.WatchlistMetadata.ensureAnimeDetails(details, {
-            pick,
-            preferAnime: true,
-            forceAnime: true,
-          });
         }
       }
       if (!details?.title) {
@@ -7587,16 +7812,16 @@
         }
       );
       if (!details?.title) {
-        details = await window.WatchlistMetadata.getDetailsForPick(pick, {
-          searchQuery: state.searchQuery,
-          preferAnime,
+      details = await window.WatchlistMetadata.getDetailsForPick(pick, {
+        searchQuery: state.searchQuery,
+        preferAnime,
+      });
+      if (preferAnime && details) {
+        details = await window.WatchlistMetadata.ensureAnimeDetails(details, {
+          pick,
+          preferAnime: true,
+          forceAnime: true,
         });
-        if (preferAnime && details) {
-          details = await window.WatchlistMetadata.ensureAnimeDetails(details, {
-            pick,
-            preferAnime: true,
-            forceAnime: true,
-          });
         }
       }
     } catch (_) {}
@@ -7901,7 +8126,7 @@
       setBulkPasteError("");
       resumeImportJobUiIfAny();
       if (!els.bulkImportPreview || els.bulkImportPreview.hidden) {
-        els.bulkPasteInput?.focus();
+      els.bulkPasteInput?.focus();
       }
     } else {
       hideSearchConfirmStep();
@@ -10419,8 +10644,8 @@
 
     if (changed) {
       IJ.saveImportItems?.(listId, items);
-      state.data = itemsToNested(state.items);
-      saveData();
+    state.data = itemsToNested(state.items);
+    saveData();
       render();
       for (const id of correctedIds) {
         queueImportedItemEnrichment(id);
@@ -10882,7 +11107,7 @@
             syncMeta
           );
         }
-        updateGenreOptions();
+    updateGenreOptions();
         // Never full-rebuild the main list while matching is still running —
         // painting hundreds of cards + poster hydration mid-import was a
         // primary Out-of-Memory cause. Cards appear after matching idles.
@@ -10891,7 +11116,7 @@
             scheduleDeferredListRender();
           }
         } else {
-          render();
+    render();
         }
 
         if (posterTraceCommits.length) {
@@ -10916,7 +11141,7 @@
       renderImportJobPreview(job, freshItems);
 
       if (!silent) {
-        await window.WatchlistDialog.alert(
+    await window.WatchlistDialog.alert(
           t("bulk.commitResult", {
             added: result.added,
             alreadyPresent: result.alreadyPresent,
@@ -10924,8 +11149,8 @@
             failed: result.failed,
             stillReady: result.stillReady,
           }),
-          { title: t("alert.bulkAddedTitle") }
-        );
+      { title: t("alert.bulkAddedTitle") }
+    );
       }
     } catch (error) {
       console.warn("[bulk-import:commit]", error);
@@ -11665,16 +11890,56 @@
   }
 
   function setType(type) {
-    state.type = type;
+    const prevType = state.type;
+    const nextType = type;
+
+    // Move live DOM (with decoded posters) into a DocumentFragment instead of
+    // serializing to HTML — innerHTML rebuild forces mobile to re-download images.
+    if (
+      prevType &&
+      prevType !== nextType &&
+      filtersAllowTypeViewCache() &&
+      els.main?.querySelector(".card")
+    ) {
+      const frag = document.createDocumentFragment();
+      while (els.main.firstChild) frag.appendChild(els.main.firstChild);
+      typeViewDomCache.set(prevType, {
+        frag,
+        scrollY: window.scrollY || 0,
+      });
+    }
+
+    state.type = nextType;
     els.typeTabs.forEach((tab) => {
-      const active = tab.dataset.type === type;
+      const active = tab.dataset.type === nextType;
       tab.classList.toggle("type-tab--active", active);
       tab.setAttribute("aria-selected", String(active));
       tab.tabIndex = active ? 0 : -1;
     });
     updateGenreOptions();
     updateRatingFilterOptions();
-    render();
+
+    if (filtersAllowTypeViewCache()) {
+      const cached = typeViewDomCache.get(nextType);
+      if (cached?.frag?.childNodes?.length) {
+        els.main.replaceChildren();
+        els.main.appendChild(cached.frag);
+        typeViewDomCache.delete(nextType);
+        applyCardLayout();
+        bindPosterErrorHandlers();
+        bindPosterLoadTracking();
+        if (shouldHydratePosters()) {
+          els.main.querySelectorAll(".card").forEach(observeCardPosterUpgrade);
+        }
+        updateStats();
+        updateClearFiltersButton();
+        updateFilterFieldHighlights();
+        window.scrollTo(0, cached.scrollY || 0);
+        return;
+      }
+    }
+
+    render({ preserveTypeViewCache: true });
   }
 
   function countTitles(data) {
@@ -12352,10 +12617,14 @@
 
     els.search.addEventListener("input", () => {
       state.search = els.search.value;
-      render();
+      clearTimeout(listSearchDebounceTimer);
+      listSearchDebounceTimer = setTimeout(() => {
+        render();
+      }, 180);
     });
 
     bindSearchClear(els.search, els.searchClear, () => {
+      clearTimeout(listSearchDebounceTimer);
       state.search = "";
       render();
     });
@@ -13214,9 +13483,9 @@
 
     let hasLocal = false;
     try {
-      state.data = loadWatchlist();
-      state.items = flattenWatchlist(state.data);
-      state.data = itemsToNested(state.items);
+    state.data = loadWatchlist();
+    state.items = flattenWatchlist(state.data);
+    state.data = itemsToNested(state.items);
       hasLocal = state.data && !window.WatchlistAuth.isWatchlistEmpty(state.data);
     } catch (loadError) {
       console.error("[app] local watchlist load failed:", loadError);
@@ -13254,8 +13523,8 @@
 
     const { data, watched } = storageKeys();
     try {
-      localStorage.setItem(data, JSON.stringify(state.data));
-      localStorage.setItem(watched, JSON.stringify(state.watched));
+    localStorage.setItem(data, JSON.stringify(state.data));
+    localStorage.setItem(watched, JSON.stringify(state.watched));
     } catch (err) {
       console.warn("[app] could not persist local snapshot:", err);
     }

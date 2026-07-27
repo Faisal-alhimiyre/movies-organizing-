@@ -122,13 +122,13 @@ class TitleMetaBackfillController extends Notifier<TitleMetaBackfillProgress> {
         MetadataDetail? meta;
         final imdbId = getImdbIdFromItem(item);
         if (imdbId != null) {
-          meta = await metadata.getMetadata(imdbId, forceRefresh: true);
+          meta = await metadata.getMetadata(imdbId, forceRefresh: false);
         } else {
           final link = item.link?.trim();
           if (link != null && link.isNotEmpty) {
             meta = await metadata.resolveMetadataFromLink(
               link,
-              forceRefresh: true,
+              forceRefresh: false,
             );
           }
         }
@@ -155,7 +155,7 @@ class TitleMetaBackfillController extends Notifier<TitleMetaBackfillProgress> {
             if (itemHasTitleMeta(merged)) {
               items[index] = merged;
               updated += 1;
-              if (updated % 3 == 0) {
+              if (updated % 15 == 0) {
                 await controller.replaceItems(
                   items,
                   expectedListId: listId,

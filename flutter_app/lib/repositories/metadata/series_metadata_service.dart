@@ -8,7 +8,8 @@ import 'package:http/http.dart' as http;
 import '../../core/config/app_config.dart';
 import '../../core/config/environment.dart';
 import '../../core/storage/hive_boxes.dart';
-import '../../core/utils/item_links.dart' show getAnilistIdFromItem;
+import '../../core/utils/item_links.dart'
+    show getAnilistIdFromItem, getImdbIdFromItem;
 import '../../core/utils/title_meta_format.dart' show parsePositiveCount;
 import '../../models/series_metadata.dart';
 import '../../models/watchlist_item.dart';
@@ -481,18 +482,8 @@ class SeriesMetadataService {
             forceRefresh: forceRefresh,
           );
           if (_hasRenderableEpisodes(tvdbResult)) {
-            var tmdbId = resolution.tmdbId;
-            if (tmdbId == null && resolution.imdbId != null) {
-              tmdbId = await _resolveTmdbIdByImdb(resolution.imdbId!);
-            }
-            if (tmdbId != null) {
-              tvdbResult = await _enrichTmdbEpisodeRatings(
-                tvdbResult,
-                tmdbId,
-                seasonNumber,
-                locale,
-              );
-            }
+            // Paint TVDB episodes first; TMDB rating enrich is applied by the
+            // sheet as a non-blocking patch via [enrichSeasonEpisodeRatings].
             return tvdbResult;
           }
         }
@@ -516,6 +507,26 @@ class SeriesMetadataService {
       default:
         return const SeasonEpisodesResult(state: MetadataResultState.unavailable);
     }
+  }
+
+  /// Non-blocking TMDB rating patch after episodes are already on screen.
+  Future<SeasonEpisodesResult> enrichSeasonEpisodeRatings({
+    required SeriesIdResolution resolution,
+    required SeasonEpisodesResult result,
+    required int seasonNumber,
+    required String locale,
+  }) async {
+    var tmdbId = resolution.tmdbId;
+    if (tmdbId == null && resolution.imdbId != null) {
+      tmdbId = await _resolveTmdbIdByImdb(resolution.imdbId!);
+    }
+    if (tmdbId == null) return result;
+    return _enrichTmdbEpisodeRatingsIfNeeded(
+      result,
+      tmdbId,
+      seasonNumber,
+      locale,
+    );
   }
 
   /// Standalone movies related to a TV series or anime (not season-carousel entries).
@@ -549,6 +560,334 @@ class SeriesMetadataService {
     }
 
     return const RelatedMoviesResult(state: MetadataResultState.noSeasons);
+  }
+
+  /// "More like this" recommendations — TMDB similar for movies/TV.
+  Future<RelatedMoviesResult> fetchSimilarTitles({
+    required SeriesIdResolution resolution,
+    required WatchlistItem item,
+    required String locale,
+  }) async {
+    final imdbId = resolution.imdbId ?? getImdbIdFromItem(item);
+    var tmdbId = resolution.tmdbId;
+    final mediaType = item.contentType == 'movies' ? 'movie' : 'tv';
+    final lang = locale.startsWith('ar') ? 'ar-SA' : 'en-US';
+
+    if ((imdbId == null || imdbId.isEmpty) && tmdbId == null) {
+      return const RelatedMoviesResult(state: MetadataResultState.invalidId);
+    }
+
+    // Resolve IMDb → TMDB when needed (movie results, not only TV).
+    if ((tmdbId == null || tmdbId <= 0) &&
+        imdbId != null &&
+        imdbId.isNotEmpty &&
+        _config.hasTmdbKey) {
+      final findJson = await _fetchTmdb(
+        'find/$imdbId',
+        {'external_source': 'imdb_id'},
+      );
+      if (findJson != null) {
+        final movieResults =
+            (findJson['movie_results'] as List?)?.cast<Map<String, dynamic>>() ??
+                const [];
+        final tvResults =
+            (findJson['tv_results'] as List?)?.cast<Map<String, dynamic>>() ??
+                const [];
+        if (mediaType == 'movie' && movieResults.isNotEmpty) {
+          tmdbId = movieResults.first['id'] as int?;
+        } else if (mediaType == 'tv' && tvResults.isNotEmpty) {
+          tmdbId = tvResults.first['id'] as int?;
+        } else if (movieResults.isNotEmpty) {
+          tmdbId = movieResults.first['id'] as int?;
+        } else if (tvResults.isNotEmpty) {
+          tmdbId = tvResults.first['id'] as int?;
+        }
+      }
+    }
+
+    // Direct TMDB when key is available.
+    if (tmdbId != null && tmdbId > 0 && _config.hasTmdbKey) {
+      final similarJson = await _fetchTmdb(
+        '$mediaType/$tmdbId/similar',
+        {'language': lang, 'page': '1'},
+      );
+      final recJson = await _fetchTmdb(
+        '$mediaType/$tmdbId/recommendations',
+        {'language': lang, 'page': '1'},
+      );
+      final rows = <Map<String, dynamic>>[
+        ...((recJson?['results'] as List?)?.cast<Map<String, dynamic>>() ??
+            const []),
+        ...((similarJson?['results'] as List?)?.cast<Map<String, dynamic>>() ??
+            const []),
+      ];
+      final movies = await _enrichTmdbTvSimilarMeta(
+        _mapTmdbSimilarRows(rows, mediaType, tmdbId),
+        mediaType,
+        lang,
+      );
+      if (movies.isNotEmpty) {
+        return RelatedMoviesResult(
+          state: MetadataResultState.available,
+          movies: movies,
+        );
+      }
+    }
+
+    // Edge fallback (deployed `similar` action).
+    final edge = await _invokeTmdbEdge({
+      'action': 'similar',
+      if (tmdbId != null) 'tmdbId': tmdbId,
+      'mediaType': mediaType,
+      'imdbId': imdbId ?? '',
+      'locale': locale,
+    });
+    if (edge == null) {
+      return const RelatedMoviesResult(state: MetadataResultState.offlineNoCache);
+    }
+
+    final rows = edge['results'];
+    if (rows is! List) {
+      return const RelatedMoviesResult(state: MetadataResultState.noSeasons);
+    }
+
+    final movies = <RelatedMovie>[];
+    for (final raw in rows) {
+      if (raw is! Map) continue;
+      final title = raw['title']?.toString().trim() ?? '';
+      if (title.isEmpty) continue;
+      final scoreRaw = raw['score'];
+      final score = scoreRaw is num
+          ? scoreRaw.toDouble()
+          : double.tryParse('$scoreRaw');
+      final genres = (raw['genres'] as List?)
+              ?.map((e) => e.toString().trim())
+              .where((e) => e.isNotEmpty)
+              .take(4)
+              .toList() ??
+          const <String>[];
+      final tmdbIdRaw = raw['tmdbId'];
+      final tmdbId = tmdbIdRaw is int
+          ? tmdbIdRaw
+          : int.tryParse('$tmdbIdRaw');
+      movies.add(
+        RelatedMovie(
+          source: 'tmdb',
+          title: title,
+          poster: raw['poster']?.toString() ?? '',
+          year: raw['year']?.toString() ?? '',
+          overview: raw['overview']?.toString() ?? '',
+          score: score,
+          tmdbId: tmdbId,
+          genres: genres,
+          contentType: raw['contentType']?.toString() ??
+              (mediaType == 'movie' ? 'movies' : 'tvSeries'),
+          adult: raw['adult'] == true,
+          ageRating: raw['ageRating']?.toString() ?? '',
+          seasonCount: raw['seasonCount'] is int
+              ? raw['seasonCount'] as int
+              : int.tryParse('${raw['seasonCount'] ?? ''}'),
+          episodeCount: raw['episodeCount'] is int
+              ? raw['episodeCount'] as int
+              : int.tryParse('${raw['episodeCount'] ?? ''}'),
+        ),
+      );
+    }
+
+    return RelatedMoviesResult(
+      state: movies.isEmpty
+          ? MetadataResultState.noSeasons
+          : MetadataResultState.available,
+      movies: movies,
+    );
+  }
+
+  Future<List<RelatedMovie>> _enrichTmdbTvSimilarMeta(
+    List<RelatedMovie> movies,
+    String mediaType,
+    String lang,
+  ) async {
+    if (mediaType != 'tv' || movies.isEmpty || !_config.hasTmdbKey) {
+      return movies;
+    }
+    final slice = movies.take(12).toList();
+    final enriched = await Future.wait(slice.map((movie) async {
+      final id = movie.tmdbId;
+      if (id == null || id <= 0) return movie;
+      if ((movie.seasonCount ?? 0) > 0 &&
+          (movie.episodeCount ?? 0) > 0 &&
+          movie.ageRating.isNotEmpty) {
+        return movie;
+      }
+      final details = await _fetchTmdb(
+        'tv/$id',
+        {'language': lang, 'append_to_response': 'content_ratings'},
+      );
+      if (details == null) return movie;
+
+      final seasons = details['number_of_seasons'] is int
+          ? details['number_of_seasons'] as int
+          : int.tryParse('${details['number_of_seasons'] ?? ''}');
+      final episodes = details['number_of_episodes'] is int
+          ? details['number_of_episodes'] as int
+          : int.tryParse('${details['number_of_episodes'] ?? ''}');
+      var age = movie.ageRating;
+      final ratings = (details['content_ratings'] is Map
+              ? (details['content_ratings'] as Map)['results']
+              : null) as List? ??
+          const [];
+      const prefer = ['US', 'GB', 'CA', 'AU'];
+      for (final iso in prefer) {
+        for (final raw in ratings) {
+          if (raw is! Map) continue;
+          if (raw['iso_3166_1']?.toString().toUpperCase() != iso) continue;
+          final rating = raw['rating']?.toString().trim() ?? '';
+          if (rating.isNotEmpty) {
+            age = rating;
+            break;
+          }
+        }
+        if (age.isNotEmpty && age != movie.ageRating) break;
+      }
+      if (age.isEmpty) {
+        for (final raw in ratings) {
+          if (raw is! Map) continue;
+          final rating = raw['rating']?.toString().trim() ?? '';
+          if (rating.isNotEmpty) {
+            age = rating;
+            break;
+          }
+        }
+      }
+
+      return RelatedMovie(
+        source: movie.source,
+        title: movie.title,
+        poster: movie.poster,
+        year: movie.year,
+        overview: movie.overview,
+        runtimeMinutes: movie.runtimeMinutes,
+        anilistId: movie.anilistId,
+        tmdbId: movie.tmdbId,
+        score: movie.score,
+        genres: movie.genres,
+        contentType: movie.contentType,
+        adult: movie.adult || details['adult'] == true,
+        ageRating: age,
+        seasonCount: (seasons != null && seasons > 0)
+            ? seasons
+            : movie.seasonCount,
+        episodeCount: (episodes != null && episodes > 0)
+            ? episodes
+            : movie.episodeCount,
+      );
+    }));
+    if (movies.length <= 12) return enriched;
+    return [...enriched, ...movies.skip(12)];
+  }
+
+  List<RelatedMovie> _mapTmdbSimilarRows(
+    List<Map<String, dynamic>> rows,
+    String mediaType,
+    int selfTmdbId,
+  ) {
+    const genreNames = <int, String>{
+      28: 'Action',
+      12: 'Adventure',
+      16: 'Animation',
+      35: 'Comedy',
+      80: 'Crime',
+      99: 'Documentary',
+      18: 'Drama',
+      10751: 'Family',
+      14: 'Fantasy',
+      36: 'History',
+      27: 'Horror',
+      10402: 'Music',
+      9648: 'Mystery',
+      10749: 'Romance',
+      878: 'Sci-Fi',
+      10770: 'TV Movie',
+      53: 'Thriller',
+      10752: 'War',
+      37: 'Western',
+      10759: 'Action & Adventure',
+      10762: 'Kids',
+      10763: 'News',
+      10764: 'Reality',
+      10765: 'Sci-Fi & Fantasy',
+      10766: 'Soap',
+      10767: 'Talk',
+      10768: 'War & Politics',
+    };
+    final seen = <int>{};
+    final movies = <RelatedMovie>[];
+    for (final row in rows) {
+      final id = row['id'];
+      final tmdbId = id is int ? id : int.tryParse('$id') ?? row['tmdbId'] as int?;
+      if (tmdbId == null || tmdbId <= 0 || tmdbId == selfTmdbId) continue;
+      if (!seen.add(tmdbId)) continue;
+      final title =
+          (row['title'] ?? row['name'])?.toString().trim() ?? '';
+      if (title.isEmpty) continue;
+      final date =
+          (row['release_date'] ?? row['first_air_date'])?.toString() ?? '';
+      final year = date.length >= 4
+          ? date.substring(0, 4)
+          : (row['year']?.toString() ?? '');
+      final posterPath = row['poster_path']?.toString() ?? '';
+      final poster = (row['poster']?.toString().isNotEmpty == true)
+          ? row['poster'].toString()
+          : (posterPath.isNotEmpty ? '$_tmdbImage$posterPath' : '');
+      final vote = row['vote_average'];
+      final scoreRaw = row['score'];
+      final score = scoreRaw is num
+          ? scoreRaw.toDouble()
+          : (vote is num && vote > 0 ? (vote * 10).roundToDouble() : null);
+      final genreIds = (row['genre_ids'] as List? ?? row['genreIds'] as List? ?? const [])
+          .map((e) => e is int ? e : int.tryParse('$e'))
+          .whereType<int>()
+          .toList();
+      final genresFromRow = (row['genres'] as List?)
+              ?.map((e) => e.toString().trim())
+              .where((e) => e.isNotEmpty)
+              .toList() ??
+          const <String>[];
+      final genres = genresFromRow.isNotEmpty
+          ? genresFromRow.take(4).toList()
+          : genreIds
+              .map((id) => genreNames[id])
+              .whereType<String>()
+              .take(4)
+              .toList();
+      movies.add(
+        RelatedMovie(
+          source: 'tmdb',
+          title: title,
+          poster: poster,
+          year: year,
+          overview: row['overview']?.toString() ?? '',
+          score: score,
+          tmdbId: tmdbId,
+          genres: genres,
+          contentType: mediaType == 'movie' ? 'movies' : 'tvSeries',
+          adult: row['adult'] == true,
+          ageRating: row['ageRating']?.toString() ?? '',
+          seasonCount: row['seasonCount'] is int
+              ? row['seasonCount'] as int
+              : (row['number_of_seasons'] is int
+                  ? row['number_of_seasons'] as int
+                  : int.tryParse('${row['seasonCount'] ?? row['number_of_seasons'] ?? ''}')),
+          episodeCount: row['episodeCount'] is int
+              ? row['episodeCount'] as int
+              : (row['number_of_episodes'] is int
+                  ? row['number_of_episodes'] as int
+                  : int.tryParse('${row['episodeCount'] ?? row['number_of_episodes'] ?? ''}')),
+        ),
+      );
+      if (movies.length >= 24) break;
+    }
+    return movies;
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -731,7 +1070,7 @@ class SeriesMetadataService {
         cached,
         isStale: _isStale(cacheKey, _episodesTtl),
       );
-      return _enrichTmdbEpisodeRatings(parsed, tmdbId, season, locale);
+      return _enrichTmdbEpisodeRatingsIfNeeded(parsed, tmdbId, season, locale);
     }
 
     final json = await _fetchTmdb('tv/$tmdbId/season/$season', {'language': lang});
@@ -758,7 +1097,7 @@ class SeriesMetadataService {
           result = _mergeEpisodeLocaleResults(result, enResult);
         }
       }
-      result = await _enrichTmdbEpisodeRatings(result, tmdbId, season, locale);
+      result = await _enrichTmdbEpisodeRatingsIfNeeded(result, tmdbId, season, locale);
       _writeRawCache(cacheKey, _episodesResultToJson(result), _episodesTtl);
       return result;
     }
@@ -769,7 +1108,7 @@ class SeriesMetadataService {
       final enCached = _readRawCache(enKey, _episodesTtl);
       if (enCached != null) {
         final parsed = _parseCachedEpisodesResult(enCached, isStale: true);
-        return _enrichTmdbEpisodeRatings(parsed, tmdbId, season, locale);
+        return _enrichTmdbEpisodeRatingsIfNeeded(parsed, tmdbId, season, locale);
       }
       final enJson = await _fetchTmdb(
         'tv/$tmdbId/season/$season',
@@ -782,7 +1121,7 @@ class SeriesMetadataService {
           season,
           fallbackPoster: fallbackPoster,
         );
-        enResult = await _enrichTmdbEpisodeRatings(enResult, tmdbId, season, 'en');
+        enResult = await _enrichTmdbEpisodeRatingsIfNeeded(enResult, tmdbId, season, 'en');
         _writeRawCache(enKey, _episodesResultToJson(enResult), _episodesTtl);
         return enResult;
       }
@@ -795,11 +1134,26 @@ class SeriesMetadataService {
         isStale: true,
         forceState: MetadataResultState.offlineWithCache,
       );
-      return _enrichTmdbEpisodeRatings(parsed, tmdbId, season, locale);
+      return _enrichTmdbEpisodeRatingsIfNeeded(parsed, tmdbId, season, locale);
     }
     return const SeasonEpisodesResult(
       state: MetadataResultState.offlineNoCache,
     );
+  }
+
+  Future<SeasonEpisodesResult> _enrichTmdbEpisodeRatingsIfNeeded(
+    SeasonEpisodesResult result,
+    int tmdbId,
+    int season,
+    String locale,
+  ) async {
+    final episodes = result.episodes;
+    if (episodes == null || episodes.isEmpty) return result;
+    // Season JSON already carries vote_average — paint episodes first without a
+    // second ratings round-trip when we already have a usable season score.
+    if (result.seasonRating != null) return result;
+    if (episodes.any((e) => e.episodeRating != null)) return result;
+    return _enrichTmdbEpisodeRatings(result, tmdbId, season, locale);
   }
 
   Future<SeasonEpisodesResult> _enrichTmdbEpisodeRatings(
@@ -810,44 +1164,52 @@ class SeriesMetadataService {
   ) async {
     final episodes = result.episodes;
     if (episodes == null || episodes.isEmpty) return result;
-    if (!episodes.any((e) => e.episodeRating == null)) return result;
 
-    var ratingMap = await _fetchEpisodeRatingMap(tmdbId, season, locale);
-    ratingMap ??= locale != 'en'
-        ? await _fetchEpisodeRatingMap(tmdbId, season, 'en')
+    final needsEpisodeRating = episodes.any((e) => e.episodeRating == null);
+    final needsSeasonRating = result.seasonRating == null;
+    if (!needsEpisodeRating && !needsSeasonRating) return result;
+
+    var ratingPayload = await _fetchEpisodeRatingPayload(tmdbId, season, locale);
+    ratingPayload ??= locale != 'en'
+        ? await _fetchEpisodeRatingPayload(tmdbId, season, 'en')
         : null;
-    if (ratingMap == null || ratingMap.isEmpty) return result;
+    if (ratingPayload == null) return result;
 
-    final enriched = episodes.map((ep) {
-      if (ep.episodeRating != null) return ep;
-      final rating = ratingMap![ep.episodeNumber];
-      if (rating == null) return ep;
-      return EpisodeDetail(
-        source: ep.source,
-        seriesTmdbId: ep.seriesTmdbId,
-        seasonNumber: ep.seasonNumber,
-        episodeNumber: ep.episodeNumber,
-        title: ep.title,
-        still: ep.still,
-        overview: ep.overview,
-        runtimeMinutes: ep.runtimeMinutes,
-        airDate: ep.airDate,
-        isAired: ep.isAired,
-        episodeRating: rating,
-        episodeRatingSource: 'tmdb',
-      );
-    }).toList();
+    final ratingMap = ratingPayload.byEpisode;
+    final seasonRating = result.seasonRating ?? ratingPayload.seasonRating;
 
-    return SeasonEpisodesResult(
-      state: result.state,
+    final enriched = !needsEpisodeRating || ratingMap.isEmpty
+        ? episodes
+        : episodes.map((ep) {
+            if (ep.episodeRating != null) return ep;
+            final rating = ratingMap[ep.episodeNumber];
+            if (rating == null) return ep;
+            return EpisodeDetail(
+              source: ep.source,
+              seriesTmdbId: ep.seriesTmdbId,
+              seasonNumber: ep.seasonNumber,
+              episodeNumber: ep.episodeNumber,
+              title: ep.title,
+              still: ep.still,
+              overview: ep.overview,
+              runtimeMinutes: ep.runtimeMinutes,
+              airDate: ep.airDate,
+              isAired: ep.isAired,
+              episodeRating: rating,
+              episodeRatingSource: 'tmdb',
+            );
+          }).toList();
+
+    return result.copyWith(
       episodes: enriched,
-      seasonPoster: result.seasonPoster,
-      isStale: result.isStale,
-      debugMessage: result.debugMessage,
+      seasonRating: seasonRating,
+      seasonRatingSource:
+          seasonRating != null ? (result.seasonRatingSource ?? 'tmdb') : null,
     );
   }
 
-  Future<Map<int, double>?> _fetchEpisodeRatingMap(
+  Future<({Map<int, double> byEpisode, double? seasonRating})?>
+      _fetchEpisodeRatingPayload(
     int tmdbId,
     int season,
     String locale,
@@ -858,7 +1220,10 @@ class SeriesMetadataService {
         'tv/$tmdbId/season/$season',
         {'language': lang},
       );
-      return _ratingMapFromSeasonJson(json);
+      final byEpisode = _ratingMapFromSeasonJson(json) ?? <int, double>{};
+      final seasonRating = _parseExternalRating(json?['vote_average']);
+      if (byEpisode.isEmpty && seasonRating == null) return null;
+      return (byEpisode: byEpisode, seasonRating: seasonRating);
     }
 
     final edge = await _invokeTmdbEdge({
@@ -870,19 +1235,21 @@ class SeriesMetadataService {
     if (edge == null) return null;
 
     final rows = edge['episodes'];
-    if (rows is! List) return null;
-
     final map = <int, double>{};
-    for (final raw in rows) {
-      if (raw is! Map) continue;
-      final epNum = raw['episodeNumber'];
-      final rating = raw['rating'];
-      if (epNum is! int && epNum is! num) continue;
-      final n = rating is num ? rating.toDouble() : double.tryParse('$rating');
-      if (n == null || !n.isFinite || n <= 0 || n > 10) continue;
-      map[epNum is int ? epNum : epNum.round()] = (n * 10).round() / 10;
+    if (rows is List) {
+      for (final raw in rows) {
+        if (raw is! Map) continue;
+        final epNum = raw['episodeNumber'];
+        final rating = raw['rating'];
+        if (epNum is! int && epNum is! num) continue;
+        final n = rating is num ? rating.toDouble() : double.tryParse('$rating');
+        if (n == null || !n.isFinite || n <= 0 || n > 10) continue;
+        map[epNum is int ? epNum : epNum.round()] = (n * 10).round() / 10;
+      }
     }
-    return map.isEmpty ? null : map;
+    final seasonRating = _parseExternalRating(edge['seasonRating']);
+    if (map.isEmpty && seasonRating == null) return null;
+    return (byEpisode: map, seasonRating: seasonRating);
   }
 
   Map<int, double>? _ratingMapFromSeasonJson(Map<String, dynamic>? json) {
@@ -954,6 +1321,8 @@ class SeriesMetadataService {
       return const SeasonEpisodesResult(state: MetadataResultState.unavailable);
     }
 
+    final seasonRating = _parseExternalRating(json['vote_average']);
+
     return SeasonEpisodesResult(
       state: episodes.isEmpty
           ? MetadataResultState.noSeasons
@@ -961,6 +1330,8 @@ class SeriesMetadataService {
       episodes: episodes,
       seasonPoster: posterPath != null ? seasonPoster : null,
       seasonOverview: json['overview']?.toString(),
+      seasonRating: seasonRating,
+      seasonRatingSource: seasonRating != null ? 'tmdb' : null,
     );
   }
 
@@ -1156,6 +1527,9 @@ class SeriesMetadataService {
       return const SeasonEpisodesResult(state: MetadataResultState.offlineNoCache);
     }
 
+    final poster =
+        media['coverImage']?['large']?.toString() ??
+        (fallbackPoster ?? '');
     final episodeCount = parsePositiveCount(media['episodes']);
     final streamingEps = (media['streamingEpisodes'] as List? ?? [])
         .cast<Map<String, dynamic>>();
@@ -1204,14 +1578,7 @@ class SeriesMetadataService {
       null,
       result.episodes!,
     );
-    return SeasonEpisodesResult(
-      state: result.state,
-      episodes: enriched.episodes,
-      seasonPoster: result.seasonPoster,
-      seasonOverview: result.seasonOverview,
-      isStale: result.isStale,
-      debugMessage: result.debugMessage,
-    );
+    return result.copyWith(episodes: enriched.episodes);
   }
 
   List<EpisodeDetail> _buildAnilistEpisodeList(
@@ -1391,7 +1758,6 @@ class SeriesMetadataService {
       final ep = raw as Map<String, dynamic>;
       final epNum = parsePositiveCount(ep['Episode']) ?? 0;
       final released = _na(ep['Released']?.toString());
-      final imdbRating = _parseOmdbEpisodeRating(ep['imdbRating']?.toString());
       return EpisodeDetail(
         source: 'omdb',
         seasonNumber: season,
@@ -1403,8 +1769,9 @@ class SeriesMetadataService {
         runtimeMinutes: null,
         airDate: released.isNotEmpty ? released : null,
         isAired: released.isNotEmpty ? _isAired(released) : true,
-        episodeRating: imdbRating,
-        episodeRatingSource: imdbRating != null ? 'imdb' : null,
+        // OMDb season bulk ratings are incomplete — do not surface as episode scores.
+        episodeRating: null,
+        episodeRatingSource: null,
       );
     }).where((e) => e.episodeNumber > 0).toList();
   }
@@ -2139,6 +2506,8 @@ class SeriesMetadataService {
     format
     duration
     averageScore
+    isAdult
+    genres
     episodes
     title { english romaji native }
     coverImage { large }
@@ -2379,6 +2748,21 @@ class SeriesMetadataService {
       overview: _stripHtml(node['description']?.toString() ?? ''),
       runtimeMinutes: parsePositiveCount(node['duration']),
       score: score,
+      genres: (node['genres'] as List?)
+              ?.map((e) => e.toString().trim())
+              .where((e) => e.isNotEmpty)
+              .take(4)
+              .toList() ??
+          const [],
+      contentType: 'anime',
+      adult: node['isAdult'] == true,
+      ageRating: node['isAdult'] == true ? 'R' : '',
+      episodeCount: parsePositiveCount(node['episodes']),
+      seasonCount: () {
+        final format = node['format']?.toString().toUpperCase() ?? '';
+        if (format == 'MOVIE' || format == 'SPECIAL') return null;
+        return 1;
+      }(),
     );
   }
 
@@ -2478,6 +2862,9 @@ class SeriesMetadataService {
           if (result.seasonPoster != null) 'seasonPoster': result.seasonPoster,
           if (result.seasonOverview != null && result.seasonOverview!.isNotEmpty)
             'seasonOverview': result.seasonOverview,
+          if (result.seasonRating != null) 'seasonRating': result.seasonRating,
+          if (result.seasonRatingSource != null)
+            'seasonRatingSource': result.seasonRatingSource,
         },
         'state': result.state.name,
       };
@@ -2537,6 +2924,8 @@ class SeriesMetadataService {
         : null;
     final seasonPoster = payload['seasonPoster']?.toString();
     final seasonOverview = payload['seasonOverview']?.toString();
+    final seasonRating = _parseExternalRating(payload['seasonRating']);
+    final seasonRatingSource = payload['seasonRatingSource']?.toString();
 
     final stateStr = cached['state']?.toString();
     final parsedState = MetadataResultState.values.firstWhere(
@@ -2552,6 +2941,12 @@ class SeriesMetadataService {
           : null,
       seasonOverview:
           seasonOverview != null && seasonOverview.isNotEmpty ? seasonOverview : null,
+      seasonRating: seasonRating,
+      seasonRatingSource: seasonRating != null
+          ? (seasonRatingSource != null && seasonRatingSource.isNotEmpty
+              ? seasonRatingSource
+              : 'tmdb')
+          : null,
       isStale: isStale,
     );
   }
@@ -2658,12 +3053,27 @@ class SeriesMetadataService {
       );
     }).toList();
 
+    final seasonRating =
+        localResult.seasonRating ?? enResult.seasonRating;
+
     return SeasonEpisodesResult(
       state: localResult.state,
       episodes: merged,
       seasonPoster: localResult.seasonPoster ?? enResult.seasonPoster,
       seasonOverview: localResult.seasonOverview ?? enResult.seasonOverview,
+      seasonRating: seasonRating,
+      seasonRatingSource: seasonRating != null
+          ? (localResult.seasonRatingSource ??
+              enResult.seasonRatingSource ??
+              'tmdb')
+          : null,
     );
+  }
+
+  static double? _parseExternalRating(dynamic raw) {
+    final n = raw is num ? raw.toDouble() : double.tryParse('$raw');
+    if (n == null || !n.isFinite || n <= 0 || n > 10) return null;
+    return (n * 10).round() / 10;
   }
 
   /// True when [airDate] is in the past (or absent, assumed aired).

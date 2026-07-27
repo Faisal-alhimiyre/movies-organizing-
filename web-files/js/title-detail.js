@@ -1321,9 +1321,9 @@
     setupSwipeToDismiss();
   }
 
-  // ─── Seasons integration ───────────────────────────────────────────────────
+  // ─── Seasons / Similar integration ─────────────────────────────────────────
   function attachSeasons(item) {
-    if (!isTvOrAnime(item)) return;
+    if (!isTvOrAnime(item) && !isMovie(item)) return;
     const slot = _scroll?.querySelector("#tdSeasonsSlot");
     if (!slot) return;
 

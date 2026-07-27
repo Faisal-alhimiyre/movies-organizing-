@@ -54,6 +54,27 @@ void main() {
     expect(updated.anilistRating, '90');
   });
 
+  test('applyRatingsBackfillResult preserves cardPoster and season fields', () {
+    final base = WatchlistItem(
+      id: makeItemId('tvSeries', 'Drama', 'Prison Break'),
+      contentType: 'tvSeries',
+      genre: 'Drama',
+      title: 'Prison Break',
+      link: 'https://www.imdb.com/title/tt0455275/',
+      poster: 'https://example.com/poster.jpg',
+      cardPoster: 'https://example.com/s2.jpg',
+      selectedSeason: 2,
+      selectedSeasonName: 'Season 2',
+      imdbLink: 'https://www.imdb.com/title/tt0455275/',
+    );
+    final updated = applyRatingsBackfillResult(base, imdbRating: '8.3');
+    expect(updated.cardPoster, 'https://example.com/s2.jpg');
+    expect(updated.selectedSeason, 2);
+    expect(updated.selectedSeasonName, 'Season 2');
+    expect(updated.imdbLink, 'https://www.imdb.com/title/tt0455275/');
+    expect(updated.imdbRating, '8.3');
+  });
+
   test('ratingSortEmptyHintKey when imdb sort has no scores', () {
     const config = AppConfig(
       supabaseUrl: '',

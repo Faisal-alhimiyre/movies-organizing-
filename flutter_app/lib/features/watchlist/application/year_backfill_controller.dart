@@ -91,7 +91,7 @@ class YearBackfillController extends Notifier<YearBackfillProgress> {
               anilistRating: result.anilistRating,
             );
             updated += 1;
-            if (updated % 3 == 0) {
+            if (updated % 15 == 0) {
               await controller.replaceItems(
                 items,
                 expectedListId: listId,

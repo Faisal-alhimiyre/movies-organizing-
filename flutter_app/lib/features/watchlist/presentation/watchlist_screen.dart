@@ -919,9 +919,15 @@ class _WatchlistBody extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final filters = ref.watch(watchlistFilterProvider);
-    final yearProgress = ref.watch(yearBackfillControllerProvider);
-    final ratingsProgress = ref.watch(ratingsBackfillControllerProvider);
-    final titleMetaProgress = ref.watch(titleMetaBackfillControllerProvider);
+    final yearProgress = ref.watch(
+      yearBackfillControllerProvider.select((p) => (running: p.running, done: p.done, total: p.total)),
+    );
+    final ratingsProgress = ref.watch(
+      ratingsBackfillControllerProvider.select((p) => (running: p.running, done: p.done, total: p.total)),
+    );
+    final titleMetaProgress = ref.watch(
+      titleMetaBackfillControllerProvider.select((p) => (running: p.running, done: p.done, total: p.total)),
+    );
     final config = ref.watch(appConfigProvider);
     final filtered = filterWatchlistItems(
       items: snapshot.items,
@@ -991,76 +997,86 @@ class _WatchlistBody extends ConsumerWidget {
                 SnackBar(content: Text(message)),
               );
             },
-            child: ListView(
+            child: CustomScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
-              children: [
-              const RatingsBackfillOrchestrator(),
-              const TitleMetaBackfillOrchestrator(),
-              const PosterBackfillOrchestrator(),
-              WatchlistPanel(
-                tabs: TypeTabBar(
-                  selected: typeFilter,
-                  counts: counts,
-                  onChanged: onTypeChanged,
-                  l10n: l10n,
-                ),
-                filters: snapshot.items.isNotEmpty
-                    ? WatchlistFilterBar(items: snapshot.items, l10n: l10n)
-                    : null,
-              ),
-              if (snapshot.items.isNotEmpty)
-                Transform.translate(
-                  offset: Offset(
-                    0,
-                    AppBreakpoints.isMobile(context) ? -5.6 : -12,
-                  ),
-                  child: Padding(
-                    padding: EdgeInsets.only(
-                      bottom: AppBreakpoints.isMobile(context) ? 8.8 : 24,
+              slivers: [
+                const SliverToBoxAdapter(child: RatingsBackfillOrchestrator()),
+                const SliverToBoxAdapter(child: TitleMetaBackfillOrchestrator()),
+                const SliverToBoxAdapter(child: PosterBackfillOrchestrator()),
+                SliverToBoxAdapter(
+                  child: WatchlistPanel(
+                    tabs: TypeTabBar(
+                      selected: typeFilter,
+                      counts: counts,
+                      onChanged: onTypeChanged,
+                      l10n: l10n,
                     ),
-                    child: Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: CardLayoutToggle(l10n: l10n),
-                    ),
+                    filters: snapshot.items.isNotEmpty
+                        ? WatchlistFilterBar(items: snapshot.items, l10n: l10n)
+                        : null,
                   ),
                 ),
-              if (snapshot.isEmptyList || snapshot.items.isEmpty)
-                WatchlistEmptyState(l10n: l10n)
-              else if (filtered.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 32),
-                  child: Center(
-                    child: Text(
-                      _emptyFilterMessage(
-                        l10n: l10n,
-                        filters: filters,
-                        releaseHintKey: releaseHintKey,
-                        ageHintKey: ageHintKey,
-                        ratingHintKey: ratingHintKey,
+                if (snapshot.items.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: Transform.translate(
+                      offset: Offset(
+                        0,
+                        AppBreakpoints.isMobile(context) ? -5.6 : -12,
                       ),
-                      textAlign: TextAlign.center,
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                          bottom: AppBreakpoints.isMobile(context) ? 8.8 : 24,
+                        ),
+                        child: Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: CardLayoutToggle(l10n: l10n),
+                        ),
+                      ),
                     ),
                   ),
-                )
-              else if (groups.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 32),
-                  child: Center(child: Text(l10n.emptySearch)),
-                )
-              else
-                ...groups.map(
-                  (group) => GenreSection(
-                    group: group,
-                    watched: snapshot.watched,
-                    l10n: l10n,
-                    onItemTap: onItemTap,
-                    onItemAction: onItemAction,
+                if (snapshot.isEmptyList || snapshot.items.isEmpty)
+                  SliverToBoxAdapter(child: WatchlistEmptyState(l10n: l10n))
+                else if (filtered.isEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 32),
+                      child: Center(
+                        child: Text(
+                          _emptyFilterMessage(
+                            l10n: l10n,
+                            filters: filters,
+                            releaseHintKey: releaseHintKey,
+                            ageHintKey: ageHintKey,
+                            ratingHintKey: ratingHintKey,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                  )
+                else if (groups.isEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 32),
+                      child: Center(child: Text(l10n.emptySearch)),
+                    ),
+                  )
+                else
+                  ...groups.expand(
+                    (group) => buildGenreSectionSlivers(
+                      context: context,
+                      ref: ref,
+                      group: group,
+                      watched: snapshot.watched,
+                      l10n: l10n,
+                      onItemTap: onItemTap,
+                      onItemAction: onItemAction,
+                    ),
                   ),
-                ),
-              const SizedBox(height: 80),
-            ],
+                const SliverToBoxAdapter(child: SizedBox(height: 80)),
+              ],
+            ),
           ),
-        ),
         ),
         const LinkPreviewLayer(),
       ],
