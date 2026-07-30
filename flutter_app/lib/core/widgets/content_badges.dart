@@ -187,6 +187,7 @@ class ContentTitleMetaBadges extends StatelessWidget {
     this.spacing = 4,
     this.runSpacing = 4,
     this.solid = false,
+    this.quiet = false,
     this.fontSize = 10,
     this.padding = const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
   });
@@ -199,16 +200,21 @@ class ContentTitleMetaBadges extends StatelessWidget {
   final double spacing;
   final double runSpacing;
   final bool solid;
+  final bool quiet;
   final double fontSize;
   final EdgeInsets padding;
 
-  factory ContentTitleMetaBadges.fromItem(WatchlistItem item) {
+  factory ContentTitleMetaBadges.fromItem(
+    WatchlistItem item, {
+    bool quiet = false,
+  }) {
     return ContentTitleMetaBadges(
       contentType: item.contentType,
       ageRating: item.ageRating,
       runtime: item.runtime,
       seasonCount: item.seasonCount,
       episodeCount: item.episodeCount,
+      quiet: quiet,
     );
   }
 
@@ -234,6 +240,7 @@ class ContentTitleMetaBadges extends StatelessWidget {
             (badge) => _TitleMetaBadge(
               badge: badge,
               solid: solid,
+              quiet: quiet,
               fontSize: fontSize,
               padding: padding,
             ),
@@ -247,63 +254,71 @@ class _TitleMetaBadge extends StatelessWidget {
   const _TitleMetaBadge({
     required this.badge,
     required this.solid,
+    required this.quiet,
     required this.fontSize,
     required this.padding,
   });
 
   final TitleMetaBadge badge;
   final bool solid;
+  final bool quiet;
   final double fontSize;
   final EdgeInsets padding;
 
   @override
   Widget build(BuildContext context) {
-    final (fg, bg, border) = switch (badge.kind) {
-      TitleMetaBadgeKind.age => solid
-          ? (
-              const Color(0xFFFCD34D),
-              const Color(0xF2181206),
-              const Color(0x80FBBF24),
-            )
-          : (
-              const Color(0xFFFBBF24),
-              const Color(0x1FFBBF24),
-              const Color(0x59FBBF24),
-            ),
-      TitleMetaBadgeKind.duration => solid
-          ? (
-              const Color(0xFF93C5FD),
-              const Color(0xF2080E1A),
-              const Color(0x7393C5FD),
-            )
-          : (
-              const Color(0xFF93C5FD),
-              const Color(0x1A93C5FD),
-              const Color(0x4D93C5FD),
-            ),
-      TitleMetaBadgeKind.seasons => solid
-          ? (
-              const Color(0xFFA5B4FC),
-              const Color(0xF20C0C1E),
-              const Color(0x73A5B4FC),
-            )
-          : (
-              const Color(0xFFA5B4FC),
-              const Color(0x1AA5B4FC),
-              const Color(0x4DA5B4FC),
-            ),
-      TitleMetaBadgeKind.episodes => solid
-          ? (
-              const Color(0xFF86EFAC),
-              const Color(0xF2051A0E),
-              const Color(0x7386EFAC),
-            )
-          : (
-              const Color(0xFF86EFAC),
-              const Color(0x1A86EFAC),
-              const Color(0x4D86EFAC),
-            ),
-    };
+    final (fg, bg, border) = quiet
+        ? (
+            const Color(0xFFC8C8C8),
+            Colors.white.withValues(alpha: 0.04),
+            Colors.white.withValues(alpha: 0.1),
+          )
+        : switch (badge.kind) {
+            TitleMetaBadgeKind.age => solid
+                ? (
+                    const Color(0xFFFCD34D),
+                    const Color(0xF2181206),
+                    const Color(0x80FBBF24),
+                  )
+                : (
+                    const Color(0xFFFBBF24),
+                    const Color(0x1FFBBF24),
+                    const Color(0x59FBBF24),
+                  ),
+            TitleMetaBadgeKind.duration => solid
+                ? (
+                    const Color(0xFF93C5FD),
+                    const Color(0xF2080E1A),
+                    const Color(0x7393C5FD),
+                  )
+                : (
+                    const Color(0xFF93C5FD),
+                    const Color(0x1A93C5FD),
+                    const Color(0x4D93C5FD),
+                  ),
+            TitleMetaBadgeKind.seasons => solid
+                ? (
+                    const Color(0xFFA5B4FC),
+                    const Color(0xF20C0C1E),
+                    const Color(0x73A5B4FC),
+                  )
+                : (
+                    const Color(0xFFA5B4FC),
+                    const Color(0x1AA5B4FC),
+                    const Color(0x4DA5B4FC),
+                  ),
+            TitleMetaBadgeKind.episodes => solid
+                ? (
+                    const Color(0xFF86EFAC),
+                    const Color(0xF2051A0E),
+                    const Color(0x7386EFAC),
+                  )
+                : (
+                    const Color(0xFF86EFAC),
+                    const Color(0x1A86EFAC),
+                    const Color(0x4D86EFAC),
+                  ),
+          };
 
     final chip = DecoratedBox(
       decoration: BoxDecoration(

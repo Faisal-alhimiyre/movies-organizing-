@@ -187,7 +187,7 @@ class L10n {
   String get detailTabSeasons => _ar ? 'المواسم' : 'Seasons';
   String get detailTabSpecials => _ar ? 'حلقات خاصة' : 'Specials';
   String get detailTabMovies => _ar ? 'أفلام' : 'Movies';
-  String get detailTabSimilar => _ar ? 'مشابه' : 'Similar';
+  String get detailTabSimilar => _ar ? 'مسلسلات مشابهة' : 'Similar shows';
   String get detailSimilarSectionTitle =>
       _ar ? 'أفلام أخرى قد تعجبك' : 'Other movies that you might like';
   String get detailSimilarLoading =>

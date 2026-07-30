@@ -597,13 +597,14 @@ class _DetailContent extends StatelessWidget {
                       ContentTitleMetaBadges.fromItem(item),
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
                   Text(
                     item.title,
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
-                      fontSize: isMobile ? 17 : 20,
-                      height: 1.22,
+                      fontSize: isMobile ? 18 : 21,
+                      height: 1.2,
+                      letterSpacing: -0.2,
                     ),
                   ),
                   if (item.lead.isNotEmpty) ...[
@@ -613,12 +614,12 @@ class _DetailContent extends StatelessWidget {
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: tc?.lead ?? kLeadGold,
                         fontSize: 12,
-                        height: 1.35,
+                        height: 1.4,
                       ),
                     ),
                   ],
                   if (_hasExternalRatings(item)) ...[
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 8),
                     _ExternalRatingsRow(item: item),
                   ],
                 ],
@@ -627,73 +628,23 @@ class _DetailContent extends StatelessWidget {
           ],
         ),
         if (item.genre.isNotEmpty || item.secondaryGenres.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          Text(
-            l10n.cardSectionGenres.toUpperCase(),
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: tc?.textMuted ??
-                  theme.colorScheme.onSurface.withValues(alpha: 0.55),
-              fontWeight: FontWeight.w700,
-              fontSize: 9,
-              letterSpacing: 1.4,
-            ),
-          ),
-          const SizedBox(height: 4),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                if (item.genre.isNotEmpty)
-                  ContentGenreChip(
-                    label: l10n.genreLabel(item.genre),
-                    primary: true,
-                  ),
-                ...item.secondaryGenres.map(
-                  (genre) => Padding(
-                    padding: const EdgeInsets.only(left: 5),
-                    child: ContentGenreChip(
-                      label: l10n.genreLabel(genre),
-                      primary: false,
-                    ),
-                  ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              if (item.genre.isNotEmpty)
+                ContentGenreChip(
+                  label: l10n.genreLabel(item.genre),
+                  primary: true,
                 ),
-              ],
-            ),
-          ),
-        ],
-        if (seasonPresentation != null) ...[
-          const SizedBox(height: 14),
-          Text(
-            seasonPresentation!.title,
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              fontSize: 15,
-              height: 1.3,
-            ),
-          ),
-          if (seasonPresentation!.overview.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(
-              seasonPresentation!.overview,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: tc?.textMuted ??
-                    theme.colorScheme.onSurface.withValues(alpha: 0.72),
-                fontSize: 14,
-                height: 1.55,
+              ...item.secondaryGenres.map(
+                (genre) => ContentGenreChip(
+                  label: l10n.genreLabel(genre),
+                  primary: false,
+                ),
               ),
-            ),
-          ],
-        ],
-        if (!hideSeriesSummary && item.summary.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          Text(
-            item.summary,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: tc?.textMuted ??
-                  theme.colorScheme.onSurface.withValues(alpha: 0.72),
-              fontSize: 14,
-              height: 1.55,
-            ),
+            ],
           ),
         ],
         const SizedBox(height: 12),
@@ -705,6 +656,65 @@ class _DetailContent extends StatelessWidget {
           onQuickToggleWatched: onQuickToggleWatched,
           onMovieProgressChanged: onMovieProgressChanged,
         ),
+        if (seasonPresentation != null) ...[
+          const SizedBox(height: 14),
+          Text(
+            seasonPresentation!.title,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              fontSize: 15,
+              height: 1.3,
+            ),
+          ),
+          if (seasonPresentation!.overview.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.035),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.08),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                child: Text(
+                  seasonPresentation!.overview,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: tc?.textMuted ??
+                        theme.colorScheme.onSurface.withValues(alpha: 0.72),
+                    fontSize: 14,
+                    height: 1.55,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+        if (!hideSeriesSummary && item.summary.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.035),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.08),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              child: Text(
+                item.summary,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: tc?.textMuted ??
+                      theme.colorScheme.onSurface.withValues(alpha: 0.72),
+                  fontSize: 14,
+                  height: 1.55,
+                ),
+              ),
+            ),
+          ),
+        ],
         if (showSeasons)
           TitleSeasonsPanel(
             l10n: l10n,
@@ -787,22 +797,33 @@ class _RatingBlock extends StatelessWidget {
     if (isUnwatched) {
       return withMovieProgress(
         Align(
-        alignment: AlignmentDirectional.centerStart,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onQuickToggleWatched,
-            borderRadius: BorderRadius.circular(999),
-            child: _StatusPill(
-              label: l10n.cardUnwatched,
-              fg: tc?.textMuted ??
-                  theme.colorScheme.onSurface.withValues(alpha: 0.65),
-              bg: theme.colorScheme.onSurface.withValues(alpha: 0.04),
-              border: theme.colorScheme.outline.withValues(alpha: 0.28),
+          alignment: AlignmentDirectional.centerStart,
+          child: OutlinedButton.icon(
+            onPressed: onQuickToggleWatched,
+            icon: Icon(
+              Icons.radio_button_unchecked,
+              size: 18,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.92),
+            ),
+            label: Text(l10n.cardMarkWatched),
+            style: OutlinedButton.styleFrom(
+              foregroundColor:
+                  theme.colorScheme.onSurface.withValues(alpha: 0.95),
+              backgroundColor:
+                  theme.colorScheme.onSurface.withValues(alpha: 0.08),
+              side: BorderSide(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.42),
+              ),
+              padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
+              textStyle: const TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.1,
+              ),
+              shape: const StadiumBorder(),
             ),
           ),
         ),
-      ),
       );
     }
 
@@ -826,17 +847,29 @@ class _RatingBlock extends StatelessWidget {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: onQuickToggleWatched,
-                          borderRadius: BorderRadius.circular(999),
-                          child: _StatusPill(
-                            label: l10n.progressInProgress,
-                            fg: inProgressColor,
-                            bg: inProgressColor.withValues(alpha: 0.08),
-                            border: inProgressColor.withValues(alpha: 0.28),
+                      OutlinedButton.icon(
+                        onPressed: onQuickToggleWatched,
+                        icon: Icon(
+                          Icons.remove_circle_outline,
+                          size: 18,
+                          color: inProgressColor,
+                        ),
+                        label: Text(l10n.cardMarkWatched),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: inProgressColor,
+                          backgroundColor:
+                              inProgressColor.withValues(alpha: 0.14),
+                          side: BorderSide(
+                            color: inProgressColor.withValues(alpha: 0.7),
                           ),
+                          padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
+                          textStyle: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.1,
+                          ),
+                          shape: const StadiumBorder(),
+                          visualDensity: VisualDensity.compact,
                         ),
                       ),
                       const SizedBox(width: 6),
@@ -973,17 +1006,69 @@ class _RatingBlock extends StatelessWidget {
         ],
       );
     } else if (isFullyWatched) {
+      final watchedColor = tc?.watched ?? const Color(0xFF58C322);
       content = Align(
         alignment: AlignmentDirectional.centerStart,
-        child: FilledButton(
-          onPressed: onRate,
-          style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            minimumSize: const Size(0, 36),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            visualDensity: VisualDensity.compact,
+        child: Material(
+          color: watchedColor.withValues(alpha: 0.12),
+          shape: StadiumBorder(
+            side: BorderSide(color: watchedColor.withValues(alpha: 0.55)),
           ),
-          child: Text(l10n.cardRate),
+          clipBehavior: Clip.antiAlias,
+          child: IntrinsicHeight(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                InkWell(
+                  onTap: onQuickToggleWatched,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.check_circle_outline,
+                            size: 16, color: watchedColor),
+                        const SizedBox(width: 6),
+                        Text(
+                          l10n.cardWatched,
+                          style: TextStyle(
+                            color: watchedColor,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                VerticalDivider(
+                  width: 1,
+                  thickness: 1,
+                  color: watchedColor.withValues(alpha: 0.4),
+                ),
+                InkWell(
+                  onTap: onRate,
+                  child: ColoredBox(
+                    color: watchedColor,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      child: Text(
+                        l10n.cardRate,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       );
     } else {
@@ -1026,42 +1111,6 @@ class _RatingBlock extends StatelessWidget {
                 child: content,
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({
-    required this.label,
-    required this.fg,
-    required this.bg,
-    required this.border,
-  });
-
-  final String label;
-  final Color fg;
-  final Color bg;
-  final Color border;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: fg,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
           ),
         ),
       ),

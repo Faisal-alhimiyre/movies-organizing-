@@ -74,16 +74,7 @@
 /* ── Error / status ──────────────────────────────────────────────────────── */
 
 .tds-stale-banner {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0.5rem 1.25rem 0;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  border: 1px solid var(--border, #363636);
-  background: var(--bg-card, #1e1e1e);
-  color: var(--text-muted, #888);
-  font-size: 0.78rem;
+  display: none !important;
 }
 
 .tds-stale-banner::before {
@@ -479,73 +470,135 @@
 }
 
 .tds-season-mark-btn {
-  padding: 0.3rem 0.75rem;
-  border-radius: 6px;
-  border: 1px solid var(--border-strong, #525252);
-  background: transparent;
-  color: var(--text, #e8e8e8);
-  font-size: 0.78rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text, #fafafa);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
   white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.tds-season-mark-btn:hover { background: var(--bg-card-hover, #252525); }
+.tds-season-mark-btn:hover,
 .tds-season-mark-btn:focus-visible {
-  outline: 2px solid var(--accent, #7c6aff);
-  outline-offset: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.42);
 }
+
+.tds-season-mark-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+}
+
 .tds-season-mark-btn--complete {
-  border-color: var(--accent, #7c6aff);
-  color: var(--accent, #7c6aff);
+  color: var(--watched, #4ade80);
+  background: color-mix(in srgb, var(--watched, #4ade80) 12%, transparent);
+  border-color: color-mix(in srgb, var(--watched, #4ade80) 55%, transparent);
+}
+
+.tds-season-mark-btn--complete:hover,
+.tds-season-mark-btn--complete:focus-visible {
+  background: color-mix(in srgb, var(--watched, #4ade80) 18%, transparent);
+  border-color: var(--watched, #4ade80);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--watched, #4ade80) 18%, transparent);
 }
 
 /* ── Season progress + mark button (below carousel) ─────────────────────── */
 
 .tds-season-actions {
-  margin: 0.75rem 1.25rem 0;
-  padding: 0 0.25rem;
+  margin: 0.55rem 1.25rem 0;
+  padding: 0;
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 0.5rem;
   flex-wrap: wrap;
 }
 
 .tds-season-actions__avg {
   margin: 0;
-  font-size: 0.78rem;
-  color: var(--text-secondary, #a0a0a0);
-}
-
-.tds-season-avg-badge {
-  display: inline-flex;
+  display: none;
   align-items: center;
-  align-self: flex-start;
-  padding: 0.22rem 0.65rem;
-  border-radius: 999px;
-  font-size: 0.72rem;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.82rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  line-height: 1.2;
   letter-spacing: 0.01em;
-  color: var(--text, #e8e8e8);
-  background: color-mix(in srgb, var(--title-accent, #c4a882) 16%, var(--bg-card, #1e1e1e));
-  border: 1px solid color-mix(in srgb, var(--title-accent, #c4a882) 38%, transparent);
+  color: var(--text-secondary, #c4c4c4);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.tds-season-actions__avg.tds-season-avg-badge {
+  display: inline-flex;
+}
+
+html[data-theme="light"] .tds-season-mark-btn {
+  color: rgba(20, 20, 20, 0.9);
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.22);
+}
+
+html[data-theme="light"] .tds-season-mark-btn:hover,
+html[data-theme="light"] .tds-season-mark-btn:focus-visible {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.05);
+}
+
+html[data-theme="light"] .tds-season-mark-btn--complete {
+  color: var(--watched, #2d9a52);
+  background: color-mix(in srgb, var(--watched, #2d9a52) 10%, transparent);
+  border-color: color-mix(in srgb, var(--watched, #2d9a52) 45%, transparent);
+}
+
+html[data-theme="light"] .tds-season-actions__avg {
+  color: rgba(20, 20, 20, 0.7);
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.14);
 }
 
 /* ── Episodes section ────────────────────────────────────────────────────── */
 
 .tds-episodes-section {
-  margin-top: 0.9rem;
+  margin-top: 0.65rem;
 }
 
 .tds-episodes-section:not(.tds-episodes-section--ready) .tds-episode-list {
   display: none;
 }
 
+/* One compact block for title + toggles + jump */
+.tds-episodes-toolbar {
+  margin: 0 1rem 0.65rem;
+  padding: 0.7rem 0.85rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  box-sizing: border-box;
+}
+
 .tds-episodes-header {
-  padding: 0 1.25rem 0.25rem;
+  padding: 0;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -555,13 +608,18 @@
   display: grid;
   grid-template-columns: max-content 2.1rem;
   column-gap: 0.55rem;
-  row-gap: 0.4rem;
+  row-gap: 0.35rem;
   align-items: center;
   justify-content: start;
-  padding: 0 1.25rem 0.55rem;
+  padding: 0;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
+}
+
+.tds-spoiler-row:not([hidden]) {
+  padding-top: 0.55rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .tds-spoiler-toggle {
@@ -572,7 +630,7 @@
   padding: 0;
   border: none;
   background: none;
-  color: var(--text-secondary, #a0a0a0);
+  color: var(--text-secondary, #b5b5b5);
   font: inherit;
   font-size: 0.78rem;
   cursor: pointer;
@@ -626,33 +684,39 @@
 .tds-episode-jump {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.15rem 1.25rem 0.65rem;
+  gap: 0.35rem;
+  padding: 0.55rem 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
 }
 
+.tds-episode-jump[hidden] {
+  display: none;
+}
+
 .tds-episode-jump__label {
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #a8a8a8);
 }
 
 .tds-episode-jump__field {
   display: flex;
   align-items: stretch;
-  gap: 0.45rem;
-  max-width: 14rem;
+  gap: 0.4rem;
+  max-width: 12.5rem;
 }
 
 .tds-episode-jump__input {
   flex: 1 1 auto;
   width: auto;
   min-width: 0;
-  padding: 0.45rem 0.65rem;
-  font-size: 0.88rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.86rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -695,11 +759,21 @@
 
 .tds-episodes-title {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   color: var(--text-secondary, #a0a0a0);
+}
+
+html[data-theme="light"] .tds-episodes-toolbar {
+  border-color: rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.03);
+}
+
+html[data-theme="light"] .tds-spoiler-row:not([hidden]),
+html[data-theme="light"] .tds-episode-jump {
+  border-top-color: rgba(0, 0, 0, 0.08);
 }
 
 .tds-episodes-status {
@@ -1137,6 +1211,11 @@
     padding: 0 1.5rem;
   }
 
+  .tds-episodes-toolbar {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
   .tds-loading-section {
     padding-left: 1.5rem;
     padding-right: 1.5rem;
@@ -1178,43 +1257,62 @@ html[data-theme="pink"] .tds-season-card--selected { border-color: #fff; }
 html[data-theme="pink"] .tds-ep-check--watched { background: rgba(255,255,255,0.9); border-color: rgba(255,255,255,0.9); color: #9b1149; }
 html[data-theme="pink"] .tds-retry-btn { color: #fff; border-color: rgba(255,255,255,0.4); }
 html[data-theme="pink"] .tds-overview-toggle { color: rgba(255,255,255,0.85); }
-html[data-theme="pink"] .tds-season-mark-btn { border-color: rgba(255,255,255,0.4); color: #fff; }
-html[data-theme="pink"] .tds-season-mark-btn--complete { border-color: #fff; color: #fff; }
+html[data-theme="pink"] .tds-season-mark-btn {
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #fff;
+}
+html[data-theme="pink"] .tds-season-mark-btn--complete {
+  border-color: #fff;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
 
-/* ── Series tabs (Seasons / Movies) ─────────────────────────────────────── */
+/* ── Series tabs (Seasons / Specials / Movies / Similar) ───────────────── */
 
 .tds-series-tabs {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  padding: 0.75rem 1.25rem 0.35rem;
+  align-items: stretch;
+  gap: 0;
+  margin: 0.75rem 1.25rem 0.45rem;
+  padding: 3px;
+  border: 1px solid var(--border, #363636);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  overflow: hidden;
 }
 
 .tds-series-tab {
-  flex: 1 1 calc(25% - 0.35rem);
-  min-width: 4.5rem;
-  min-height: 2.35rem;
-  padding: 0.45rem 0.55rem;
-  border: 1px solid var(--border, #363636);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.03);
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 2.4rem;
+  padding: 0.45rem 0.4rem;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
   color: var(--text-muted, #a8a8a8);
   font: inherit;
   font-size: 0.78rem;
   font-weight: 600;
+  line-height: 1.2;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
 }
 
 .tds-series-tab--active {
-  background: color-mix(in srgb, var(--accent, #7c6aff) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accent, #7c6aff) 55%, var(--border, #363636));
+  background: color-mix(in srgb, var(--accent, #7c6aff) 22%, rgba(255, 255, 255, 0.06));
   color: var(--text, #fafafa);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #7c6aff) 45%, transparent);
+}
+
+.tds-series-tab:hover:not(.tds-series-tab--active) {
+  color: var(--text-secondary, #c8c8c8);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .tds-series-tab:focus-visible {
   outline: 2px solid var(--accent, #7c6aff);
-  outline-offset: 2px;
+  outline-offset: 1px;
+  z-index: 1;
 }
 
 .tds-tab-panel[hidden] {
@@ -1416,6 +1514,11 @@ html[data-theme="pink"] .tds-season-mark-btn--complete { border-color: #fff; col
   outline-offset: 2px;
 }
 
+.tds-movie-card__add--busy {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .tds-movie-card__add--on-list,
 .tds-movie-card__add:disabled {
   opacity: 0.75;
@@ -1442,16 +1545,24 @@ html[data-theme="pink"] .tds-season-mark-btn--complete { border-color: #fff; col
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.75rem;
-  height: 2.75rem;
+  width: 2.85rem;
+  height: 2.85rem;
   padding: 0;
-  border: 1px solid var(--border-strong, #525252);
+  border: 2px solid color-mix(in srgb, var(--accent, #0095f6) 70%, #fff);
   border-radius: 50%;
-  background: var(--bg-elevated, #121212);
-  color: var(--text, #fafafa);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  background: var(--accent, #0095f6);
+  color: #fff;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent, #0095f6) 28%, transparent),
+    0 6px 18px rgba(0, 0, 0, 0.55);
   cursor: pointer;
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition: opacity 0.2s ease, transform 0.2s ease, filter 0.15s ease;
+}
+
+.tds-scroll-to-seasons:not([hidden]):hover,
+.tds-scroll-to-seasons:not([hidden]):focus-visible {
+  filter: brightness(1.08);
+  outline: none;
 }
 
 .tds-scroll-to-seasons:not([hidden]):active {
@@ -1459,8 +1570,22 @@ html[data-theme="pink"] .tds-season-mark-btn--complete { border-color: #fff; col
 }
 
 .tds-scroll-to-seasons svg {
-  width: 1.25rem;
-  height: 1.25rem;
+  width: 1.3rem;
+  height: 1.3rem;
+  stroke-width: 2.75;
+}
+
+html[data-theme="light"] .tds-scroll-to-seasons {
+  color: #fff;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent, #0095f6) 22%, transparent),
+    0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
+html[data-theme="pink"] .tds-scroll-to-seasons {
+  background: #fff;
+  color: #111;
+  border-color: rgba(255, 255, 255, 0.9);
 }
 
 @media (prefers-reduced-motion: reduce) {

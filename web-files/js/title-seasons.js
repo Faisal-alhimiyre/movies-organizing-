@@ -984,7 +984,6 @@
           <span>${esc(t("seasons.loading"))}</span>
         </div>
         <div class="tds-error-section" data-tds-part="seasons-error" hidden></div>
-        <div class="tds-stale-banner" data-tds-part="stale-banner" hidden></div>
         <div class="tds-seasons-section" data-tds-part="seasons-section" hidden>
           <div class="tds-carousel-wrap">
             <button class="tds-nav-btn tds-nav-btn--prev" data-tds-action="prev-season" hidden
@@ -1035,44 +1034,46 @@
           <div class="tds-movies-list" data-tds-part="similar-list" hidden role="list"></div>
         </div>
         <div class="tds-episodes-section" data-tds-part="episodes-section" hidden>
-          <div class="tds-episodes-header">
-            <h3 class="tds-episodes-title" data-tds-label="episodes-title"></h3>
-          </div>
-          <div class="tds-spoiler-row" data-tds-part="spoiler-row" hidden>
-            <button type="button" class="tds-spoiler-toggle" role="switch"
-              aria-checked="false" data-tds-action="toggle-spoiler">
-              <span class="tds-spoiler-toggle__label">${esc(t("seasons.spoilerMode"))}</span>
-              <span class="tds-spoiler-toggle__track" aria-hidden="true">
-                <span class="tds-spoiler-toggle__thumb"></span>
-              </span>
-            </button>
-            <button type="button" class="tds-spoiler-toggle" role="switch"
-              aria-checked="false" data-tds-action="toggle-hide-ratings">
-              <span class="tds-spoiler-toggle__label">${esc(t("seasons.hideEpisodeRatings"))}</span>
-              <span class="tds-spoiler-toggle__track" aria-hidden="true">
-                <span class="tds-spoiler-toggle__thumb"></span>
-              </span>
-            </button>
-            <button type="button" class="tds-spoiler-toggle" role="switch"
-              aria-checked="false" data-tds-action="toggle-hide-filler" hidden>
-              <span class="tds-spoiler-toggle__label">${esc(t("seasons.hideFiller"))}</span>
-              <span class="tds-spoiler-toggle__track" aria-hidden="true">
-                <span class="tds-spoiler-toggle__thumb"></span>
-              </span>
-            </button>
-          </div>
-          <div class="tds-episode-jump" data-tds-part="episode-jump" hidden>
-            <label class="tds-episode-jump__label" for="tdsEpisodeJumpInput">${esc(t("seasons.jumpToEpisode"))}</label>
-            <div class="tds-episode-jump__field">
-              <input id="tdsEpisodeJumpInput" class="tds-episode-jump__input form-input"
-                data-tds-part="episode-jump-input"
-                type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
-                placeholder="${esc(t("seasons.jumpToEpisodePlaceholder"))}"
-                aria-label="${esc(t("seasons.jumpToEpisode"))}" />
-              <button type="button" class="tds-episode-jump__go" data-tds-action="jump-episode"
-                aria-label="${esc(t("seasons.jumpToEpisodeGo"))}">↵</button>
+          <div class="tds-episodes-toolbar">
+            <div class="tds-episodes-header">
+              <h3 class="tds-episodes-title" data-tds-label="episodes-title"></h3>
             </div>
-            <p class="tds-episode-jump__hint" data-tds-part="episode-jump-hint" hidden></p>
+            <div class="tds-spoiler-row" data-tds-part="spoiler-row" hidden>
+              <button type="button" class="tds-spoiler-toggle" role="switch"
+                aria-checked="false" data-tds-action="toggle-spoiler">
+                <span class="tds-spoiler-toggle__label">${esc(t("seasons.spoilerMode"))}</span>
+                <span class="tds-spoiler-toggle__track" aria-hidden="true">
+                  <span class="tds-spoiler-toggle__thumb"></span>
+                </span>
+              </button>
+              <button type="button" class="tds-spoiler-toggle" role="switch"
+                aria-checked="false" data-tds-action="toggle-hide-ratings">
+                <span class="tds-spoiler-toggle__label">${esc(t("seasons.hideEpisodeRatings"))}</span>
+                <span class="tds-spoiler-toggle__track" aria-hidden="true">
+                  <span class="tds-spoiler-toggle__thumb"></span>
+                </span>
+              </button>
+              <button type="button" class="tds-spoiler-toggle" role="switch"
+                aria-checked="false" data-tds-action="toggle-hide-filler" hidden>
+                <span class="tds-spoiler-toggle__label">${esc(t("seasons.hideFiller"))}</span>
+                <span class="tds-spoiler-toggle__track" aria-hidden="true">
+                  <span class="tds-spoiler-toggle__thumb"></span>
+                </span>
+              </button>
+            </div>
+            <div class="tds-episode-jump" data-tds-part="episode-jump" hidden>
+              <label class="tds-episode-jump__label" for="tdsEpisodeJumpInput">${esc(t("seasons.jumpToEpisode"))}</label>
+              <div class="tds-episode-jump__field">
+                <input id="tdsEpisodeJumpInput" class="tds-episode-jump__input form-input"
+                  data-tds-part="episode-jump-input"
+                  type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+                  placeholder="${esc(t("seasons.jumpToEpisodePlaceholder"))}"
+                  aria-label="${esc(t("seasons.jumpToEpisode"))}" />
+                <button type="button" class="tds-episode-jump__go" data-tds-action="jump-episode"
+                  aria-label="${esc(t("seasons.jumpToEpisodeGo"))}">↵</button>
+              </div>
+              <p class="tds-episode-jump__hint" data-tds-part="episode-jump-hint" hidden></p>
+            </div>
           </div>
           <div class="tds-episodes-status" data-tds-part="episodes-status" hidden></div>
           <div class="tds-episode-list" role="list" aria-live="polite"></div>
@@ -1640,19 +1641,37 @@
     const App = window.WatchlistApp;
     if (!WM || !App?.openAddTitleConfirm) return;
 
-    const defaultContentType =
-      entry.contentType ||
+    const details = await resolveRelatedEntryDetails(entry);
+    if (!details?.title) return;
+
+    await App.openAddTitleConfirm(details, {
+      defaultContentType: details.contentType,
+      origin: "related",
+      forceOnList: entry.onList === true,
+    });
+  }
+
+  function relatedEntryContentType(entry) {
+    return (
+      entry?.contentType ||
       (_item?.contentType === "anime"
         ? "anime"
         : _item?.contentType === "tvSeries"
           ? "tvSeries"
-          : "movies");
+          : "movies")
+    );
+  }
+
+  async function resolveRelatedEntryDetails(entry) {
+    if (!entry?.title) return null;
+    const WM = window.WatchlistMetadata;
+    const defaultContentType = relatedEntryContentType(entry);
 
     let details = null;
     if (entry.anilistId) {
-      details = await WM.fetchAnilistById(entry.anilistId);
+      details = await WM?.fetchAnilistById?.(entry.anilistId);
     } else if (entry.pick) {
-      details = await WM.getDetailsForPick(entry.pick, {
+      details = await WM?.getDetailsForPick?.(entry.pick, {
         preferAnime: defaultContentType === "anime",
       });
     }
@@ -1682,18 +1701,70 @@
             ? [_item.genre]
             : [],
         tmdbId: entry.tmdbId || entry.pick?.tmdbId || null,
+        anilistId: entry.anilistId || null,
+        imdbId: entry.imdbId || null,
+        ageRating: entry.ageRating || "",
+        seasonCount: entry.seasonCount || null,
+        episodeCount: entry.episodeCount || null,
+        runtime: entry.runtimeMinutes
+          ? `${entry.runtimeMinutes} min`
+          : entry.runtime || "",
       };
     }
 
+    details.contentType = details.contentType || defaultContentType;
+
     if (defaultContentType === "anime") {
-      details = await WM.ensureAnimeDetails(details, { forceAnime: true });
+      details = (await WM?.ensureAnimeDetails?.(details, { forceAnime: true })) || details;
     }
 
-    await App.openAddTitleConfirm(details, {
-      defaultContentType,
-      origin: "related",
-      forceOnList: entry.onList === true,
-    });
+    return details;
+  }
+
+  async function quickAddRelatedTitle(entry, buttonEl) {
+    if (!entry?.title) return;
+    const App = window.WatchlistApp;
+    if (!App?.quickAddFromDetails) return;
+
+    if (entry.onList === true || App.isTitleOnList?.({
+      title: entry.title,
+      anilistId: entry.anilistId,
+      imdbId: entry.imdbId,
+      year: entry.year,
+    })) {
+      entry.onList = true;
+      refreshRelatedPanels();
+      return;
+    }
+
+    if (buttonEl) {
+      buttonEl.disabled = true;
+      buttonEl.classList.add("tds-movie-card__add--busy");
+    }
+
+    try {
+      const details = await resolveRelatedEntryDetails(entry);
+      if (!details?.title) return;
+
+      const result = await App.quickAddFromDetails(details, {
+        defaultContentType: relatedEntryContentType(entry),
+        genre: _item?.genre,
+        secondaryGenres: _item?.secondaryGenres,
+      });
+
+      if (result?.ok) {
+        entry.onList = true;
+        refreshRelatedPanels();
+      } else if (buttonEl) {
+        buttonEl.disabled = false;
+        buttonEl.classList.remove("tds-movie-card__add--busy");
+      }
+    } catch {
+      if (buttonEl) {
+        buttonEl.disabled = false;
+        buttonEl.classList.remove("tds-movie-card__add--busy");
+      }
+    }
   }
 
   async function openRelatedMovie(index) {
@@ -1713,6 +1784,22 @@
   async function openSimilarTitle(index) {
     const title = _similarResult?.titles?.[Number(index)];
     await openRelatedTitle(title);
+  }
+
+  async function addRelatedMovie(index, buttonEl) {
+    const movie = _moviesResult?.movies?.[Number(index)];
+    if (!movie) return;
+    if (!movie.contentType) {
+      movie.contentType =
+        _item?.contentType === "anime" ? "anime" : "movies";
+    }
+    await quickAddRelatedTitle(movie, buttonEl);
+  }
+
+  async function addSimilarTitle(index, buttonEl) {
+    const title = _similarResult?.titles?.[Number(index)];
+    if (!title) return;
+    await quickAddRelatedTitle(title, buttonEl);
   }
 
   // ─── Metadata loading ─────────────────────────────────────────────────────
@@ -3027,11 +3114,8 @@
     errEl.setAttribute("role", "alert");
   }
 
-  function showStale(msg) {
-    const bannerEl = getP("stale-banner");
-    if (!bannerEl) return;
-    bannerEl.textContent = msg;
-    bannerEl.hidden = false;
+  function showStale() {
+    // Intentionally unused — cache freshness is not shown to users.
   }
 
   // ─── Targeted update: individual season card ──────────────────────────────
@@ -3365,11 +3449,11 @@
         break;
       }
       case "add-related-movie": {
-        void openRelatedMovie(target.dataset.tdsMovieIndex);
+        void addRelatedMovie(target.dataset.tdsMovieIndex, target);
         break;
       }
       case "add-similar-title": {
-        void openSimilarTitle(target.dataset.tdsMovieIndex);
+        void addSimilarTitle(target.dataset.tdsMovieIndex, target);
         break;
       }
       case "select-season": {

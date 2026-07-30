@@ -310,13 +310,13 @@
 .td-header {
   display: flex;
   align-items: flex-start;
-  gap: 0.85rem;
-  padding: 0.65rem 1rem 0.75rem;
+  gap: 1rem;
+  padding: 0.85rem 1.15rem 0.9rem;
 }
 
 .td-poster-wrap {
-  flex: 0 0 6.5rem;
-  width: 6.5rem;
+  flex: 0 0 6.75rem;
+  width: 6.75rem;
 }
 
 .td-poster-btn {
@@ -327,7 +327,7 @@
   border: none;
   background: none;
   cursor: zoom-in;
-  border-radius: 8px;
+  border-radius: 10px;
   font: inherit;
   color: inherit;
 }
@@ -345,9 +345,9 @@
   width: 100%;
   aspect-ratio: 2 / 3;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: 10px;
   display: block;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 
 .td-poster--empty {
@@ -357,7 +357,7 @@
   aspect-ratio: 2 / 3;
   background: var(--bg-card, #1a1a1a);
   border: 1px solid var(--border, #363636);
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 1.75rem;
   color: var(--text-muted, #a8a8a8);
 }
@@ -369,7 +369,7 @@
   aspect-ratio: 2 / 3;
   background: rgba(220, 80, 80, 0.08);
   border: 1px solid rgba(220, 80, 80, 0.3);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 0.4rem;
   text-align: center;
   font-size: 0.6rem;
@@ -382,77 +382,89 @@
 .td-header-info {
   flex: 1 1 auto;
   min-width: 0;
-  padding-top: 0.05rem;
+  padding-top: 0.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
+/* Quiet type chip stays readable; meta badges keep their semantic colors. */
 .td-badge-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem;
-  margin-bottom: 0.42rem;
+  gap: 0.28rem;
+  margin-bottom: 0;
 }
 
 .td-badge-row .badge {
-  font-size: 0.6rem;
-  padding: 0.12rem 0.36rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.18rem 0.45rem;
+  border-radius: 6px;
 }
 
 .td-title {
-  margin: 0 0 0.28rem;
+  margin: 0;
   font-family: var(--font-display, inherit);
-  font-size: 1.05rem;
+  font-size: 1.2rem;
   font-weight: 700;
-  line-height: 1.22;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
   color: var(--text, #fafafa);
 }
 
 .td-alt-title {
   display: block;
-  margin-top: 0.12rem;
-  font-size: 0.74rem;
+  margin-top: 0.15rem;
+  font-size: 0.76rem;
   font-weight: 400;
   color: var(--text-muted, #a8a8a8);
 }
 
 .td-lead {
-  margin: 0.12rem 0 0;
-  font-size: 0.74rem;
+  margin: 0;
+  font-size: 0.76rem;
   color: var(--title-accent, #c4a882);
-  line-height: 1.35;
+  line-height: 1.4;
 }
 
 /* ── Genres section ─────────────────────────────────────────────────────── */
 
 .td-genres {
-  padding: 0 1rem 0;
+  padding: 0.15rem 1.15rem 0;
 }
 
 .td-section-label {
-  display: block;
-  margin-bottom: 0.22rem;
-  font-size: 0.55rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-muted, #a8a8a8);
+  display: none; /* less chrome — genres speak for themselves */
 }
 
 .td-badge-row--genres {
-  overflow-x: auto;
-  flex-wrap: nowrap;
-  scrollbar-width: none;
-  padding-bottom: 0.1rem;
+  display: flex;
+  flex-wrap: wrap;
+  overflow: visible;
+  gap: 0.3rem;
+  padding-bottom: 0;
 }
 
-.td-badge-row--genres::-webkit-scrollbar { display: none; }
+.td-badge-row--genres .badge {
+  font-size: 0.68rem;
+  padding: 0.28rem 0.6rem;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
 
 /* ── Summary / overview ─────────────────────────────────────────────────── */
 
 .td-summary {
-  padding: 0.65rem 1rem 0;
-  font-size: 0.85rem;
+  margin: 0.75rem 1.15rem 0;
+  padding: 0.75rem 0.85rem;
+  font-size: 0.86rem;
   line-height: 1.55;
-  color: var(--text-muted, #a8a8a8);
+  color: var(--text-secondary, #c8c8c8);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
 }
 
 .td-summary:empty { display: none; }
@@ -460,27 +472,30 @@
 /* ── External scores ────────────────────────────────────────────────────── */
 
 .td-scores {
-  padding: 0.25rem 0 0;
+  padding: 0.15rem 0 0;
 }
 
 .td-scores .card__rating-badges {
   display: flex !important;
   flex-wrap: wrap;
   justify-content: flex-start;
-  gap: 0.4rem;
+  gap: 0.35rem;
   margin: 0;
   min-height: 0;
 }
 
 .td-scores .card__score {
-  /* Larger than ordinary card badges for comfortable reading and touch target */
   min-height: 2.4rem;
   padding: 0.3rem 0.85rem 0.3rem 0.75rem;
   gap: 0.45rem;
   border-radius: 8px;
 }
 
-.td-scores .card__score-value { font-size: 1rem; font-weight: 700; }
+.td-scores .card__score-value {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
 .td-scores .card__score-logo--imdb { height: 1.1rem; width: auto; }
 .td-scores .card__score-logo--anilist { height: 1.2rem; width: auto; }
 
@@ -504,11 +519,17 @@
 /* ── My Rating block ────────────────────────────────────────────────────── */
 
 .td-my-rating {
-  margin: 0.7rem 1rem 0;
+  margin: 0.55rem 1rem 0;
   padding: 0.55rem 0.65rem;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border, #363636);
   border-radius: 8px;
+}
+
+/* Watch status sits with title meta (after genres), not under season plot. */
+.td-genres + .td-my-rating,
+.td-genres + .td-my-rating--chip {
+  margin-top: 0.45rem;
 }
 
 .td-my-rating--chip {
@@ -518,7 +539,7 @@
   gap: 0.5rem;
   width: fit-content;
   max-width: 100%;
-  margin: 0.7rem 1rem 0;
+  margin: 0.55rem 1rem 0;
   padding: 0;
   background: none;
   border: none;
@@ -531,20 +552,144 @@
   width: fit-content;
 }
 
+/* Clear action button — not a passive status label. */
+.td-watch-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.45rem 0.95rem 0.45rem 0.75rem;
+  font-family: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    transform 0.12s ease, box-shadow 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.td-watch-toggle__icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: 0 0 auto;
+}
+
+.td-watch-toggle__label {
+  white-space: nowrap;
+}
+
+.td-watch-toggle--unwatched {
+  color: rgba(250, 250, 250, 0.95);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+}
+
+.td-watch-toggle--unwatched:hover,
+.td-watch-toggle--unwatched:focus-visible {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+}
+
+.td-watch-toggle--in-progress {
+  color: var(--in-progress, #fb923c);
+  background: color-mix(in srgb, var(--in-progress, #fb923c) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--in-progress, #fb923c) 70%, transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--in-progress, #fb923c) 18%, transparent) inset;
+}
+
+.td-watch-toggle--in-progress:hover,
+.td-watch-toggle--in-progress:focus-visible {
+  background: color-mix(in srgb, var(--in-progress, #fb923c) 22%, transparent);
+  border-color: var(--in-progress, #fb923c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--in-progress, #fb923c) 22%, transparent);
+}
+
+.td-watch-toggle:active {
+  transform: scale(0.97);
+}
+
+.td-watch-toggle:focus-visible {
+  outline: none;
+}
+
+html[data-theme="light"] .td-watch-toggle--unwatched {
+  color: rgba(20, 20, 20, 0.9);
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.32);
+  box-shadow: none;
+}
+
+html[data-theme="light"] .td-watch-toggle--unwatched:hover,
+html[data-theme="light"] .td-watch-toggle--unwatched:focus-visible {
+  background: rgba(0, 0, 0, 0.07);
+  border-color: rgba(0, 0, 0, 0.45);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+}
+
+/* Legacy chip badge hooks (cards / older markup). */
+.td-my-rating--chip .card__footer-badge--unwatched {
+  color: rgba(250, 250, 250, 0.92);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding: 0.4rem 0.85rem;
+}
+
+.td-my-rating--chip .card__footer-badge--unwatched:hover,
+.td-my-rating--chip .card__footer-badge--unwatched:focus-visible {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.td-my-rating--chip .card__footer-badge--in-progress,
+.td-my-rating--chip .card__watch-status--in-progress {
+  color: var(--in-progress, #fb923c);
+  background: color-mix(in srgb, var(--in-progress, #fb923c) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--in-progress, #fb923c) 65%, transparent);
+  font-weight: 700;
+  padding: 0.4rem 0.85rem;
+}
+
+.td-my-rating--chip .card__footer-badge--watched {
+  color: var(--watched, #4ade80);
+  background: color-mix(in srgb, var(--watched, #4ade80) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--watched, #4ade80) 55%, transparent);
+  font-weight: 700;
+  padding: 0.4rem 0.85rem;
+}
+
 .td-my-rating--chip .card__watch-status {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.35rem 0.7rem;
+  padding: 0.4rem 0.85rem;
   font-size: 0.82rem;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.2;
   border-radius: 999px;
   cursor: pointer;
   font-family: inherit;
   color: var(--in-progress, #fb923c);
-  background: transparent;
-  border: 1px solid color-mix(in srgb, var(--in-progress, #fb923c) 55%, transparent);
+  background: color-mix(in srgb, var(--in-progress, #fb923c) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--in-progress, #fb923c) 65%, transparent);
+}
+
+html[data-theme="light"] .td-my-rating--chip .card__footer-badge--unwatched {
+  color: rgba(20, 20, 20, 0.88);
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.28);
+}
+
+html[data-theme="light"] .td-my-rating--chip .card__footer-badge--unwatched:hover,
+html[data-theme="light"] .td-my-rating--chip .card__footer-badge--unwatched:focus-visible {
+  background: rgba(0, 0, 0, 0.09);
+  border-color: rgba(0, 0, 0, 0.4);
 }
 
 .td-my-rating--chip.td-my-rating--movie {
@@ -709,6 +854,116 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 0.45rem;
+}
+
+.td-watch-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.85rem 0.4rem 0.7rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  border-radius: 999px;
+}
+
+.td-watch-status__icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: 0 0 auto;
+}
+
+.td-watch-status--watched {
+  color: var(--watched, #4ade80);
+  background: color-mix(in srgb, var(--watched, #4ade80) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--watched, #4ade80) 55%, transparent);
+}
+
+/* Unified Watched | Rate control */
+.td-watch-rate {
+  display: inline-flex;
+  align-items: stretch;
+  max-width: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--watched, #4ade80) 55%, transparent);
+  background: color-mix(in srgb, var(--watched, #4ade80) 12%, transparent);
+}
+
+.td-watch-rate__watched,
+.td-watch-rate__rate {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  font-family: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 0.15s ease, filter 0.15s ease, color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.td-watch-rate__watched {
+  padding: 0.48rem 0.85rem 0.48rem 0.75rem;
+  color: var(--watched, #4ade80);
+  background: transparent;
+}
+
+.td-watch-rate__watched:hover,
+.td-watch-rate__watched:focus-visible {
+  background: color-mix(in srgb, var(--watched, #4ade80) 18%, transparent);
+}
+
+.td-watch-rate__watched:focus-visible,
+.td-watch-rate__rate:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--watched, #4ade80) 55%, transparent);
+}
+
+.td-watch-rate__icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: 0 0 auto;
+}
+
+.td-watch-rate__rate {
+  padding: 0.48rem 1.05rem;
+  color: #fff;
+  background: var(--watched, #4ade80);
+  border-inline-start: 1px solid color-mix(in srgb, var(--watched, #4ade80) 70%, transparent);
+  font-weight: 700;
+}
+
+.td-watch-rate__rate:hover,
+.td-watch-rate__rate:focus-visible {
+  filter: brightness(1.06);
+}
+
+.td-watch-rate__watched:active,
+.td-watch-rate__rate:active {
+  filter: brightness(0.94);
+}
+
+html[data-theme="light"] .td-watch-rate {
+  background: color-mix(in srgb, var(--watched, #2d9a52) 10%, #fff);
+  border-color: color-mix(in srgb, var(--watched, #2d9a52) 45%, rgba(0, 0, 0, 0.15));
+}
+
+html[data-theme="light"] .td-watch-rate__rate {
+  color: #fff;
+  background: var(--watched, #2d9a52);
+  border-inline-start-color: color-mix(in srgb, var(--watched, #2d9a52) 40%, rgba(0, 0, 0, 0.1));
+}
+
+.td-my-rating--watched-unrated .td-my-rating__rate-btn {
+  min-height: 2.15rem;
 }
 
 .td-my-rating--chip .td-my-rating__note-btn {
@@ -1105,9 +1360,13 @@ html[data-theme="pink"] .td-panel {
     padding: 0.14rem 0.4rem;
   }
 
-  .td-genres { padding: 0 1.25rem 0; }
-  .td-summary { padding: 0.7rem 1.25rem 0; font-size: 0.88rem; }
-  .td-scores { padding: 0.6rem 1.25rem 0; }
+  .td-genres { padding: 0.2rem 1.25rem 0; }
+  .td-summary {
+    margin: 0.85rem 1.25rem 0;
+    padding: 0.8rem 0.95rem;
+    font-size: 0.9rem;
+  }
+  .td-scores { padding: 0.2rem 0 0; }
   .td-my-rating { margin: 0.75rem 1.25rem 0; }
   .td-my-rating--chip { margin: 0.75rem 1.25rem 0; }
   .td-my-rating--chip.td-my-rating--in-progress:not(.td-my-rating--movie) { margin: 0.75rem 1.25rem 0; }

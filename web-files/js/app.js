@@ -7455,6 +7455,88 @@
     await showSearchConfirmStep(enriched);
   }
 
+  /**
+   * Instant add from related/similar + buttons — no confirm sheet.
+   * Uses suggested genres (or the parent card's genre when provided).
+   */
+  async function quickAddFromDetails(details, options = {}) {
+    if (!details?.title) return { ok: false, reason: "no_title" };
+
+    const contentType = normalizeContentType(
+      options.defaultContentType || details.contentType || "movies"
+    );
+    const WM = window.WatchlistMetadata;
+
+    let resolvedDetails = { ...details, contentType };
+    if (contentType === "anime") {
+      resolvedDetails =
+        (await WM?.resolveDetailsForWatchlistAdd?.(
+          {
+            anilistId: details.anilistId,
+            title: details.title,
+            year: details.year,
+            source: "anilist",
+            poster: details.poster,
+            plot: details.plot,
+          },
+          "anime",
+          { pipeline: "related-quick-add", posterRequired: false }
+        )) ||
+        (await WM?.ensureAnimeDetails?.(details, { forceAnime: true })) ||
+        resolvedDetails;
+    }
+
+    if (isTitleOnList({
+      title: resolvedDetails.title || details.title,
+      imdbId: resolvedDetails.imdbId || details.imdbId,
+      anilistId: resolvedDetails.anilistId || details.anilistId,
+      year: resolvedDetails.year || details.year,
+    })) {
+      return { ok: true, alreadyOnList: true };
+    }
+
+    const suggested =
+      resolvedDetails.mergedGenres ||
+      WM?.suggestGenres?.(resolvedDetails.genres, STANDARD_GENRES, contentType) ||
+      [];
+    const genre = normalizeGenre(
+      options.genre ||
+        suggested[0] ||
+        WM?.defaultGenreForContentType?.(contentType)
+    );
+    const secondaryGenres = normalizeSecondaryGenres(
+      genre,
+      options.secondaryGenres ??
+        suggested.filter((entry) => entry !== genre)
+    );
+
+    const item = buildItemFromSearchDetails(resolvedDetails, {
+      contentType,
+      genre,
+      secondaryGenres,
+    });
+    if (!item?.title) return { ok: false, reason: "no_title" };
+
+    const duplicate = findDuplicate(item, null);
+    if (duplicate) {
+      return { ok: true, alreadyOnList: true, item: duplicate };
+    }
+
+    state.items.push(item);
+    state.data = itemsToNested(state.items);
+    saveData();
+    updateGenreOptions();
+    updateStats();
+    clearTypeViewDomCache();
+    queueItemBadgeEnrichment(item.id);
+    // Keep an open title-detail sheet intact; list will catch up when it closes.
+    if (!window.WatchlistTitleDetail?.isOpen?.()) {
+      syncListCard(item.id);
+    }
+
+    return { ok: true, alreadyOnList: false, item };
+  }
+
   function isTitleOnList(hints) {
     if (!hints) return false;
     return isSearchResultOnList({
@@ -13760,6 +13842,7 @@
     },
     normalizeGenre,
     openAddTitleConfirm,
+    quickAddFromDetails,
     getSearchConfirmBackKey,
     getSearchConfirmAddKey,
     isTitleOnList,

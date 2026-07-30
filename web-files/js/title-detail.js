@@ -833,11 +833,14 @@
       return `<div class="td-my-rating td-my-rating--chip${movieClass}">
         <div class="td-my-rating__chip-row">
           <button type="button"
-            class="card__footer-badge card__footer-badge--unwatched"
+            class="td-watch-toggle td-watch-toggle--unwatched"
             data-td-action="quick-toggle-watched"
             data-td-id="${esc(itemId)}"
             aria-label="${esc(t("card.markWatched"))}">
-            ${esc(t("card.notWatchedShort"))}
+            <svg class="td-watch-toggle__icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"></circle>
+            </svg>
+            <span class="td-watch-toggle__label">${esc(t("card.markWatched"))}</span>
           </button>
         </div>
         ${movieBar}
@@ -849,11 +852,15 @@
       return `<div class="td-my-rating td-my-rating--chip td-my-rating--in-progress${movieClass}">
         <div class="td-my-rating__toolbar">
           <button type="button"
-            class="card__watch-status card__watch-status--in-progress"
+            class="td-watch-toggle td-watch-toggle--in-progress"
             data-td-action="quick-toggle-watched"
             data-td-id="${esc(itemId)}"
             aria-label="${esc(t("card.markWatched"))}">
-            ${esc(t("card.inProgress"))}
+            <svg class="td-watch-toggle__icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"></circle>
+              <path d="M8 12h8"></path>
+            </svg>
+            <span class="td-watch-toggle__label">${esc(t("card.markWatched"))}</span>
           </button>
           <button type="button" class="btn btn--ghost btn--sm td-my-rating__note-btn"
             data-td-action="add-note" data-td-id="${esc(itemId)}">
@@ -865,15 +872,31 @@
       </div>`;
     }
 
-    // Watched (fully): show rating controls
+    // Watched (fully): status + rate as one control; Watched toggles back off
     if (!rated) {
-      return `<div class="td-my-rating td-my-rating--chip">
-        <button
-          type="button"
-          class="btn btn--primary td-my-rating__rate-btn"
-          data-td-action="rate"
-          data-td-id="${esc(itemId)}"
-        >${esc(t("detail.rate"))}</button>
+      return `<div class="td-my-rating td-my-rating--chip td-my-rating--watched-unrated">
+        <div class="td-watch-rate" role="group" aria-label="${esc(t("detail.watched"))}">
+          <button
+            type="button"
+            class="td-watch-rate__watched"
+            data-td-action="quick-toggle-watched"
+            data-td-id="${esc(itemId)}"
+            aria-label="${esc(t("card.markUnwatched"))}"
+            title="${esc(t("card.markUnwatched"))}"
+          >
+            <svg class="td-watch-rate__icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"></circle>
+              <path d="M8.5 12.5l2.2 2.2 4.8-5"></path>
+            </svg>
+            <span>${esc(t("detail.watched"))}</span>
+          </button>
+          <button
+            type="button"
+            class="td-watch-rate__rate"
+            data-td-action="rate"
+            data-td-id="${esc(itemId)}"
+          >${esc(t("detail.rate"))}</button>
+        </div>
       </div>`;
     }
 
@@ -1162,9 +1185,9 @@
     return `
       ${headerMarkup(item)}
       ${genresMarkup(item)}
+      ${myRating}
       ${seasonDetail}
       ${item.summary ? `<p class="td-summary" data-td-series-summary>${esc(item.summary)}</p>` : ""}
-      ${myRating}
       <div class="td-seasons-slot" id="tdSeasonsSlot"></div>
     `;
   }
