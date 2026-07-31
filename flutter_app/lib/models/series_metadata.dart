@@ -503,6 +503,7 @@ class RelatedMovie {
     this.runtimeMinutes,
     this.anilistId,
     this.tmdbId,
+    this.imdbId,
     this.score,
     this.genres = const [],
     this.contentType = 'movies',
@@ -520,6 +521,7 @@ class RelatedMovie {
   final int? runtimeMinutes;
   final int? anilistId;
   final int? tmdbId;
+  final String? imdbId;
   final double? score;
   final List<String> genres;
   final String contentType;
@@ -537,6 +539,7 @@ class RelatedMovie {
         if (runtimeMinutes != null) 'runtimeMinutes': runtimeMinutes,
         if (anilistId != null) 'anilistId': anilistId,
         if (tmdbId != null) 'tmdbId': tmdbId,
+        if (imdbId != null && imdbId!.isNotEmpty) 'imdbId': imdbId,
         if (score != null) 'score': score,
         if (genres.isNotEmpty) 'genres': genres,
         'contentType': contentType,
@@ -555,6 +558,7 @@ class RelatedMovie {
         runtimeMinutes: json['runtimeMinutes'] as int?,
         anilistId: json['anilistId'] as int?,
         tmdbId: json['tmdbId'] as int?,
+        imdbId: json['imdbId']?.toString(),
         score: (json['score'] as num?)?.toDouble(),
         genres: (json['genres'] as List?)
                 ?.map((e) => e.toString())

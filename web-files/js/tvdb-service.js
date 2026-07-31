@@ -277,6 +277,26 @@
     return flat?.length ? flat : null;
   }
 
+  /**
+   * Feature films linked to a series (TVDB season 0 / specials).
+   * Server-side filter + enrichment — preferred over client-side heuristics.
+   */
+  async function fetchRelatedMovies(tvdbId, locale = "en") {
+    if (!tvdbId) return null;
+    try {
+      const result = await callFunction({
+        action: "relatedMovies",
+        tvdbId,
+        locale,
+      });
+      if (!result || result.error || !Array.isArray(result.movies)) return null;
+      return result.movies;
+    } catch (err) {
+      logServiceWarn("[tvdb-service] fetchRelatedMovies failed:", err);
+      return null;
+    }
+  }
+
   // ── Expose ────────────────────────────────────────────────────────────
   window.WatchlistTvdb = {
     resolveId,
@@ -285,6 +305,7 @@
     fetchEpisodes,
     fetchEpisodeTotals,
     fetchAllEpisodes,
+    fetchRelatedMovies,
     collectOfficialSeasonNumbers,
   };
 })();

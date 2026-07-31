@@ -370,10 +370,14 @@ describe("_collectAnilistRelatedMoviesFromSources", () => {
 });
 
 describe("_isMovieLikeTvSpecial", () => {
-  const SM = window.WatchlistSeriesMetadata;
+  let SM;
+  beforeEach(() => {
+    SM = loadModule();
+  });
 
   test("accepts TVDB-linked movies and long features, rejects recaps", () => {
     expect(SM._isMovieLikeTvSpecial({ isMovie: true, title: "Seven Kings Must Die" })).toBe(true);
+    expect(SM._isMovieLikeTvSpecial({ isMovie: 348291, title: "Seven Kings Must Die" })).toBe(true);
     expect(SM._isMovieLikeTvSpecial({ linkedMovieId: 12345, title: "Feature" })).toBe(true);
     expect(
       SM._isMovieLikeTvSpecial({ runtimeMinutes: 114, title: "Seven Kings Must Die" })

@@ -14,6 +14,8 @@
 
 import {
   isForceRefresh,
+  readSeriesCache,
+  writeSeriesCache,
   TTL_EPISODES_MS,
   TTL_RESOLVE_MS,
   TTL_SERIES_MS,
@@ -28,6 +30,7 @@ const ALLOWED_ACTIONS = new Set([
   "episodes",
   "episodeTotals",
   "allEpisodes",
+  "relatedMovies",
 ]);
 
 // CORS headers — required for browser fetch from the website
@@ -113,14 +116,23 @@ async function tvdbGet(path: string, retried = false): Promise<unknown> {
 function s(v: unknown): string { return typeof v === "string" ? v.trim() : ""; }
 function n(v: unknown): number | null { const x = Number(v); return isFinite(x) ? x : null; }
 
-/** TVDB marks feature films in season 0 with isMovie and/or linkedMovie. */
+/** TVDB marks feature films in season 0 with isMovie and/or linkedMovie.
+ *  Note: `isMovie` is often the linked movie id (int64), not a 0/1 flag. */
 function tvdbEpisodeMovieFlags(ep: Record<string, unknown>) {
   const linkedMovieId = n(ep.linkedMovie);
-  const isMovie =
-    ep.isMovie === 1 ||
+  const isMovieRaw = n(ep.isMovie);
+  // True when API sends boolean true, 1, or any positive movie id.
+  const flagged =
     ep.isMovie === true ||
+    (isMovieRaw != null && isMovieRaw > 0) ||
     (linkedMovieId != null && linkedMovieId > 0);
-  return { isMovie, linkedMovieId };
+  const resolvedLinked =
+    linkedMovieId != null && linkedMovieId > 0
+      ? linkedMovieId
+      : isMovieRaw != null && isMovieRaw > 1
+        ? isMovieRaw
+        : null;
+  return { isMovie: flagged, linkedMovieId: resolvedLinked };
 }
 function a(v: unknown): unknown[] { return Array.isArray(v) ? v : []; }
 
@@ -167,6 +179,65 @@ async function enrichEpisodeStills(
   }
 }
 
+/**
+ * Season-0 list rows often omit isMovie / linkedMovie / runtime for feature
+ * films. Pull extended episode records for specials that still look ambiguous.
+ */
+async function enrichSeason0MovieFlags(
+  episodes: Array<{
+    tvdbEpId: number | null;
+    isMovie: boolean;
+    linkedMovieId: number | null;
+    runtimeMinutes: number | null;
+    title: string;
+    still: string;
+  }>,
+): Promise<void> {
+  const needs = episodes.filter((ep) => {
+    if (!ep.tvdbEpId) return false;
+    if (ep.isMovie) return false;
+    if (ep.linkedMovieId != null && ep.linkedMovieId > 0) return false;
+    // Already long enough to count as a movie without a round-trip.
+    if (ep.runtimeMinutes != null && ep.runtimeMinutes >= 80) return false;
+    return true;
+  });
+  if (!needs.length) return;
+
+  const CONCURRENCY = 8;
+  const capped = needs.slice(0, 40);
+  for (let i = 0; i < capped.length; i += CONCURRENCY) {
+    const batch = capped.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      batch.map(async (ep) => {
+        try {
+          const data = (await tvdbGet(`/episodes/${ep.tvdbEpId}`)) as {
+            data?: Record<string, unknown>;
+          };
+          const row = data?.data;
+          if (!row) return;
+          const flags = tvdbEpisodeMovieFlags(row);
+          if (flags.isMovie) ep.isMovie = true;
+          if (flags.linkedMovieId != null) ep.linkedMovieId = flags.linkedMovieId;
+          const runtime = n(row.runtime);
+          if (runtime != null && (ep.runtimeMinutes == null || ep.runtimeMinutes <= 0)) {
+            ep.runtimeMinutes = runtime;
+          }
+          if (!ep.still) {
+            const url = imgUrl(row.image);
+            if (url) ep.still = url;
+          }
+          const name = s(row.name);
+          if (name && (!ep.title || /^episode\s*\d+$/i.test(ep.title))) {
+            ep.title = name;
+          }
+        } catch {
+          // keep list row as-is
+        }
+      }),
+    );
+  }
+}
+
 function isAired(dateStr: string | null): boolean {
   if (!dateStr) return false;
   const t = new Date(dateStr).getTime();
@@ -205,11 +276,13 @@ async function paginateSeriesEpisodes(
 ): Promise<unknown[]> {
   const order = normalizeEpisodeOrder(opts.order, "official");
   const maxPages = opts.maxPages ?? 40;
-  const wantSeason = opts.season != null && opts.season > 0;
+  const wantSeason = opts.season != null && opts.season >= 0;
   const seasonParamWorks = order === "official" || order === "default";
   const useSeasonParam = wantSeason && seasonParamWorks;
   const allRaw: unknown[] = [];
   let page = 0;
+  // Prefer translated episode lists when we are not using ?season= (which
+  // returns untranslated names). Season 0 uses ?season=0 for reliability.
   let useLang = Boolean(opts.lang) && !useSeasonParam;
 
   while (page < maxPages) {
@@ -237,16 +310,16 @@ async function paginateSeriesEpisodes(
     allRaw.push(...eps);
 
     const hasNext = Boolean(data?.links?.next);
-    if (hasNext) {
+    if (hasNext && page < maxPages - 1) {
       page++;
       continue;
     }
     if (useSeasonParam) break;
-    if (eps.length >= 100) {
+    if (eps.length >= 100 && page < maxPages - 1) {
       page++;
       continue;
     }
-    if (eps.length >= TVDB_PAGE_SIZE_HINT) {
+    if (eps.length >= TVDB_PAGE_SIZE_HINT && page < maxPages - 1) {
       page++;
       continue;
     }
@@ -337,20 +410,29 @@ async function actionResolve(
     };
   }
 
-  // TMDb ID — remote source name on TVDB is "TheMovieDB.com"
+  // TMDb ID — try several remote-id spellings TVDB has used over time.
   if (p.tmdbId) {
     const tmdbId = n(p.tmdbId);
     if (!tmdbId || tmdbId <= 0 || !Number.isInteger(tmdbId)) {
       return { error: "invalid_tmdb_id" };
     }
-    const hit = await resolveSeriesByRemoteId(`TheMovieDB.com-${tmdbId}`);
-    if (!hit) return { error: "not_found" };
-    return {
-      tvdbId: hit.tvdbId,
-      matchSource: "tmdb",
-      confidence: "medium",
-      title: hit.title,
-    };
+    const candidates = [
+      String(tmdbId),
+      `TheMovieDB.com-${tmdbId}`,
+      `themoviedb-${tmdbId}`,
+    ];
+    for (const remote of candidates) {
+      const hit = await resolveSeriesByRemoteId(remote);
+      if (hit) {
+        return {
+          tvdbId: hit.tvdbId,
+          matchSource: "tmdb",
+          confidence: "medium",
+          title: hit.title,
+        };
+      }
+    }
+    return { error: "not_found" };
   }
 
   return { error: "no_identifier_provided" };
@@ -455,21 +537,40 @@ async function actionEpisodes(
   const lang = tvdbLanguage(p.locale);
   const order = normalizeEpisodeOrder(p.order, "official");
 
-  const allEps = allSeasons
-    ? await paginateSeriesEpisodes(id, { lang, maxPages: 80, order })
-    : await paginateSeriesEpisodes(id, {
-      // ?season= queries return untranslated episode text; use the lang
-      // episode list and filter locally so English/Arabic overviews resolve.
+  let allEps: unknown[];
+  if (allSeasons) {
+    allEps = await paginateSeriesEpisodes(id, { lang, maxPages: 80, order });
+  } else if (season === 0) {
+    // Prefer ?season=0 (feature films / linked movies). Some TVDB responses
+    // return an empty page for season=0 — fall back to the full lang list.
+    allEps = await paginateSeriesEpisodes(id, {
+      season: 0,
+      maxPages: 5,
+      order,
+    });
+    if (!allEps.length) {
+      allEps = await paginateSeriesEpisodes(id, {
+        lang,
+        maxPages: 20,
+        order,
+      });
+    }
+  } else {
+    allEps = await paginateSeriesEpisodes(id, {
       lang,
       maxPages: 10,
       order,
     });
+  }
 
   const seasonFiltered = allSeasons
     ? allEps
     : allEps.filter((ep: any) => {
       const sn = n(ep.seasonNumber);
-      return sn == null || sn === season;
+      if (sn === season) return true;
+      // Linked-movie specials sometimes omit seasonNumber.
+      if (season === 0 && sn == null) return true;
+      return false;
     });
 
   const episodes = seasonFiltered
@@ -514,6 +615,18 @@ async function actionEpisodes(
 
   if (!allSeasons || !shouldSkipBulkStillEnrichment(episodes.length)) {
     await enrichEpisodeStills(episodes as Array<{ tvdbEpId: number | null; still: string }>);
+  }
+  if (!allSeasons && season === 0) {
+    await enrichSeason0MovieFlags(
+      episodes as Array<{
+        tvdbEpId: number | null;
+        isMovie: boolean;
+        linkedMovieId: number | null;
+        runtimeMinutes: number | null;
+        title: string;
+        still: string;
+      }>,
+    );
   }
 
   return { source: "tvdb", tvdbId: id, season, episodes };
@@ -615,6 +728,188 @@ async function actionAllEpisodes(
   }
 
   return { source: "tvdb", tvdbId: id, order, episodes };
+}
+
+const TV_SPECIAL_NON_MOVIE_TITLE =
+  /\b(story\s+so\s+far|recap|making\s+of|behind\s+the\s+scenes|featurette|trailer|preview|deleted\s+scenes?|clip\s+show|retrospective|look\s+back|highlights?)\b/i;
+
+function isTvSpecialNonMovieTitle(title: string): boolean {
+  const t = s(title);
+  if (!t) return false;
+  if (TV_SPECIAL_NON_MOVIE_TITLE.test(t)) return true;
+  if (/^the\s+making\b/i.test(t)) return true;
+  return false;
+}
+
+function isMovieLikeTvSpecialRow(ep: {
+  isMovie?: boolean;
+  linkedMovieId?: number | null;
+  runtimeMinutes?: number | null;
+  title?: string;
+}): boolean {
+  if (ep.isMovie === true) return true;
+  const linked = n(ep.linkedMovieId);
+  if (linked != null && linked > 0) return true;
+  if (isTvSpecialNonMovieTitle(ep.title || "")) return false;
+  const runtime = n(ep.runtimeMinutes);
+  return runtime != null && runtime >= 80;
+}
+
+function pickMovieAgeRating(ratings: unknown): string {
+  const list = a(ratings) as Array<Record<string, unknown>>;
+  if (!list.length) return "";
+  const prefer = new Set(["usa", "us", "gbr", "gb", "can", "ca", "aus", "au"]);
+  for (const row of list) {
+    const country = s(row.country).toLowerCase();
+    const name = s(row.name) || s(row.fullName);
+    if (name && prefer.has(country)) return name;
+  }
+  for (const row of list) {
+    const name = s(row.name) || s(row.fullName);
+    if (name) return name;
+  }
+  return "";
+}
+
+function pickMovieImdbId(remoteIds: unknown): string | null {
+  for (const raw of a(remoteIds)) {
+    const row = raw as Record<string, unknown>;
+    const source = s(row.sourceName).toLowerCase();
+    const id = s(row.id);
+    if ((source === "imdb" || source === "imdb.com") && /^tt\d{6,10}$/i.test(id)) {
+      return id.toLowerCase();
+    }
+  }
+  return null;
+}
+
+/**
+ * Fill poster / genres / age rating / IMDb from the linked TVDB movie record.
+ * Related-movie lists are tiny (usually 1–2), so a few /movies/{id}/extended
+ * calls stay cheap and avoid episode screencaps as “posters”.
+ */
+async function enrichRelatedMovieCards(
+  movies: Array<Record<string, unknown>>,
+): Promise<void> {
+  const needs = movies.filter((m) => {
+    const linked = n(m.linkedMovieId);
+    return linked != null && linked > 0;
+  });
+  if (!needs.length) return;
+
+  const CONCURRENCY = 4;
+  for (let i = 0; i < needs.length; i += CONCURRENCY) {
+    const batch = needs.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      batch.map(async (movie) => {
+        const linked = n(movie.linkedMovieId);
+        if (!linked) return;
+        try {
+          const data = (await tvdbGet(`/movies/${linked}/extended`)) as {
+            data?: Record<string, unknown>;
+          };
+          const row = data?.data;
+          if (!row) return;
+
+          const poster = imgUrl(row.image);
+          if (poster) movie.poster = poster;
+
+          const genres = a(row.genres)
+            .map((g) => s((g as Record<string, unknown>)?.name))
+            .filter(Boolean)
+            .slice(0, 6);
+          if (genres.length) movie.genres = genres;
+
+          const age = pickMovieAgeRating(row.contentRatings);
+          if (age) movie.ageRating = age;
+
+          const imdbId = pickMovieImdbId(row.remoteIds);
+          if (imdbId) movie.imdbId = imdbId;
+
+          const name = s(row.name);
+          if (name) movie.title = name;
+
+          const overview = s(row.overview);
+          if (overview) movie.overview = overview;
+
+          const runtime = n(row.runtime);
+          if (runtime != null && runtime > 0) movie.runtimeMinutes = runtime;
+
+          const release = row.first_release as Record<string, unknown> | undefined;
+          const releaseDate = s(release?.date);
+          if (releaseDate.length >= 4) {
+            movie.year = releaseDate.slice(0, 4);
+            movie.airDate = releaseDate;
+          }
+        } catch {
+          // keep episode-derived fields
+        }
+      }),
+    );
+  }
+}
+
+/**
+ * Feature films linked to a series (season 0 / specials).
+ * Runs season-0 fetch + movie-flag enrichment, then returns only movie rows.
+ */
+async function actionRelatedMovies(
+  p: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const id = n(p.tvdbId);
+  if (!id || id <= 0 || !Number.isInteger(id)) return { error: "invalid_tvdb_id" };
+
+  const seasonResult = await actionEpisodes({
+    ...p,
+    tvdbId: id,
+    season: 0,
+    all: false,
+    allSeasons: false,
+  });
+  if (seasonResult.error) return seasonResult;
+
+  const episodes = Array.isArray(seasonResult.episodes)
+    ? (seasonResult.episodes as Array<Record<string, unknown>>)
+    : [];
+  const movies = episodes
+    .filter((ep) =>
+      isMovieLikeTvSpecialRow({
+        isMovie: ep.isMovie === true,
+        linkedMovieId: n(ep.linkedMovieId),
+        runtimeMinutes: n(ep.runtimeMinutes),
+        title: s(ep.title),
+      })
+    )
+    .map((ep) => ({
+      source: "tvdb",
+      tvdbEpId: n(ep.tvdbEpId),
+      seriesTvdbId: id,
+      seasonNumber: n(ep.seasonNumber) ?? 0,
+      episodeNumber: n(ep.episodeNumber),
+      title: s(ep.title),
+      overview: s(ep.overview),
+      // Prefer linked-movie poster after enrichment; still is a last-resort fallback.
+      still: s(ep.still),
+      poster: "",
+      runtimeMinutes: n(ep.runtimeMinutes),
+      airDate: ep.airDate ?? null,
+      isMovie: true,
+      linkedMovieId: n(ep.linkedMovieId),
+      year: s(ep.airDate).slice(0, 4),
+      genres: [] as string[],
+      ageRating: "",
+      imdbId: null as string | null,
+      contentType: "movies",
+    }))
+    .filter((m) => m.title);
+
+  await enrichRelatedMovieCards(movies);
+
+  for (const movie of movies) {
+    if (!s(movie.poster) && s(movie.still)) movie.poster = s(movie.still);
+  }
+
+  return { source: "tvdb", tvdbId: id, movies };
 }
 
 // ── Request handler ───────────────────────────────────────────────────────
@@ -719,8 +1014,8 @@ Deno.serve(async (req: Request) => {
         const order = normalizeEpisodeOrder(body.order, "official");
         const cacheKey = id
           ? allSeasons
-            ? `tvdb:v1:episodes-all:${id}:${lang}:${order}`
-            : `tvdb:v1:episodes:${id}:${season ?? "x"}:${lang}:${order}`
+            ? `tvdb:v3:episodes-all:${id}:${lang}:${order}`
+            : `tvdb:v4:episodes:${id}:${season ?? "x"}:${lang}:${order}`
           : "";
         result = cacheKey
           ? await withSeriesCache({
@@ -733,6 +1028,40 @@ Deno.serve(async (req: Request) => {
               compute: () => actionEpisodes(body),
             })
           : await actionEpisodes(body);
+        break;
+      }
+      case "relatedMovies": {
+        const id = n(body.tvdbId);
+        if (!id) {
+          result = await actionRelatedMovies(body);
+          break;
+        }
+        const relatedKey = `tvdb:v3:relatedMovies:${id}:${lang}`;
+        if (!forceRefresh) {
+          const hit = await readSeriesCache(relatedKey);
+          if (hit && Array.isArray(hit.movies) && hit.movies.length > 0) {
+            result = hit;
+            break;
+          }
+        }
+        // Never cache/serve empty related lists — recompute when no positive hit.
+        const fresh = await actionRelatedMovies(body);
+        if (
+          fresh &&
+          !fresh.error &&
+          Array.isArray(fresh.movies) &&
+          fresh.movies.length > 0
+        ) {
+          await writeSeriesCache({
+            cacheKey: relatedKey,
+            provider: "tvdb",
+            kind: "relatedMovies",
+            locale: lang,
+            payload: fresh,
+            ttlMs: TTL_SERIES_MS,
+          });
+        }
+        result = fresh;
         break;
       }
       case "episodeTotals": {

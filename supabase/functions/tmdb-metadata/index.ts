@@ -4,7 +4,8 @@
  * Proxies a small allowlisted subset of TMDB v3 calls so the browser never
  * needs a client-side TMDB API key for per-episode ratings.
  *
- * Allowed actions: resolve | seasonRatings | search | details | tvFetch | imdbSuggest | similar
+ * Allowed actions: resolve | seasonRatings | search | details | tvFetch |
+ *   imdbSuggest | similar | relatedMovies
  *
  * Secret env vars:
  *   TMDB_API_KEY   (required)
@@ -13,11 +14,13 @@
 
 import {
   isForceRefresh,
+  readSeriesCache,
   TTL_EPISODES_MS,
   TTL_RATINGS_MS,
   TTL_RESOLVE_MS,
   TTL_SERIES_MS,
   withSeriesCache,
+  writeSeriesCache,
 } from "../_shared/series-metadata-cache.ts";
 
 const TMDB_BASE = "https://api.themoviedb.org/3";
@@ -30,6 +33,7 @@ const ALLOWED_ACTIONS = new Set([
   "tvFetch",
   "imdbSuggest",
   "similar",
+  "relatedMovies",
 ]);
 
 const CORS: Record<string, string> = {
@@ -740,6 +744,233 @@ async function actionSimilar(
   return { ok: true, mediaType, tmdbId, results };
 }
 
+const TMDB_GENRE_NAMES: Record<number, string> = {
+  28: "Action",
+  12: "Adventure",
+  16: "Animation",
+  35: "Comedy",
+  80: "Crime",
+  99: "Documentary",
+  18: "Drama",
+  10751: "Family",
+  14: "Fantasy",
+  36: "History",
+  27: "Horror",
+  10402: "Music",
+  9648: "Mystery",
+  10749: "Romance",
+  878: "Sci-Fi",
+  10770: "TV Movie",
+  53: "Thriller",
+  10752: "War",
+  37: "Western",
+};
+
+const NON_FEATURE_MOVIE_TITLE =
+  /\b(behind\s+the\s+scenes|making\s+of|creating\s+the|no\s+half\s+measures|road\s+to|documentary|recap|look\s+back|featurette|panel|interview|q\s*&\s*a)\b/i;
+
+function normalizeFranchiseKey(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^(the|a|an)\s+/, "");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Require the series title as whole words (avoids "Breaking Bad" ⊂ "Breaking Badly"). */
+function titleIncludesSeries(titleKey: string, seriesKey: string): boolean {
+  if (!titleKey || !seriesKey) return false;
+  if (titleKey === seriesKey) return true;
+  const re = new RegExp(`(?:^|\\s)${escapeRegExp(seriesKey)}(?:\\s|$)`);
+  return re.test(titleKey);
+}
+
+function pickUsMovieCertification(details: Record<string, unknown> | null): string {
+  if (!details) return "";
+  const releaseDates = (details.release_dates as Record<string, unknown> | undefined)
+    ?.results;
+  if (!Array.isArray(releaseDates)) return "";
+  const prefer = ["US", "GB", "CA", "AU"];
+  for (const iso of prefer) {
+    const country = (releaseDates as Record<string, unknown>[]).find(
+      (r) => s(r.iso_3166_1).toUpperCase() === iso,
+    );
+    const dates = country?.release_dates;
+    if (!Array.isArray(dates)) continue;
+    for (const row of dates as Record<string, unknown>[]) {
+      const cert = s(row.certification);
+      if (cert) return cert;
+    }
+  }
+  return "";
+}
+
+/**
+ * Franchise / spin-off movies for a TV series (e.g. El Camino for Breaking Bad).
+ * TMDB TV recommendations are other TV shows — this searches movies whose titles
+ * include the series name, then lightly enriches age ratings.
+ */
+async function actionRelatedMovies(
+  p: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  let tmdbId = n(p.tmdbId);
+  const imdbId = s(p.imdbId);
+  let seriesTitle = s(p.title);
+
+  if ((!tmdbId || tmdbId <= 0) && /^tt\d{6,10}$/.test(imdbId)) {
+    const findJson = await tmdbGet(`find/${imdbId}`, {
+      external_source: "imdb_id",
+    });
+    const tvHit = (Array.isArray(findJson?.tv_results)
+      ? findJson.tv_results
+      : [])[0] as Record<string, unknown> | undefined;
+    if (tvHit) tmdbId = n(tvHit.id);
+  }
+
+  const lang = tmdbLanguage(p.locale);
+  if (tmdbId && tmdbId > 0 && !seriesTitle) {
+    const details = await tmdbGet(`tv/${tmdbId}`, { language: lang });
+    seriesTitle = s(details?.name) || s(details?.original_name);
+  }
+
+  if (!seriesTitle || seriesTitle.length < 2) {
+    return { error: "missing_title", movies: [] };
+  }
+
+  const seriesKey = normalizeFranchiseKey(seriesTitle);
+  if (seriesKey.length < 2) return { error: "missing_title", movies: [] };
+
+  const searchJson = await tmdbGet("search/movie", {
+    language: lang,
+    query: seriesTitle,
+    include_adult: "false",
+    page: "1",
+  });
+  const raw = Array.isArray(searchJson?.results) ? searchJson.results : [];
+
+  const IMG = "https://image.tmdb.org/t/p/w342";
+  const candidates: Array<Record<string, unknown>> = [];
+  const seen = new Set<number>();
+
+  for (const row of raw as Record<string, unknown>[]) {
+    const id = n(row.id);
+    if (!id || seen.has(id)) continue;
+    const title = s(row.title);
+    const original = s(row.original_title);
+    const titleKey = normalizeFranchiseKey(title);
+    const originalKey = normalizeFranchiseKey(original);
+    if (!titleIncludesSeries(titleKey, seriesKey) && !titleIncludesSeries(originalKey, seriesKey)) {
+      continue;
+    }
+    // Exact series-title hits are usually wrong media packaging, not a film.
+    if (titleKey === seriesKey || originalKey === seriesKey) continue;
+    const genreIds = Array.isArray(row.genre_ids)
+      ? (row.genre_ids as unknown[])
+          .map((g) => Number(g))
+          .filter((g) => Number.isFinite(g) && g > 0)
+      : [];
+    // Skip documentaries / making-of style titles about the show.
+    if (genreIds.includes(99)) continue;
+    if (NON_FEATURE_MOVIE_TITLE.test(title) || NON_FEATURE_MOVIE_TITLE.test(original)) {
+      continue;
+    }
+
+    seen.add(id);
+    const date = s(row.release_date);
+    const year = date.length >= 4 ? date.slice(0, 4) : "";
+    const posterPath = s(row.poster_path);
+    const vote = n(row.vote_average);
+    const voteCount = n(row.vote_count) ?? 0;
+    const genres = genreIds
+      .map((gid) => TMDB_GENRE_NAMES[gid])
+      .filter((name): name is string => Boolean(name))
+      .slice(0, 4);
+
+    candidates.push({
+      source: "tmdb",
+      tmdbId: id,
+      title,
+      year,
+      overview: s(row.overview),
+      poster: posterPath ? `${IMG}${posterPath}` : "",
+      score: vote != null && vote > 0 ? Math.round(vote * 10) / 10 : null,
+      voteCount,
+      genres,
+      adult: row.adult === true,
+      ageRating: "",
+      runtimeMinutes: null as number | null,
+      imdbId: null as string | null,
+      contentType: "movies",
+      pick: {
+        source: "tmdb",
+        tmdbId: id,
+        tmdbType: "movie",
+        title,
+        year,
+      },
+    });
+  }
+
+  candidates.sort((a, b) => (n(b.voteCount) ?? 0) - (n(a.voteCount) ?? 0));
+  const movies = candidates.slice(0, 10);
+
+  // Light enrichment: age rating + runtime + imdb for the shortlist only.
+  const CONCURRENCY = 4;
+  for (let i = 0; i < movies.length; i += CONCURRENCY) {
+    const batch = movies.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      batch.map(async (movie) => {
+        const id = n(movie.tmdbId);
+        if (!id) return;
+        try {
+          const details = await tmdbGet(`movie/${id}`, {
+            language: lang,
+            append_to_response: "release_dates,external_ids",
+          });
+          if (!details) return;
+          const age = pickUsMovieCertification(details as Record<string, unknown>);
+          if (age) movie.ageRating = age;
+          const runtime = n(details.runtime);
+          if (runtime != null && runtime > 0) movie.runtimeMinutes = runtime;
+          const ext = details.external_ids as Record<string, unknown> | undefined;
+          const imdb = s(ext?.imdb_id).toLowerCase();
+          if (/^tt\d{6,10}$/.test(imdb)) {
+            movie.imdbId = imdb;
+            (movie.pick as Record<string, unknown>).imdbId = imdb;
+          }
+          if (details.adult === true) movie.adult = true;
+        } catch {
+          /* keep search row */
+        }
+      }),
+    );
+  }
+
+  // Drop shorts / thin stubs after runtime enrichment (keep unknowns with votes).
+  const filtered = movies.filter((m) => {
+    const rt = n(m.runtimeMinutes);
+    if (rt != null && rt > 0 && rt < 70) return false;
+    const votes = n(m.voteCount) ?? 0;
+    if (votes < 50 && (rt == null || rt < 90)) return false;
+    return true;
+  });
+
+  for (const m of filtered) delete m.voteCount;
+
+  return {
+    ok: true,
+    source: "tmdb",
+    tmdbId: tmdbId || null,
+    seriesTitle,
+    movies: filtered,
+  };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS });
@@ -868,6 +1099,39 @@ Deno.serve(async (req: Request) => {
               compute: () => actionSimilar(body),
             })
           : await actionSimilar(body);
+        break;
+      }
+      case "relatedMovies": {
+        const tmdbId = n(body.tmdbId);
+        const titleKey = s(body.title).toLowerCase().slice(0, 80) || "x";
+        const lang = tmdbLanguage(resolveTitleLocale(body));
+        const cacheId =
+          tmdbId && tmdbId > 0 ? String(tmdbId) : s(body.imdbId) || titleKey;
+        const relatedKey = `tmdb:v1:relatedMovies:${cacheId}:${lang}`;
+        if (!forceRefresh) {
+          const hit = await readSeriesCache(relatedKey);
+          if (hit && Array.isArray(hit.movies) && hit.movies.length > 0) {
+            result = hit;
+            break;
+          }
+        }
+        const fresh = await actionRelatedMovies(body);
+        if (
+          fresh &&
+          !fresh.error &&
+          Array.isArray(fresh.movies) &&
+          fresh.movies.length > 0
+        ) {
+          await writeSeriesCache({
+            cacheKey: relatedKey,
+            provider: "tmdb",
+            kind: "relatedMovies",
+            locale: lang,
+            payload: fresh,
+            ttlMs: TTL_SERIES_MS,
+          });
+        }
+        result = fresh;
         break;
       }
       default:

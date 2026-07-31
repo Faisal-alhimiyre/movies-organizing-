@@ -227,6 +227,34 @@
     }
   }
 
+  /**
+   * Franchise / spin-off movies for a TV series (TMDB movie search by series title).
+   * Complements TVDB season-0 linked films (e.g. El Camino for Breaking Bad).
+   */
+  async function fetchRelatedMovies({
+    tmdbId = null,
+    imdbId = "",
+    title = "",
+    locale = "en",
+  } = {}) {
+    try {
+      const result = await callFunction({
+        action: "relatedMovies",
+        tmdbId,
+        imdbId,
+        title,
+        locale,
+      });
+      if (!result || result.error || !Array.isArray(result.movies)) {
+        return { ok: false, error: result?.error || "api_failure", movies: [] };
+      }
+      return { ok: true, movies: result.movies };
+    } catch (err) {
+      logServiceWarn("[tmdb-service] fetchRelatedMovies failed:", err);
+      return { ok: false, error: err.message, movies: [] };
+    }
+  }
+
   /** True when Supabase is configured so the edge function is reachable. */
   function isAvailable() {
     return !!getFunctionUrl();
@@ -240,6 +268,7 @@
     fetchTv,
     imdbSuggest,
     fetchSimilar,
+    fetchRelatedMovies,
     isAvailable,
   };
 })();

@@ -417,12 +417,45 @@
   let _seriesCacheDirty = false;
   let _seriesCacheFlushTimer = null;
 
+  /**
+   * Drop sticky empty related-movies entries and short-lived TVDB resolve
+   * negatives. Older builds cached `movies: []` for a week, and TVDB resolve
+   * used to skip TMDb→TVDB without a browser TMDb key (writing negatives).
+   */
+  function purgeStaleRelatedMoviesLookups(cache) {
+    if (!cache || typeof cache !== "object") return false;
+    let changed = false;
+    for (const key of Object.keys(cache)) {
+      if (key.includes("related:movies:")) {
+        const movies = cache[key]?.movies;
+        if (Array.isArray(movies) && movies.length === 0) {
+          delete cache[key];
+          changed = true;
+        }
+        continue;
+      }
+      // Force a fresh TMDb→TVDB edge resolve after the getTmdbKey() gate fix.
+      if (
+        key.includes("resolve:tvdb:negative:tmdb:") ||
+        key.includes("resolve:tvdb:negative:imdb:")
+      ) {
+        delete cache[key];
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   function readSeriesCache() {
     if (_seriesCacheSnapshot) return _seriesCacheSnapshot;
     try {
       _seriesCacheSnapshot = JSON.parse(localStorage.getItem(SERIES_CACHE_KEY) || "{}");
     } catch {
       _seriesCacheSnapshot = {};
+    }
+    if (purgeStaleRelatedMoviesLookups(_seriesCacheSnapshot)) {
+      _seriesCacheDirty = true;
+      flushSeriesCacheSoon();
     }
     return _seriesCacheSnapshot;
   }
@@ -526,7 +559,12 @@
 
     const WM = window.WatchlistMetadata;
     const itemTmdbId = parseInt(String(item?.tmdbId || "").trim(), 10);
-    const itemImdbId = String(item?.imdbId || WM?.extractImdbId?.(item?.link) || "")
+    const itemImdbId = String(
+      item?.imdbId ||
+        WM?.extractImdbId?.(item?.imdbLink) ||
+        WM?.extractImdbId?.(item?.link) ||
+        ""
+    )
       .trim()
       .toLowerCase();
 
@@ -3203,11 +3241,12 @@
   }
 
   async function fetchAnilistRelatedMovies(anilistId, locale) {
-    const cacheKey = `metadata:v2:related:movies:anilist:${anilistId}:${locale}`;
+    // v3: never reuse empty related lists (older builds cached [] for a week).
+    const cacheKey = `metadata:v3:related:movies:anilist:${anilistId}:${locale}`;
     const cached = readCached(cacheKey, TTL_SERIES);
-    if (cached?.movies) {
+    if (Array.isArray(cached?.movies) && cached.movies.length > 0) {
       return {
-        state: cached.movies.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
+        state: ResultState.AVAILABLE,
         movies: cached.movies,
         isStale: isStale(cacheKey, TTL_SERIES),
       };
@@ -3259,7 +3298,9 @@
     const related = collectAnilistRelatedMoviesFromSources(sources, chainIds);
     const movies = related.map((entry) => normalizeAnilistRelatedMovie(entry.node));
 
-    writeSeriesCacheEntry(cacheKey, { movies }, TTL_SERIES);
+    if (movies.length) {
+      writeSeriesCacheEntry(cacheKey, { movies }, TTL_SERIES);
+    }
     return {
       state: movies.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
       movies,
@@ -3281,9 +3322,12 @@
   /**
    * TV feature films in season 0: TVDB isMovie/linkedMovie when present,
    * else long runtime (80+ min) excluding obvious non-movie specials.
+   * TVDB often sets `isMovie` to the movie id (e.g. 348291), not 0/1.
    */
   function isMovieLikeTvSpecial(episode) {
-    if (episode?.isMovie === true || episode?.isMovie === 1) return true;
+    if (episode?.isMovie === true) return true;
+    const isMovieNum = Number(episode?.isMovie);
+    if (Number.isFinite(isMovieNum) && isMovieNum > 0) return true;
     const linked = Number(episode?.linkedMovieId);
     if (Number.isFinite(linked) && linked > 0) return true;
     if (isTvSpecialNonMovie(episode)) return false;
@@ -3293,19 +3337,33 @@
 
   function normalizeTvdbRelatedMovie(episode) {
     const title = String(episode?.title || "").trim();
-    const year = episode?.airDate ? String(episode.airDate).slice(0, 4) : "";
+    const year =
+      (episode?.year && String(episode.year)) ||
+      (episode?.airDate ? String(episode.airDate).slice(0, 4) : "");
+    const poster = String(episode?.poster || episode?.still || "").trim();
+    const genres = Array.isArray(episode?.genres)
+      ? episode.genres.map((g) => String(g || "").trim()).filter(Boolean).slice(0, 4)
+      : [];
+    const ageRating = String(episode?.ageRating || "").trim();
+    const imdbId = String(episode?.imdbId || "").trim().toLowerCase() || null;
     return {
       source: "tvdb",
       title,
-      poster: episode?.still || "",
+      poster,
       year,
       overview: cleanEpisodeOverviewText(episode?.overview || ""),
       runtimeMinutes: episode?.runtimeMinutes ?? null,
+      genres,
+      ageRating,
+      imdbId,
+      contentType: "movies",
       pick: {
         source: "tvdb",
         title,
         year,
+        imdbId,
         tvdbId: episode?.seriesTvdbId,
+        linkedMovieId: episode?.linkedMovieId ?? null,
         seasonNumber: episode?.seasonNumber,
         episodeNumber: episode?.episodeNumber,
       },
@@ -3313,11 +3371,12 @@
   }
 
   async function fetchTvdbRelatedMovies(tvdbId, locale) {
-    const cacheKey = `metadata:v4:related:movies:tvdb:${tvdbId}:${locale}`;
+    // v8: relatedMovies includes linked-movie poster/genres/ageRating.
+    const cacheKey = `metadata:v8:related:movies:tvdb:${tvdbId}:${locale}`;
     const cached = readCached(cacheKey, TTL_SERIES);
-    if (cached?.movies) {
+    if (Array.isArray(cached?.movies) && cached.movies.length > 0) {
       return {
-        state: cached.movies.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
+        state: ResultState.AVAILABLE,
         movies: cached.movies,
         isStale: isStale(cacheKey, TTL_SERIES),
       };
@@ -3327,20 +3386,38 @@
     if (!WTvdb) return { state: ResultState.UNAVAILABLE, movies: [] };
 
     try {
-      const episodes = await WTvdb.fetchEpisodes(tvdbId, 0, locale);
-      const movies = (episodes || [])
-        .filter(isMovieLikeTvSpecial)
-        .map(normalizeTvdbRelatedMovie)
-        .filter((m) => m.title);
+      let movies = [];
+      if (typeof WTvdb.fetchRelatedMovies === "function") {
+        const rows = await WTvdb.fetchRelatedMovies(tvdbId, locale);
+        movies = (rows || [])
+          .map((ep) => normalizeTvdbRelatedMovie(ep))
+          .filter((m) => m.title);
+      }
+      // Fallback for older edge deploys without relatedMovies action.
+      if (!movies.length && typeof WTvdb.fetchEpisodes === "function") {
+        const episodes = await WTvdb.fetchEpisodes(tvdbId, 0, locale);
+        movies = (episodes || [])
+          .filter(isMovieLikeTvSpecial)
+          .map(normalizeTvdbRelatedMovie)
+          .filter((m) => m.title);
+      }
 
-      writeSeriesCacheEntry(cacheKey, { movies }, TTL_SERIES);
+      // Optional OMDb fill for age/genres/poster/score when the edge row is thin
+      // and a browser OMDb key exists. At most a few movies per series.
+      if (movies.length && getOmdbKey()) {
+        await enrichTvdbRelatedMoviesFromOmdb(movies);
+      }
+
+      if (movies.length) {
+        writeSeriesCacheEntry(cacheKey, { movies }, TTL_SERIES);
+      }
       return {
         state: movies.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
         movies,
       };
     } catch {
       const stale = readCacheStale(cacheKey);
-      if (stale?.movies) {
+      if (Array.isArray(stale?.movies) && stale.movies.length > 0) {
         return {
           state: ResultState.OFFLINE_WITH_CACHE,
           movies: stale.movies,
@@ -3351,8 +3428,69 @@
     }
   }
 
+  async function enrichTvdbRelatedMoviesFromOmdb(movies) {
+    const WM = window.WatchlistMetadata;
+    if (!WM?.getMetadata && !getOmdbKey()) return;
+    const slice = movies.slice(0, 6);
+    await Promise.all(
+      slice.map(async (movie) => {
+        const needsPoster = !movie.poster;
+        const needsGenres = !Array.isArray(movie.genres) || !movie.genres.length;
+        const needsAge = !movie.ageRating;
+        const needsScore = movie.score == null;
+        if (!needsPoster && !needsGenres && !needsAge && !needsScore) return;
+
+        let imdbId = movie.imdbId || null;
+        if (!imdbId && movie.title) {
+          imdbId = await searchOmdbImdbByTitle(movie.title, movie.year || null);
+        }
+        if (!imdbId) return;
+
+        try {
+          const meta = WM?.getMetadata
+            ? await WM.getMetadata(imdbId)
+            : null;
+          if (!meta) return;
+          movie.imdbId = imdbId;
+          if (needsPoster && meta.poster) movie.poster = meta.poster;
+          if (needsAge && meta.ageRating) movie.ageRating = meta.ageRating;
+          if (needsScore && meta.rating) {
+            const score = Number(meta.rating);
+            if (Number.isFinite(score) && score > 0) movie.score = score;
+          }
+          if (needsGenres) {
+            const genres = [];
+            if (Array.isArray(meta.genres)) {
+              for (const g of meta.genres) {
+                if (g) genres.push(String(g));
+              }
+            }
+            if (!genres.length && meta.genre) genres.push(String(meta.genre));
+            if (!genres.length && meta.Genre) {
+              String(meta.Genre)
+                .split(",")
+                .map((g) => g.trim())
+                .filter(Boolean)
+                .forEach((g) => genres.push(g));
+            }
+            if (Array.isArray(meta.secondaryGenres)) {
+              for (const g of meta.secondaryGenres) {
+                if (g) genres.push(String(g));
+              }
+            }
+            if (genres.length) movie.genres = [...new Set(genres)].slice(0, 4);
+          }
+          if (movie.pick) movie.pick.imdbId = imdbId;
+        } catch {
+          /* keep TVDB fields */
+        }
+      })
+    );
+  }
+
   /**
    * Standalone movies related to a TV series or anime (not season-carousel entries).
+   * Live-action: TVDB season-0 linked films + TMDB franchise movie search (merged).
    */
   async function fetchRelatedMovies(resolution, item, locale = "en") {
     if (!resolution || resolution.isNegative) {
@@ -3373,14 +3511,203 @@
       return fetchAnilistRelatedMovies(anilistId, locale);
     }
 
+    return fetchLiveActionRelatedMovies(resolution, item, locale);
+  }
+
+  function relatedMovieDedupeKey(movie) {
+    const imdb = String(movie?.imdbId || movie?.pick?.imdbId || "")
+      .trim()
+      .toLowerCase();
+    if (/^tt\d{6,10}$/.test(imdb)) return `imdb:${imdb}`;
+    const tmdb = Number(movie?.tmdbId || movie?.pick?.tmdbId);
+    if (Number.isFinite(tmdb) && tmdb > 0) return `tmdb:${tmdb}`;
+    const title = String(movie?.title || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const year = String(movie?.year || "").slice(0, 4);
+    return title ? `title:${title}:${year}` : "";
+  }
+
+  function mergeRelatedMovieLists(primary, secondary) {
+    const out = [];
+    const seen = new Set();
+    for (const list of [primary || [], secondary || []]) {
+      for (const movie of list) {
+        if (!movie?.title) continue;
+        const key = relatedMovieDedupeKey(movie);
+        if (key && seen.has(key)) {
+          // Prefer the row that already has poster/genres/age when deduping.
+          const idx = out.findIndex((m) => relatedMovieDedupeKey(m) === key);
+          if (idx < 0) continue;
+          const cur = out[idx];
+          out[idx] = {
+            ...cur,
+            poster: cur.poster || movie.poster || "",
+            genres:
+              Array.isArray(cur.genres) && cur.genres.length
+                ? cur.genres
+                : movie.genres || [],
+            ageRating: cur.ageRating || movie.ageRating || "",
+            score: cur.score != null ? cur.score : movie.score,
+            imdbId: cur.imdbId || movie.imdbId || null,
+            tmdbId: cur.tmdbId || movie.tmdbId || null,
+            runtimeMinutes: cur.runtimeMinutes || movie.runtimeMinutes || null,
+            overview: cur.overview || movie.overview || "",
+          };
+          continue;
+        }
+        if (key) seen.add(key);
+        out.push(movie);
+      }
+    }
+    return out;
+  }
+
+  function normalizeTmdbRelatedMovie(row) {
+    const title = String(row?.title || "").trim();
+    const tmdbId = Number(row?.tmdbId);
+    const year = String(row?.year || "").slice(0, 4);
+    const genres = Array.isArray(row?.genres)
+      ? row.genres.map((g) => String(g || "").trim()).filter(Boolean).slice(0, 4)
+      : [];
+    return {
+      source: "tmdb",
+      tmdbId: Number.isFinite(tmdbId) && tmdbId > 0 ? tmdbId : null,
+      title,
+      poster: String(row?.poster || "").trim(),
+      year,
+      overview: cleanEpisodeOverviewText(row?.overview || ""),
+      runtimeMinutes: row?.runtimeMinutes ?? null,
+      score: row?.score != null ? Number(row.score) : null,
+      genres,
+      ageRating: String(row?.ageRating || "").trim(),
+      imdbId: String(row?.imdbId || "").trim().toLowerCase() || null,
+      adult: row?.adult === true,
+      contentType: "movies",
+      pick: {
+        source: "tmdb",
+        tmdbId: Number.isFinite(tmdbId) && tmdbId > 0 ? tmdbId : null,
+        tmdbType: "movie",
+        title,
+        year,
+        imdbId: String(row?.imdbId || "").trim().toLowerCase() || null,
+      },
+    };
+  }
+
+  async function fetchTmdbFranchiseRelatedMovies(resolution, item, locale) {
+    const Tmdb = window.WatchlistTmdb;
+    if (!Tmdb?.fetchRelatedMovies) {
+      return { state: ResultState.UNAVAILABLE, movies: [] };
+    }
+
+    const tmdbId =
+      Number(resolution?.tmdbId) ||
+      Number(item?.tmdbId) ||
+      null;
+    const imdbId =
+      resolution?.imdbId ||
+      item?.imdbId ||
+      window.WatchlistMetadata?.extractImdbId?.(item?.imdbLink) ||
+      window.WatchlistMetadata?.extractImdbId?.(item?.link) ||
+      "";
+    const title = String(item?.title || resolution?.title || "").trim();
+
+    const cacheKey = `metadata:v1:related:movies:tmdb-franchise:${
+      tmdbId || imdbId || title.toLowerCase()
+    }:${locale}`;
+    const cached = readCached(cacheKey, TTL_SERIES);
+    if (Array.isArray(cached?.movies) && cached.movies.length > 0) {
+      return {
+        state: ResultState.AVAILABLE,
+        movies: cached.movies,
+        isStale: isStale(cacheKey, TTL_SERIES),
+      };
+    }
+
+    try {
+      const result = await Tmdb.fetchRelatedMovies({
+        tmdbId: Number.isFinite(tmdbId) && tmdbId > 0 ? tmdbId : null,
+        imdbId,
+        title,
+        locale,
+      });
+      const movies = (result?.movies || [])
+        .map(normalizeTmdbRelatedMovie)
+        .filter((m) => m.title);
+      if (movies.length) {
+        writeSeriesCacheEntry(cacheKey, { movies }, TTL_SERIES);
+      }
+      return {
+        state: movies.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
+        movies,
+      };
+    } catch {
+      const stale = readCacheStale(cacheKey);
+      if (Array.isArray(stale?.movies) && stale.movies.length > 0) {
+        return {
+          state: ResultState.OFFLINE_WITH_CACHE,
+          movies: stale.movies,
+          isStale: true,
+        };
+      }
+      return { state: ResultState.UNAVAILABLE, movies: [] };
+    }
+  }
+
+  async function fetchLiveActionRelatedMovies(resolution, item, locale) {
+    const mergeKey = `metadata:v1:related:movies:live:${
+      resolution?.tmdbId ||
+      resolution?.imdbId ||
+      item?.tmdbId ||
+      String(item?.title || "").toLowerCase()
+    }:${locale}`;
+    const cachedMerge = readCached(mergeKey, TTL_SERIES);
+    if (Array.isArray(cachedMerge?.movies) && cachedMerge.movies.length > 0) {
+      return {
+        state: ResultState.AVAILABLE,
+        movies: cachedMerge.movies,
+        isStale: isStale(mergeKey, TTL_SERIES),
+      };
+    }
+
+    let tvdbMovies = [];
+    let tmdbMovies = [];
+
     if (window.WatchlistTvdb) {
-      const tvdbId = await resolveTvdbId(resolution);
-      if (tvdbId) {
-        return fetchTvdbRelatedMovies(tvdbId, locale);
+      try {
+        const tvdbId = await resolveTvdbId(resolution);
+        if (tvdbId) {
+          const tvdbResult = await fetchTvdbRelatedMovies(tvdbId, locale);
+          tvdbMovies = tvdbResult?.movies || [];
+        }
+      } catch {
+        /* TMDB path may still work */
       }
     }
 
-    return { state: ResultState.NO_SEASONS, movies: [] };
+    try {
+      const tmdbResult = await fetchTmdbFranchiseRelatedMovies(
+        resolution,
+        item,
+        locale
+      );
+      tmdbMovies = tmdbResult?.movies || [];
+    } catch {
+      /* keep TVDB rows */
+    }
+
+    // TVDB linked films first (true series attachments), then TMDB franchise hits.
+    const movies = mergeRelatedMovieLists(tvdbMovies, tmdbMovies);
+    if (movies.length) {
+      writeSeriesCacheEntry(mergeKey, { movies }, TTL_SERIES);
+    }
+    return {
+      state: movies.length ? ResultState.AVAILABLE : ResultState.NO_SEASONS,
+      movies,
+    };
   }
 
   function normalizeAnilistSimilarTitle(node) {
@@ -4613,8 +4940,37 @@
   async function resolveTvdbId(resolution) {
     if (!hasTvdbBackend()) return null;
 
-    const imdbId = resolution?.imdbId;
-    const tmdbId = resolution?.tmdbId;
+    let imdbId = resolution?.imdbId ? String(resolution.imdbId).trim().toLowerCase() : "";
+    if (imdbId && !/^tt\d{6,10}$/.test(imdbId)) imdbId = "";
+    const tmdbId = Number(resolution?.tmdbId);
+
+    // TMDb-only list items (common from search) need an IMDb bridge — TVDB's
+    // TheMovieDB.com remote-id lookup is unreliable, but IMDb remote ids work.
+    if (
+      !imdbId &&
+      Number.isFinite(tmdbId) &&
+      tmdbId > 0 &&
+      window.WatchlistTmdb?.getDetails
+    ) {
+      const bridgeKey = `metadata:v1:resolve:imdb:tmdb-tv:${tmdbId}`;
+      const bridged = readCached(bridgeKey, TTL_RESOLVE);
+      if (bridged?.imdbId && /^tt\d{6,10}$/.test(String(bridged.imdbId))) {
+        imdbId = String(bridged.imdbId).toLowerCase();
+      } else if (!bridged?.miss) {
+        try {
+          const details = await window.WatchlistTmdb.getDetails("tv", tmdbId, "en");
+          const fromDetails = String(details?.imdbId || "").trim().toLowerCase();
+          if (/^tt\d{6,10}$/.test(fromDetails)) {
+            imdbId = fromDetails;
+            writeSeriesCacheEntry(bridgeKey, { imdbId }, TTL_RESOLVE);
+          } else {
+            writeSeriesCacheEntry(bridgeKey, { miss: true }, TTL_NEGATIVE);
+          }
+        } catch {
+          /* keep going with tmdb-only attempts below */
+        }
+      }
+    }
 
     // ── Primary: IMDb → TVDB via Edge Function (no TMDb key required) ───
     if (imdbId) {
@@ -4623,47 +4979,61 @@
       if (cached?.tvdbId) return cached.tvdbId;
 
       const negKey = `metadata:v7:resolve:tvdb:negative:imdb:${imdbId}`;
-      if (isNegativeCacheValid(negKey)) return null;
-
-      try {
-        const tvdbId = await resolveTvdbIdViaEdge({ imdbId });
-        if (tvdbId) {
-          writeSeriesCacheEntry(cacheKey, { tvdbId }, TTL_RESOLVE);
-          return tvdbId;
-        }
-      } catch { /* fall through */ }
-      writeNegativeCache(negKey, TTL_NEGATIVE);
+      if (!isNegativeCacheValid(negKey)) {
+        try {
+          const tvdbId = await resolveTvdbIdViaEdge({ imdbId });
+          if (tvdbId) {
+            writeSeriesCacheEntry(cacheKey, { tvdbId }, TTL_RESOLVE);
+            return tvdbId;
+          }
+        } catch { /* fall through */ }
+        writeNegativeCache(negKey, TTL_NEGATIVE);
+      }
     }
 
-    // ── Optional: TMDb external_ids when a TMDb key is configured ───────
-    if (tmdbId && getTmdbKey()) {
+    // ── TMDb → TVDB (edge remote-id lookup; browser TMDb key optional) ──
+    if (Number.isFinite(tmdbId) && tmdbId > 0) {
       const cacheKey = `metadata:v7:resolve:tvdb:tmdb:${tmdbId}`;
       const cached = readCached(cacheKey, TTL_RESOLVE);
       if (cached?.tvdbId) return cached.tvdbId;
 
       const negKey = `metadata:v7:resolve:tvdb:negative:tmdb:${tmdbId}`;
-      if (isNegativeCacheValid(negKey)) return null;
+      if (!isNegativeCacheValid(negKey)) {
+        if (getTmdbKey()) {
+          try {
+            const json = await fetchTmdb(`tv/${tmdbId}/external_ids`, {});
+            if (json?.tvdb_id) {
+              const tvdbId = Number(json.tvdb_id);
+              if (tvdbId > 0) {
+                writeSeriesCacheEntry(cacheKey, { tvdbId }, TTL_RESOLVE);
+                return tvdbId;
+              }
+            }
+            const fromExt = String(json?.imdb_id || "").trim().toLowerCase();
+            if (/^tt\d{6,10}$/.test(fromExt)) {
+              const viaImdb = await resolveTvdbIdViaEdge({ imdbId: fromExt });
+              if (viaImdb) {
+                writeSeriesCacheEntry(cacheKey, { tvdbId: viaImdb }, TTL_RESOLVE);
+                writeSeriesCacheEntry(
+                  `metadata:v7:resolve:tvdb:imdb:${fromExt}`,
+                  { tvdbId: viaImdb },
+                  TTL_RESOLVE
+                );
+                return viaImdb;
+              }
+            }
+          } catch { /* fall through to edge */ }
+        }
 
-      try {
-        const json = await fetchTmdb(`tv/${tmdbId}/external_ids`, {});
-        if (json?.tvdb_id) {
-          const tvdbId = Number(json.tvdb_id);
-          if (tvdbId > 0) {
+        try {
+          const tvdbId = await resolveTvdbIdViaEdge({ tmdbId });
+          if (tvdbId) {
             writeSeriesCacheEntry(cacheKey, { tvdbId }, TTL_RESOLVE);
             return tvdbId;
           }
-        }
-      } catch { /* fall through */ }
-
-      // TMDb external_ids missing — try Edge Function with TMDb remote id
-      try {
-        const tvdbId = await resolveTvdbIdViaEdge({ tmdbId });
-        if (tvdbId) {
-          writeSeriesCacheEntry(cacheKey, { tvdbId }, TTL_RESOLVE);
-          return tvdbId;
-        }
-      } catch { /* fall through */ }
-      writeNegativeCache(negKey, TTL_NEGATIVE);
+        } catch { /* fall through */ }
+        writeNegativeCache(negKey, TTL_NEGATIVE);
+      }
     }
 
     // ── Cached IMDb for this AniList media only (no live AniList call here) ─

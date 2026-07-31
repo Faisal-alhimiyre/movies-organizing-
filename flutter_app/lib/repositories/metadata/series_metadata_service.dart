@@ -545,6 +545,7 @@ class SeriesMetadataService {
   }
 
   /// Standalone movies related to a TV series or anime (not season-carousel entries).
+  /// Live-action: TVDB season-0 linked films + TMDB franchise movie search (merged).
   Future<RelatedMoviesResult> fetchRelatedMovies({
     required SeriesIdResolution resolution,
     required WatchlistItem item,
@@ -567,14 +568,175 @@ class SeriesMetadataService {
       return _fetchAnilistRelatedMovies(anilistId, locale);
     }
 
-    if (_config.isSupabaseConfigured) {
-      final tvdbId = await _resolveTvdbId(resolution);
-      if (tvdbId != null) {
-        return _fetchTvdbRelatedMovies(tvdbId, locale);
+    return _fetchLiveActionRelatedMovies(resolution, item, locale);
+  }
+
+  Future<RelatedMoviesResult> _fetchLiveActionRelatedMovies(
+    SeriesIdResolution resolution,
+    WatchlistItem item,
+    String locale,
+  ) async {
+    final mergeKey =
+        '${_v5Prefix}related:movies:live:v1:${resolution.tmdbId ?? resolution.imdbId ?? item.tmdbId ?? item.title.toLowerCase()}:$locale';
+    final cached = _readRawCache(mergeKey, _seriesTtl);
+    if (cached != null && cached['movies'] is List) {
+      final movies = (cached['movies'] as List)
+          .whereType<Map>()
+          .map((m) => RelatedMovie.fromJson(Map<String, dynamic>.from(m)))
+          .where((m) => m.title.isNotEmpty)
+          .toList();
+      if (movies.isNotEmpty) {
+        return RelatedMoviesResult(
+          state: MetadataResultState.available,
+          movies: movies,
+          isStale: _isStale(mergeKey, _seriesTtl),
+        );
       }
     }
 
-    return const RelatedMoviesResult(state: MetadataResultState.noSeasons);
+    var tvdbMovies = const <RelatedMovie>[];
+    var tmdbMovies = const <RelatedMovie>[];
+
+    if (_config.isSupabaseConfigured) {
+      try {
+        final tvdbId = await _resolveTvdbId(resolution);
+        if (tvdbId != null) {
+          final tvdbResult = await _fetchTvdbRelatedMovies(tvdbId, locale);
+          tvdbMovies = tvdbResult.movies;
+        }
+      } catch (_) {}
+
+      try {
+        final tmdbResult =
+            await _fetchTmdbFranchiseRelatedMovies(resolution, item, locale);
+        tmdbMovies = tmdbResult.movies;
+      } catch (_) {}
+    }
+
+    final movies = _mergeRelatedMovieLists(tvdbMovies, tmdbMovies);
+    if (movies.isNotEmpty) {
+      _writeRawCache(mergeKey, {
+        'movies': movies.map((m) => m.toJson()).toList(),
+      }, _seriesTtl);
+    }
+
+    return RelatedMoviesResult(
+      state: movies.isNotEmpty
+          ? MetadataResultState.available
+          : MetadataResultState.noSeasons,
+      movies: movies,
+    );
+  }
+
+  String _relatedMovieDedupeKey(RelatedMovie movie) {
+    final imdb = (movie.imdbId ?? '').trim().toLowerCase();
+    if (RegExp(r'^tt\d{6,10}$').hasMatch(imdb)) return 'imdb:$imdb';
+    final tmdb = movie.tmdbId;
+    if (tmdb != null && tmdb > 0) return 'tmdb:$tmdb';
+    final title = movie.title
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9\s]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final year = movie.year.length >= 4 ? movie.year.substring(0, 4) : '';
+    return title.isEmpty ? '' : 'title:$title:$year';
+  }
+
+  List<RelatedMovie> _mergeRelatedMovieLists(
+    List<RelatedMovie> primary,
+    List<RelatedMovie> secondary,
+  ) {
+    final out = <RelatedMovie>[];
+    final seen = <String>{};
+    for (final list in [primary, secondary]) {
+      for (final movie in list) {
+        if (movie.title.isEmpty) continue;
+        final key = _relatedMovieDedupeKey(movie);
+        if (key.isNotEmpty && seen.contains(key)) {
+          final idx = out.indexWhere((m) => _relatedMovieDedupeKey(m) == key);
+          if (idx < 0) continue;
+          final cur = out[idx];
+          out[idx] = RelatedMovie(
+            source: cur.source,
+            title: cur.title,
+            poster: cur.poster.isNotEmpty ? cur.poster : movie.poster,
+            year: cur.year.isNotEmpty ? cur.year : movie.year,
+            overview: cur.overview.isNotEmpty ? cur.overview : movie.overview,
+            runtimeMinutes: cur.runtimeMinutes ?? movie.runtimeMinutes,
+            anilistId: cur.anilistId ?? movie.anilistId,
+            tmdbId: cur.tmdbId ?? movie.tmdbId,
+            imdbId: (cur.imdbId != null && cur.imdbId!.isNotEmpty)
+                ? cur.imdbId
+                : movie.imdbId,
+            score: cur.score ?? movie.score,
+            genres: cur.genres.isNotEmpty ? cur.genres : movie.genres,
+            contentType: cur.contentType,
+            adult: cur.adult || movie.adult,
+            ageRating: cur.ageRating.isNotEmpty ? cur.ageRating : movie.ageRating,
+            seasonCount: cur.seasonCount ?? movie.seasonCount,
+            episodeCount: cur.episodeCount ?? movie.episodeCount,
+          );
+          continue;
+        }
+        if (key.isNotEmpty) seen.add(key);
+        out.add(movie);
+      }
+    }
+    return out;
+  }
+
+  Future<RelatedMoviesResult> _fetchTmdbFranchiseRelatedMovies(
+    SeriesIdResolution resolution,
+    WatchlistItem item,
+    String locale,
+  ) async {
+    final tmdbId = resolution.tmdbId ?? item.tmdbId;
+    final imdbId = resolution.imdbId ?? getImdbIdFromItem(item) ?? '';
+    final title = item.title.trim();
+    final cacheKey =
+        '${_v5Prefix}related:movies:tmdb-franchise:v1:${tmdbId ?? imdbId}:$locale';
+    final cached = _readRawCache(cacheKey, _seriesTtl);
+    if (cached != null && cached['movies'] is List) {
+      final movies = (cached['movies'] as List)
+          .whereType<Map>()
+          .map((m) => RelatedMovie.fromJson(Map<String, dynamic>.from(m)))
+          .where((m) => m.title.isNotEmpty)
+          .toList();
+      if (movies.isNotEmpty) {
+        return RelatedMoviesResult(
+          state: MetadataResultState.available,
+          movies: movies,
+          isStale: _isStale(cacheKey, _seriesTtl),
+        );
+      }
+    }
+
+    final result = await _invokeTmdbEdge({
+      'action': 'relatedMovies',
+      if (tmdbId != null && tmdbId > 0) 'tmdbId': tmdbId,
+      if (imdbId.isNotEmpty) 'imdbId': imdbId,
+      if (title.isNotEmpty) 'title': title,
+      'locale': locale,
+    });
+    final raw = result?['movies'] as List? ?? const [];
+    final movies = raw
+        .whereType<Map>()
+        .map((m) => RelatedMovie.fromJson(Map<String, dynamic>.from(m)))
+        .where((m) => m.title.isNotEmpty)
+        .toList();
+
+    if (movies.isNotEmpty) {
+      _writeRawCache(cacheKey, {
+        'movies': movies.map((m) => m.toJson()).toList(),
+      }, _seriesTtl);
+    }
+
+    return RelatedMoviesResult(
+      state: movies.isNotEmpty
+          ? MetadataResultState.available
+          : MetadataResultState.noSeasons,
+      movies: movies,
+    );
   }
 
   /// "More like this" recommendations — TMDB similar for movies/TV.
@@ -2432,16 +2594,32 @@ class SeriesMetadataService {
       runtimeMinutes: parsePositiveCount(json['runtimeMinutes']),
       airDate: json['airDate']?.toString(),
       isAired: json['isAired'] != false,
-      isMovie: json['isMovie'] == true || json['isMovie'] == 1,
-      linkedMovieId: parsePositiveCount(json['linkedMovieId']),
+      isMovie: _tvdbJsonIsMovie(json['isMovie']) ||
+          (parsePositiveCount(json['linkedMovieId']) ?? 0) > 0,
+      linkedMovieId: parsePositiveCount(json['linkedMovieId']) ??
+          _tvdbMovieIdFromIsMovieField(json['isMovie']),
     );
+  }
+
+  /// TVDB `isMovie` is often the movie id (int), not only 0/1 / bool.
+  static bool _tvdbJsonIsMovie(dynamic raw) {
+    if (raw == true) return true;
+    if (raw == false || raw == null) return false;
+    final n = raw is num ? raw.toInt() : int.tryParse(raw.toString());
+    return n != null && n > 0;
+  }
+
+  static int? _tvdbMovieIdFromIsMovieField(dynamic raw) {
+    final n = raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? '');
+    if (n == null || n <= 1) return null;
+    return n;
   }
 
   Future<RelatedMoviesResult> _fetchTvdbRelatedMovies(
     int tvdbId,
     String locale,
   ) async {
-    final cacheKey = '${_v5Prefix}related:movies:tvdb:$tvdbId:$locale';
+    final cacheKey = '${_v5Prefix}related:movies:tvdb:v8:$tvdbId:$locale';
     final cached = _readRawCache(cacheKey, _seriesTtl);
     if (cached != null && cached['movies'] is List) {
       final movies = (cached['movies'] as List)
@@ -2449,34 +2627,52 @@ class SeriesMetadataService {
           .map((m) => RelatedMovie.fromJson(Map<String, dynamic>.from(m)))
           .where((m) => m.title.isNotEmpty)
           .toList();
-      return RelatedMoviesResult(
-        state: movies.isNotEmpty
-            ? MetadataResultState.available
-            : MetadataResultState.noSeasons,
-        movies: movies,
-        isStale: _isStale(cacheKey, _seriesTtl),
-      );
+      if (movies.isNotEmpty) {
+        return RelatedMoviesResult(
+          state: MetadataResultState.available,
+          movies: movies,
+          isStale: _isStale(cacheKey, _seriesTtl),
+        );
+      }
     }
 
     try {
-      final result = await _invokeTvdbEdge({
-        'action': 'episodes',
+      // Prefer dedicated relatedMovies action (season=0 + movie-card enrichment).
+      var result = await _invokeTvdbEdge({
+        'action': 'relatedMovies',
         'tvdbId': tvdbId,
-        'season': 0,
         'locale': locale,
       });
-      final rawEps = result?['episodes'] as List? ?? [];
-      final movies = rawEps
+      List rawRows = result?['movies'] as List? ?? const [];
+      List<RelatedMovie> movies = rawRows
           .whereType<Map>()
-          .map((raw) => _normalizeTvdbEpisode(Map<String, dynamic>.from(raw)))
-          .where(isMovieLikeTvSpecial)
-          .map(_normalizeTvdbRelatedMovie)
+          .map((raw) => RelatedMovie.fromJson(Map<String, dynamic>.from(raw)))
           .where((m) => m.title.isNotEmpty)
           .toList();
 
-      _writeRawCache(cacheKey, {
-        'movies': movies.map((m) => m.toJson()).toList(),
-      }, _seriesTtl);
+      // Older edge deploys: fall back to season-0 episodes + client filter.
+      if (movies.isEmpty) {
+        result = await _invokeTvdbEdge({
+          'action': 'episodes',
+          'tvdbId': tvdbId,
+          'season': 0,
+          'locale': locale,
+        });
+        rawRows = result?['episodes'] as List? ?? const [];
+        movies = rawRows
+            .whereType<Map>()
+            .map((raw) => _normalizeTvdbEpisode(Map<String, dynamic>.from(raw)))
+            .where(isMovieLikeTvSpecial)
+            .map(_normalizeTvdbRelatedMovie)
+            .where((m) => m.title.isNotEmpty)
+            .toList();
+      }
+
+      if (movies.isNotEmpty) {
+        _writeRawCache(cacheKey, {
+          'movies': movies.map((m) => m.toJson()).toList(),
+        }, _seriesTtl);
+      }
 
       return RelatedMoviesResult(
         state: movies.isNotEmpty
