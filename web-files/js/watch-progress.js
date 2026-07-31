@@ -66,6 +66,16 @@
       }
       if (Object.keys(cleaned).length) result.episodeRatings = cleaned;
     }
+    if (raw.episodeNotes && typeof raw.episodeNotes === "object") {
+      const notes = {};
+      for (const [k, v] of Object.entries(raw.episodeNotes)) {
+        if (typeof k !== "string" || !k.includes(":")) continue;
+        const text = String(v || "").trim();
+        if (!text) continue;
+        notes[k] = text.slice(0, 2000);
+      }
+      if (Object.keys(notes).length) result.episodeNotes = notes;
+    }
     return result;
   }
 
@@ -80,6 +90,9 @@
       return parsed;
     }
     if (parsed.episodeRatings && Object.keys(parsed.episodeRatings).length > 0) {
+      return parsed;
+    }
+    if (parsed.episodeNotes && Object.keys(parsed.episodeNotes).length > 0) {
       return parsed;
     }
     if (parsed.seasonTotals && Object.keys(parsed.seasonTotals).length > 0) {
@@ -250,6 +263,9 @@
     if (rawProg?.episodeRatings && typeof rawProg.episodeRatings === "object") {
       newProgress.episodeRatings = { ...rawProg.episodeRatings };
     }
+    if (rawProg?.episodeNotes && typeof rawProg.episodeNotes === "object") {
+      newProgress.episodeNotes = { ...rawProg.episodeNotes };
+    }
     if (rawProg?.seasonTotals && typeof rawProg.seasonTotals === "object") {
       newProgress.seasonTotals = { ...rawProg.seasonTotals };
     }
@@ -273,6 +289,9 @@
     if (Array.isArray(prog.episodes) && prog.episodes.length > 0) return false;
     if (typeof prog.moviePosition === "number" && prog.moviePosition > 0) return false;
     if (prog.episodeRatings && Object.keys(prog.episodeRatings).length > 0) {
+      return false;
+    }
+    if (prog.episodeNotes && Object.keys(prog.episodeNotes).length > 0) {
       return false;
     }
     if (prog.seasonTotals && Object.keys(prog.seasonTotals).length > 0) {
@@ -432,6 +451,9 @@
     if (rawProg?.episodeRatings && typeof rawProg.episodeRatings === "object") {
       newProgress.episodeRatings = { ...rawProg.episodeRatings };
     }
+    if (rawProg?.episodeNotes && typeof rawProg.episodeNotes === "object") {
+      newProgress.episodeNotes = { ...rawProg.episodeNotes };
+    }
     if (rawProg?.completed === true) {
       newProgress.completed = true;
     }
@@ -449,6 +471,35 @@
     const num = Number(val);
     if (!Number.isFinite(num) || num < 0 || num > 10) return null;
     return Math.round(num * 10) / 10;
+  }
+
+  /**
+   * Avg of user episode ratings only (unrated episodes are not zeros).
+   * @param {object|null} entry
+   * @param {{ seasonNum?: number|null, includeSpecials?: boolean }} [opts]
+   * @returns {{ avg: number, ratedCount: number }|null}
+   */
+  function episodeRatingStats(entry, { seasonNum = null, includeSpecials = false } = {}) {
+    const prog = getProgress(entry);
+    const ratings = prog?.episodeRatings;
+    if (!ratings || typeof ratings !== "object") return null;
+    const values = [];
+    for (const [key, raw] of Object.entries(ratings)) {
+      const parts = String(key).split(":");
+      const s = Number(parts[0]);
+      if (!Number.isFinite(s)) continue;
+      if (!includeSpecials && s === 0) continue;
+      if (seasonNum != null && s !== Number(seasonNum)) continue;
+      const num = Number(raw);
+      if (!Number.isFinite(num) || num <= 0 || num > 10) continue;
+      values.push(Math.round(num * 10) / 10);
+    }
+    if (!values.length) return null;
+    const sum = values.reduce((a, b) => a + b, 0);
+    return {
+      avg: Math.round((sum / values.length) * 10) / 10,
+      ratedCount: values.length,
+    };
   }
 
   function setEpisodeRating(entry, seasonNum, episodeNum, rating) {
@@ -482,6 +533,41 @@
     return next;
   }
 
+  function getEpisodeNote(entry, seasonNum, episodeNum) {
+    const prog = getProgress(entry);
+    if (!prog?.episodeNotes) return "";
+    const raw = prog.episodeNotes[episodeKey(seasonNum, episodeNum)];
+    return String(raw || "").trim();
+  }
+
+  function setEpisodeNote(entry, seasonNum, episodeNum, note) {
+    const key = episodeKey(seasonNum, episodeNum);
+    const text = String(note || "").trim().slice(0, 2000);
+    let episodes = getProgress(entry)?.episodes;
+    if (!Array.isArray(episodes)) episodes = [];
+    else episodes = [...episodes];
+    const next = _buildEntry(entry, episodes);
+    if (!text) {
+      if (!next.progress.episodeNotes || !(key in next.progress.episodeNotes)) {
+        return next;
+      }
+      delete next.progress.episodeNotes[key];
+      if (Object.keys(next.progress.episodeNotes).length === 0) {
+        delete next.progress.episodeNotes;
+      }
+      return next;
+    }
+    if (!next.progress.episodeNotes || typeof next.progress.episodeNotes !== "object") {
+      next.progress.episodeNotes = {};
+    }
+    next.progress.episodeNotes[key] = text;
+    return next;
+  }
+
+  function clearEpisodeNote(entry, seasonNum, episodeNum) {
+    return setEpisodeNote(entry, seasonNum, episodeNum, "");
+  }
+
   // ─── export ───────────────────────────────────────────────────────────────────
 
   window.WatchlistProgress = {
@@ -503,8 +589,12 @@
     markAllWatched,
     clearAllProgress,
     getEpisodeRating,
+    episodeRatingStats,
     setEpisodeRating,
     clearEpisodeRating,
+    getEpisodeNote,
+    setEpisodeNote,
+    clearEpisodeNote,
     getMoviePosition,
     setMoviePosition,
     movieWatchState,

@@ -261,8 +261,13 @@ alter table public.watchlist_items
 create index if not exists watchlist_items_in_progress_idx
   on public.watchlist_items (list_id)
   where watched = false
-    and jsonb_typeof(watch_progress->'episodes') = 'array'
-    and jsonb_array_length(watch_progress->'episodes') > 0;
+  and jsonb_typeof(watch_progress->'episodes') = 'array'
+  and jsonb_array_length(watch_progress->'episodes') > 0;
+
+-- ── Shared series / season catalog cache ───────────────────────────────────
+-- Full DDL: supabase/migrate-series-metadata-cache.sql
+-- Run that file if this project does not yet have public.series_metadata_cache.
+-- Edge functions tmdb-metadata / tvdb-metadata use it as a shared TTL cache.
 
 create or replace function public.refresh_list_stats(p_list_id text)
 returns void
@@ -307,3 +312,8 @@ where watched = true
 
 select public.refresh_list_stats(list_id)
 from public.lists;
+
+-- -- Shared series / season catalog cache -----------------------------------
+-- Full DDL: supabase/migrate-series-metadata-cache.sql
+-- Run that file if this project does not yet have public.series_metadata_cache.
+-- Edge functions tmdb-metadata / tvdb-metadata use it as a shared TTL cache.

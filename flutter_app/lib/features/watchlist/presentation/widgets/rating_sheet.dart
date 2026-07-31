@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/utils/rating_utils.dart';
+import '../../../../core/utils/watch_progress.dart';
 import '../../../../core/widgets/content_badges.dart';
 import '../../../../l10n/l10n.dart';
 import '../../../../models/watchlist_item.dart';
@@ -61,6 +62,8 @@ class _RatingSheetState extends State<RatingSheet> {
   double? _value;
   bool _saving = false;
   String? _errorMessage;
+  double? _episodeAvgSuggest;
+  String _episodeAvgMeta = '';
 
   @override
   void initState() {
@@ -71,6 +74,20 @@ class _RatingSheetState extends State<RatingSheet> {
         ? clampRatingValue(widget.watched!.rating!)
         : null;
     _noteController = TextEditingController(text: widget.watched?.note ?? '');
+    final type = widget.item.contentType;
+    if (type == 'tvSeries' || type == 'anime') {
+      final stats = episodeRatingStats(
+        widget.watched,
+        includeSpecials: false,
+      );
+      if (stats != null) {
+        _episodeAvgSuggest = stats.avg;
+        final total = widget.item.episodeCount;
+        _episodeAvgMeta = (total != null && total > 0)
+            ? widget.l10n.seasonsEpisodeAvgRatedMeta(stats.ratedCount, total)
+            : widget.l10n.seasonsEpisodeAvgRatedMetaShort(stats.ratedCount);
+      }
+    }
   }
 
   @override
@@ -201,6 +218,39 @@ class _RatingSheetState extends State<RatingSheet> {
                       minLines: 2,
                       maxLines: 4,
                     ),
+                    if (_episodeAvgSuggest != null) ...[
+                      const SizedBox(height: 12),
+                      OutlinedButton(
+                        onPressed: () => _choose(_episodeAvgSuggest!),
+                        style: OutlinedButton.styleFrom(
+                          alignment: AlignmentDirectional.centerStart,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.seasonsEpisodeAvgSuggest(_episodeAvgSuggest!),
+                              style: const TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _episodeAvgMeta,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withValues(alpha: 0.65),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     if (_errorMessage != null) ...[
                       const SizedBox(height: 12),
                       Text(
@@ -219,7 +269,9 @@ class _RatingSheetState extends State<RatingSheet> {
                         ),
                         const Spacer(),
                         FilledButton(
-                          onPressed: _saving ? null : _submit,
+                          onPressed: (_saving || !_chosen || _value == null)
+                              ? null
+                              : _submit,
                           child: _saving
                               ? const SizedBox(
                                   width: 20,

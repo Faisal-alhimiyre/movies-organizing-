@@ -9,7 +9,16 @@
  * Secret env vars read with Deno.env.get():
  *   TVDB_API_KEY   (required)
  *   TVDB_PIN       (optional subscriber PIN — leave empty if not needed)
+ *   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY — series_metadata_cache
  */
+
+import {
+  isForceRefresh,
+  TTL_EPISODES_MS,
+  TTL_RESOLVE_MS,
+  TTL_SERIES_MS,
+  withSeriesCache,
+} from "../_shared/series-metadata-cache.ts";
 
 const TVDB_BASE = "https://api4.thetvdb.com/v4";
 const ALLOWED_ACTIONS = new Set([
@@ -643,15 +652,122 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    const forceRefresh = isForceRefresh(body);
+    const locale = s(body.locale) || "en";
+    const lang = tvdbLanguage(locale);
     let result: unknown;
+
     switch (action) {
-      case "resolve":  result = await actionResolve(body);  break;
-      case "series":   result = await actionSeries(body);   break;
-      case "seasons":  result = await actionSeasons(body);  break;
-      case "episodes": result = await actionEpisodes(body); break;
-      case "episodeTotals": result = await actionEpisodeTotals(body); break;
-      case "allEpisodes": result = await actionAllEpisodes(body); break;
-      default:         result = { error: "unsupported_action" };
+      case "resolve": {
+        const tvdbId = n(body.tvdbId);
+        const imdbId = s(body.imdbId);
+        const tmdbId = n(body.tmdbId);
+        const resolveKey = tvdbId
+          ? `tvdb:v1:resolve:id:${tvdbId}`
+          : imdbId
+            ? `tvdb:v1:resolve:imdb:${imdbId}`
+            : tmdbId
+              ? `tvdb:v1:resolve:tmdb:${tmdbId}`
+              : "";
+        result = resolveKey
+          ? await withSeriesCache({
+              cacheKey: resolveKey,
+              provider: "tvdb",
+              kind: "resolve",
+              locale: "en",
+              ttlMs: TTL_RESOLVE_MS,
+              forceRefresh,
+              compute: () => actionResolve(body),
+            })
+          : await actionResolve(body);
+        break;
+      }
+      case "series": {
+        const id = n(body.tvdbId);
+        result = id
+          ? await withSeriesCache({
+              cacheKey: `tvdb:v1:series:${id}:${lang}`,
+              provider: "tvdb",
+              kind: "series",
+              locale: lang,
+              ttlMs: TTL_SERIES_MS,
+              forceRefresh,
+              compute: () => actionSeries(body),
+            })
+          : await actionSeries(body);
+        break;
+      }
+      case "seasons": {
+        const id = n(body.tvdbId);
+        result = id
+          ? await withSeriesCache({
+              cacheKey: `tvdb:v1:seasons:${id}:${lang}`,
+              provider: "tvdb",
+              kind: "seasons",
+              locale: lang,
+              ttlMs: TTL_SERIES_MS,
+              forceRefresh,
+              compute: () => actionSeasons(body),
+            })
+          : await actionSeasons(body);
+        break;
+      }
+      case "episodes": {
+        const id = n(body.tvdbId);
+        const season = n(body.season);
+        const allSeasons = body.all === true || body.allSeasons === true;
+        const order = normalizeEpisodeOrder(body.order, "official");
+        const cacheKey = id
+          ? allSeasons
+            ? `tvdb:v1:episodes-all:${id}:${lang}:${order}`
+            : `tvdb:v1:episodes:${id}:${season ?? "x"}:${lang}:${order}`
+          : "";
+        result = cacheKey
+          ? await withSeriesCache({
+              cacheKey,
+              provider: "tvdb",
+              kind: allSeasons ? "episodes_all" : "episodes",
+              locale: lang,
+              ttlMs: TTL_EPISODES_MS,
+              forceRefresh,
+              compute: () => actionEpisodes(body),
+            })
+          : await actionEpisodes(body);
+        break;
+      }
+      case "episodeTotals": {
+        const id = n(body.tvdbId);
+        result = id
+          ? await withSeriesCache({
+              cacheKey: `tvdb:v1:episodeTotals:${id}:${lang}`,
+              provider: "tvdb",
+              kind: "episodeTotals",
+              locale: lang,
+              ttlMs: TTL_SERIES_MS,
+              forceRefresh,
+              compute: () => actionEpisodeTotals(body),
+            })
+          : await actionEpisodeTotals(body);
+        break;
+      }
+      case "allEpisodes": {
+        const id = n(body.tvdbId);
+        const order = normalizeEpisodeOrder(body.order, "absolute");
+        result = id
+          ? await withSeriesCache({
+              cacheKey: `tvdb:v1:allEpisodes:${id}:${lang}:${order}`,
+              provider: "tvdb",
+              kind: "allEpisodes",
+              locale: lang,
+              ttlMs: TTL_EPISODES_MS,
+              forceRefresh,
+              compute: () => actionAllEpisodes(body),
+            })
+          : await actionAllEpisodes(body);
+        break;
+      }
+      default:
+        result = { error: "unsupported_action" };
     }
 
     return new Response(JSON.stringify(result), {

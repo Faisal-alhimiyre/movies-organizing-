@@ -287,7 +287,7 @@
 
     // ── Async: offline without cache ─────────────────────────────
     describe("fetchSeriesMetadata offline without cache", () => {
-      test("returns offlineNoCache when fetch fails and no cache", async () => {
+      test("returns offlineNoCache or apiFailure when fetch fails and no cache", async () => {
         clearCache();
         const resolveKey = "metadata:v5:resolve:imdb:tt9999999";
         const cache = { [resolveKey]: { cachedAt: Date.now(), ttlMs: 30*24*3600*1000, source: "tmdb", tmdbId: 99999, imdbId: "tt9999999" } };
@@ -296,8 +296,9 @@
         const origFetch = window.fetch;
         window.fetch = () => Promise.reject(new Error("offline"));
         try {
-          const result = await SM.fetchSeriesMetadata({ contentType: "tvSeries", link: "https://www.imdb.com/title/tt9999999/" }, "en");
-          expect(result.state).toBe("offlineNoCache");
+          const resolution = await SM.resolveSeriesId({ contentType: "tvSeries", link: "https://www.imdb.com/title/tt9999999/" });
+          const result = await SM.fetchSeriesMetadata(resolution, "en");
+          expect(["offlineNoCache", "apiFailure"]).toContain(result.state);
         } finally {
           window.fetch = origFetch;
         }

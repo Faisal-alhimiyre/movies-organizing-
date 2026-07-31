@@ -62,6 +62,8 @@
   let _fillerUiAvailable = false;
   let _activeEpisodeKey = null;
   let _episodeModalEditing = false;
+  let _epPickerChosen = false;
+  let _epPickerValue = null;
   let _episodeModalEl = null;
   let _episodeListRender = null;
   let _episodeListRenderId = 0;
@@ -1000,7 +1002,6 @@
           </div>
           <div class="tds-season-actions" data-tds-part="season-actions" hidden>
             <button type="button" class="tds-season-mark-btn" data-tds-action="mark-season" data-tds-season=""></button>
-            <p class="tds-season-actions__avg" data-tds-part="season-avg" hidden></p>
           </div>
         </div>
         </div>
@@ -1013,7 +1014,6 @@
             </div>
             <div class="tds-season-actions" data-tds-part="specials-actions" hidden>
               <button type="button" class="tds-season-mark-btn" data-tds-action="mark-season" data-tds-season="0"></button>
-              <p class="tds-season-actions__avg" data-tds-part="specials-avg" hidden></p>
             </div>
           </div>
         </div>
@@ -1074,6 +1074,10 @@
               </div>
               <p class="tds-episode-jump__hint" data-tds-part="episode-jump-hint" hidden></p>
             </div>
+            <div class="tds-season-rating-row" data-tds-part="season-rating-row" hidden>
+              <p class="tds-season-rating-row__badge tds-season-rating-row__badge--user" data-tds-part="season-user-avg" hidden></p>
+              <p class="tds-season-rating-row__badge tds-season-rating-row__badge--source" data-tds-part="season-avg" hidden></p>
+            </div>
           </div>
           <div class="tds-episodes-status" data-tds-part="episodes-status" hidden></div>
           <div class="tds-episode-list" role="list" aria-live="polite"></div>
@@ -1091,17 +1095,49 @@
             <div class="tds-episode-modal__media" data-tds-part="episode-modal-media"></div>
             <h4 class="tds-episode-modal__title" id="tdsEpisodeModalTitle" data-tds-part="episode-modal-title"></h4>
             <p class="tds-episode-modal__meta" data-tds-part="episode-modal-meta"></p>
-            <p class="tds-episode-modal__overview" data-tds-part="episode-modal-overview" hidden></p>
             <div class="tds-episode-modal__ratings">
               <span class="tds-rating-chip tds-rating-chip--source" data-tds-part="episode-modal-source" hidden></span>
               <span class="tds-rating-chip tds-rating-chip--user" data-tds-part="episode-modal-user" hidden></span>
             </div>
+            <p class="tds-episode-modal__overview" data-tds-part="episode-modal-overview" hidden></p>
             <div class="tds-episode-modal__form">
-              <label class="tds-episode-modal__label" data-tds-part="episode-modal-label" for="tdsEpisodeRatingInput">${esc(t("seasons.yourEpisodeRating"))}</label>
-              <input id="tdsEpisodeRatingInput" data-tds-part="episode-modal-input" type="number" min="0" max="10" step="0.1" placeholder="8.5" />
+              <div class="tds-episode-rated" data-tds-part="episode-rated-box" hidden>
+                <span class="tds-episode-rated__label" data-tds-part="episode-rated-label"></span>
+                <div class="tds-episode-rated__value">
+                  <span class="tds-episode-rated__score text-num" data-tds-part="episode-rated-score"></span>
+                  <span class="tds-episode-rated__denom text-num">/10</span>
+                </div>
+                <p class="tds-episode-rated__note" data-tds-part="episode-rated-note" hidden></p>
+                <button type="button" class="btn btn--ghost btn--sm tds-episode-rated__edit"
+                  data-tds-action="save-episode-rating"></button>
+              </div>
+              <div class="rating-picker rating-picker--idle tds-episode-rating-picker" data-tds-part="episode-rating-picker">
+                <p class="rating-picker__value" aria-live="polite">
+                  <span class="rating-picker__score text-num" data-tds-part="episode-rating-score">—</span>
+                  <span class="rating-picker__max">/ 10</span>
+                </p>
+                <div class="rating-picker__stars" role="group" aria-label="${esc(t("rating.starsGroup"))}">
+                  ${[1,2,3,4,5,6,7,8,9,10].map((n) =>
+                    `<button type="button" class="rating-picker__star" data-tds-ep-star="${n}" aria-label="${esc(t("rating.star", { n }))}">
+                      <span class="rating-picker__star-icon" aria-hidden="true">★</span>
+                    </button>`
+                  ).join("")}
+                </div>
+                <div class="rating-picker__fine">
+                  <button type="button" class="rating-picker__step" data-tds-ep-adjust="-0.1" aria-label="${esc(t("rating.lower"))}">−</button>
+                  <span class="rating-picker__fine-label">${esc(t("rating.fineTune"))}</span>
+                  <button type="button" class="rating-picker__step" data-tds-ep-adjust="0.1" aria-label="${esc(t("rating.raise"))}">+</button>
+                </div>
+              </div>
+              <textarea
+                class="form-textarea tds-episode-modal__note"
+                data-tds-part="episode-rating-note"
+                rows="2"
+                placeholder="${esc(t("rating.yourThoughts"))}"
+              ></textarea>
               <div class="tds-episode-modal__actions">
-                <button type="button" class="tds-modal-btn tds-modal-btn--ghost" data-tds-action="close-episode-modal">${esc(t("btn.cancel"))}</button>
-                <button type="button" class="tds-modal-btn" data-tds-action="save-episode-rating">${esc(t("btn.save"))}</button>
+                <button type="button" class="tds-modal-btn tds-modal-btn--clear" data-tds-action="clear-episode-rating" hidden>${esc(t("seasons.clearEpisodeRating"))}</button>
+                <button type="button" class="tds-modal-btn" data-tds-action="save-episode-rating" disabled>${esc(t("btn.save"))}</button>
               </div>
             </div>
           </div>
@@ -1913,7 +1949,15 @@
           break;
 
         case RS.OFFLINE_NO_CACHE:
-          showError(t("seasons.offlineNoCache"), "retry-series");
+          if (typeof navigator !== "undefined" && navigator.onLine !== false) {
+            showError(t("seasons.error"), "retry-series", t("seasons.errorHint"));
+          } else {
+            showError(
+              t("seasons.offlineNoCache"),
+              "retry-series",
+              t("seasons.offlineNoCacheHint")
+            );
+          }
           break;
 
         case RS.RATE_LIMITED:
@@ -1931,15 +1975,17 @@
         case RS.UNAVAILABLE:
         case RS.API_FAILURE:
         default:
-          showError(t("seasons.error"), "retry-series");
+          showError(t("seasons.error"), "retry-series", t("seasons.errorHint"));
           break;
       }
     } catch {
-      if (isValid(tok)) showError(t("seasons.error"), "retry-series");
+      if (isValid(tok)) {
+        showError(t("seasons.error"), "retry-series", t("seasons.errorHint"));
+      }
     } finally {
       if (!isValid(tok)) return;
       if (seasonsLoadingStillVisible()) {
-        showError(t("seasons.error"), "retry-series");
+        showError(t("seasons.error"), "retry-series", t("seasons.errorHint"));
       }
     }
   }
@@ -2045,7 +2091,11 @@
 
       case RS.OFFLINE_NO_CACHE:
         if (sn === 0) { removeSpecialsFromCarousel(); return; }
-        showEpisodesStatus(t("seasons.offlineNoCache"), "retry-episodes");
+        if (typeof navigator !== "undefined" && navigator.onLine !== false) {
+          showEpisodesStatus(t("seasons.episodesError"), "retry-episodes");
+        } else {
+          showEpisodesStatus(t("seasons.offlineNoCache"), "retry-episodes");
+        }
         return;
 
       case RS.EPISODE_DETAILS_UNAVAILABLE:
@@ -2401,14 +2451,14 @@
     const season = getSeasonByNum(seasonNum);
     if (!season) {
       actionsEl.hidden = true;
+      const ratingRow = getP("season-rating-row");
+      if (ratingRow) ratingRow.hidden = true;
       return;
     }
 
     const watchEntry = entry ?? getEntry();
     const ws = seasonWatchState(watchEntry, season);
 
-    const avgPart = isSpecials ? "specials-avg" : "season-avg";
-    const avgEl = actionsEl.querySelector(`[data-tds-part='${avgPart}']`);
     const markBtn = actionsEl.querySelector("[data-tds-action='mark-season']");
     const oldMarkText = markBtn?.textContent ?? "";
     const newMarkText = seasonMarkLabel(ws);
@@ -2425,13 +2475,40 @@
       oldMarkText,
       newMarkText,
     });
+
+    const ratingRow = getP("season-rating-row");
+    const userAvgEl = getP("season-user-avg");
+    const avgEl = getP("season-avg");
+    let hasUser = false;
+    let hasSource = false;
+    if (userAvgEl) {
+      const stats = P()?.episodeRatingStats?.(watchEntry, {
+        seasonNum,
+        includeSpecials: isSpecials,
+      });
+      if (stats) {
+        userAvgEl.textContent = t("seasons.yourSeasonRating", {
+          rating: formatRatingValue(stats.avg),
+        });
+        userAvgEl.hidden = false;
+        hasUser = true;
+      } else {
+        userAvgEl.textContent = "";
+        userAvgEl.hidden = true;
+      }
+    }
     if (avgEl) {
       const resolved = resolveSeasonExternalRating(seasonNum);
-      avgEl.textContent = resolved != null
+      const showSource = resolved != null && !_hideEpisodeRatings;
+      avgEl.textContent = showSource
         ? t("seasons.seasonRatingSource", { rating: formatRatingValue(resolved.value) })
         : "";
-      avgEl.classList.toggle("tds-season-avg-badge", resolved != null);
-      avgEl.hidden = resolved == null;
+      avgEl.hidden = !showSource;
+      hasSource = showSource;
+    }
+    if (ratingRow) {
+      const episodesVisible = !getP("episodes-section")?.hidden;
+      ratingRow.hidden = !(hasUser || hasSource) || !episodesVisible;
     }
     actionsEl.hidden = _activeTab !== (isSpecials ? "specials" : "seasons");
   }
@@ -2809,6 +2886,7 @@
       : t("seasons.episodeWatched", { title: displayTitle || t("seasons.episodeNum", { n: epNum }) });
     const sourceRating = episodeExternalRating(ep);
     const yourRating = episodeUserRating(entry, seasonNum, epNum);
+    const yourNote = P()?.getEpisodeNote?.(entry, seasonNum, epNum) || "";
 
     // Only use the episode's own unique still — never fall back to season/title
     // poster, which would make every episode without a still show the same image.
@@ -2841,8 +2919,9 @@
         </div>
         ${overviewText ? `<p class="tds-ep-overview">${esc(overviewText)}</p>` : ""}
         ${metaParts.length ? `<p class="tds-ep-meta">${esc(metaParts.join(" · "))}</p>` : ""}
-        <div class="tds-ep-ratings"${yourRating != null ? "" : " hidden"}>
+        <div class="tds-ep-ratings"${yourRating != null || yourNote ? "" : " hidden"}>
           ${yourRating != null ? `<span class="tds-rating-chip tds-rating-chip--user">${esc(t("seasons.episodeRatingYours", { rating: formatRatingValue(yourRating) }))}</span>` : ""}
+          ${yourNote ? `<p class="tds-ep-note">${esc(yourNote)}</p>` : ""}
         </div>
       </div>
       <button class="tds-ep-check${watched ? " tds-ep-check--watched" : ""}"
@@ -2941,6 +3020,98 @@
     return _episodesResult.episodes.find((ep) => `${ep.seasonNumber}:${ep.episodeNumber}` === epKey) || null;
   }
 
+  function clampEpPickerValue(rating) {
+    const num = Number(rating);
+    if (!Number.isFinite(num)) return null;
+    return Math.round(Math.min(10, Math.max(0.1, num)) * 10) / 10;
+  }
+
+  function updateEpisodeRatingPickerDisplay() {
+    const picker = getP("episode-rating-picker");
+    const scoreEl = getP("episode-rating-score");
+    const saveBtn = _episodeModalEl?.querySelector(
+      ".tds-episode-modal__actions [data-tds-action='save-episode-rating']"
+    );
+    const clearBtn = _episodeModalEl?.querySelector("[data-tds-action='clear-episode-rating']");
+    const noteEl = getP("episode-rating-note");
+    const actionsEl = _episodeModalEl?.querySelector(".tds-episode-modal__actions");
+    const ratedBox = getP("episode-rated-box");
+    const ratedLabel = getP("episode-rated-label");
+    const ratedScore = getP("episode-rated-score");
+    const ratedNote = getP("episode-rated-note");
+    const ratedEdit = ratedBox?.querySelector("[data-tds-action='save-episode-rating']");
+    const chosen = _epPickerChosen;
+    const value = _epPickerValue;
+    const entry = getEntry();
+    const ep = _activeEpisodeKey ? findEpisodeByKey(_activeEpisodeKey) : null;
+    const existing = ep
+      ? episodeUserRating(entry, ep.seasonNumber, ep.episodeNumber)
+      : null;
+    const viewing = existing != null && !_episodeModalEditing;
+    const noteText = ep
+      ? (P()?.getEpisodeNote?.(entry, ep.seasonNumber, ep.episodeNumber) || "")
+      : "";
+
+    picker?.classList.toggle("rating-picker--idle", !chosen);
+    if (scoreEl) scoreEl.textContent = chosen ? formatRatingValue(value) : "—";
+
+    picker?.querySelectorAll("[data-tds-ep-star]").forEach((button) => {
+      const star = Number(button.dataset.tdsEpStar);
+      const filled = chosen && value != null && star <= Math.floor(value + 0.001);
+      button.classList.toggle("rating-picker__star--filled", filled);
+      button.setAttribute("aria-pressed", String(filled));
+      button.disabled = false;
+    });
+    picker?.querySelectorAll("[data-tds-ep-adjust]").forEach((button) => {
+      button.disabled = false;
+    });
+
+    if (picker) picker.hidden = viewing;
+    if (noteEl) {
+      noteEl.hidden = viewing;
+      if (!viewing && !noteEl.value && noteText) noteEl.value = noteText;
+    }
+    if (actionsEl) actionsEl.hidden = viewing;
+
+    if (ratedBox) {
+      ratedBox.hidden = !viewing;
+      if (viewing) {
+        if (ratedLabel) ratedLabel.textContent = t("detail.myRating");
+        if (ratedScore) ratedScore.textContent = formatRatingValue(existing);
+        if (ratedNote) {
+          if (noteText) {
+            ratedNote.textContent = noteText;
+            ratedNote.hidden = false;
+          } else {
+            ratedNote.textContent = "";
+            ratedNote.hidden = true;
+          }
+        }
+        if (ratedEdit) ratedEdit.textContent = t("detail.editRating");
+      }
+    }
+
+    if (saveBtn) {
+      saveBtn.disabled = !chosen || value == null;
+      saveBtn.textContent = t("btn.save");
+    }
+    if (clearBtn) clearBtn.hidden = viewing || existing == null;
+  }
+
+  function chooseEpisodePickerValue(rating) {
+    const next = clampEpPickerValue(rating);
+    if (next == null) return;
+    _epPickerChosen = true;
+    _epPickerValue = next;
+    updateEpisodeRatingPickerDisplay();
+  }
+
+  function resetEpisodePicker({ chosen = false, rating = null } = {}) {
+    _epPickerChosen = chosen && rating != null;
+    _epPickerValue = _epPickerChosen ? clampEpPickerValue(rating) : null;
+    updateEpisodeRatingPickerDisplay();
+  }
+
   function openEpisodeModal(epKey) {
     const modal = getP("episode-modal");
     const ep = findEpisodeByKey(epKey);
@@ -2949,6 +3120,7 @@
     const entry = getEntry();
     const sourceRating = episodeExternalRating(ep);
     const yourRating = episodeUserRating(entry, ep.seasonNumber, ep.episodeNumber);
+    const yourNote = P()?.getEpisodeNote?.(entry, ep.seasonNumber, ep.episodeNumber) || "";
 
     const media = getP("episode-modal-media");
     const titleEl = getP("episode-modal-title");
@@ -2956,9 +3128,7 @@
     const overviewEl = getP("episode-modal-overview");
     const sourceEl = getP("episode-modal-source");
     const userEl = getP("episode-modal-user");
-    const labelEl = getP("episode-modal-label");
-    const inputEl = getP("episode-modal-input");
-    const saveBtn = _episodeModalEl?.querySelector("[data-tds-action='save-episode-rating']");
+    const noteEl = getP("episode-rating-note");
 
     if (media) {
       media.innerHTML = ep.still
@@ -2994,37 +3164,39 @@
       }
     }
     if (userEl) {
-      if (yourRating != null) {
+      // Score lives in the My Rating box while viewing.
+      if (yourRating != null && _episodeModalEditing) {
         userEl.textContent = t("seasons.episodeRatingYours", { rating: formatRatingValue(yourRating) });
         userEl.hidden = false;
       } else {
         userEl.hidden = true;
       }
     }
-    if (labelEl) labelEl.hidden = (yourRating != null && !_episodeModalEditing);
-    if (inputEl) {
-      inputEl.hidden = (yourRating != null && !_episodeModalEditing);
-      inputEl.value = yourRating != null ? String(yourRating) : "";
-    }
-    if (saveBtn) {
-      saveBtn.textContent =
-        (yourRating != null && !_episodeModalEditing)
-          ? t("seasons.editEpisodeRating")
-          : t("btn.save");
+    if (noteEl) noteEl.value = yourNote;
+
+    if (yourRating != null) {
+      resetEpisodePicker({ chosen: true, rating: yourRating });
+    } else {
+      _episodeModalEditing = true;
+      resetEpisodePicker();
     }
 
     modal.hidden = false;
     const scrollBtn = getP("scroll-to-seasons");
     if (scrollBtn) scrollBtn.hidden = true;
-    if (inputEl && !inputEl.hidden) {
-      inputEl.focus();
-      requestAnimationFrame(() => {
-        modal.querySelector(".tds-episode-modal__panel")?.scrollIntoView({
-          block: "center",
-          behavior: "smooth",
-        });
+    requestAnimationFrame(() => {
+      modal.querySelector(".tds-episode-modal__panel")?.scrollIntoView({
+        block: "center",
+        behavior: "smooth",
       });
-    }
+      if (_episodeModalEditing || yourRating == null) {
+        modal.querySelector('[data-tds-ep-star="5"]')?.focus();
+      } else {
+        getP("episode-rated-box")
+          ?.querySelector("[data-tds-action='save-episode-rating']")
+          ?.focus();
+      }
+    });
   }
 
   function closeEpisodeModal() {
@@ -3033,6 +3205,7 @@
     modal.hidden = true;
     _activeEpisodeKey = null;
     _episodeModalEditing = false;
+    resetEpisodePicker();
     syncScrollToSeasonsWatcher();
   }
 
@@ -3040,41 +3213,48 @@
     if (!_activeEpisodeKey) return;
     const ep = findEpisodeByKey(_activeEpisodeKey);
     if (!ep) return;
-    const inputEl = getP("episode-modal-input");
-    const entered = clear ? "" : String(inputEl?.value || "").trim();
-    const parsed = entered === "" ? null : Number(entered.replace(",", "."));
-    if (parsed != null && (!Number.isFinite(parsed) || parsed < 0 || parsed > 10)) return;
 
-    const [sStr, eStr] = _activeEpisodeKey.split(":");
-    const seasonNum = Number(sStr);
-    const epNum = Number(eStr);
-    if (!Number.isFinite(seasonNum) || !Number.isFinite(epNum)) return;
-
-    let entry = getEntry();
-    const existingRating = episodeUserRating(entry, seasonNum, epNum);
-    if (!clear && existingRating != null && !_episodeModalEditing) {
+    const existing = episodeUserRating(getEntry(), ep.seasonNumber, ep.episodeNumber);
+    if (!clear && existing != null && !_episodeModalEditing) {
       _episodeModalEditing = true;
       openEpisodeModal(_activeEpisodeKey);
       return;
     }
 
+    const parsed = clear ? null : (_epPickerChosen ? _epPickerValue : null);
+    if (!clear && (parsed == null || !Number.isFinite(parsed))) return;
+
+    const seasonNum = ep.seasonNumber;
+    const epNum = ep.episodeNumber;
+    const noteEl = getP("episode-rating-note");
+    const noteText = clear ? "" : String(noteEl?.value || "").trim();
+
+    let entry = getEntry();
     const airedKeys = airedEpisodeKeysForSeason(seasonNum);
     const epKey = P()?.episodeKey(seasonNum, epNum);
     const hasGranular = Boolean(P()?.getProgress(entry));
     if (!hasGranular) {
-      // Legacy-complete title: start granular progress for this episode only.
       entry = P()?.markEpisodeWatched(entry, seasonNum, epNum, epKey ? [epKey] : airedKeys);
     } else if (!(P()?.isEpisodeWatched(entry, seasonNum, epNum) ?? false)) {
       entry = P()?.markEpisodeWatched(entry, seasonNum, epNum, airedKeys);
     }
-    const normalized = (parsed != null && parsed > 0) ? parsed : null;
-    entry = (clear || normalized == null)
-      ? P()?.clearEpisodeRating?.(entry, seasonNum, epNum)
-      : P()?.setEpisodeRating?.(entry, seasonNum, epNum, normalized);
+    if (clear) {
+      entry = P()?.clearEpisodeRating?.(entry, seasonNum, epNum);
+      entry = P()?.clearEpisodeNote?.(entry, seasonNum, epNum) ?? entry;
+    } else {
+      entry = P()?.setEpisodeRating?.(entry, seasonNum, epNum, parsed);
+      entry = P()?.setEpisodeNote?.(entry, seasonNum, epNum, noteText) ?? entry;
+    }
 
     saveEntry(entry);
     _episodeModalEditing = false;
-    openEpisodeModal(_activeEpisodeKey);
+    updateSeasonActions(seasonNum, entry);
+    updateEpisodeRowStateFromEntry(entry, seasonNum, epNum, ep);
+    if (clear) {
+      openEpisodeModal(_activeEpisodeKey);
+    } else {
+      openEpisodeModal(_activeEpisodeKey);
+    }
   }
 
   // ─── Error / loading states ───────────────────────────────────────────────
@@ -3218,10 +3398,16 @@
 
     const ratingsWrap = row.querySelector(".tds-ep-ratings");
     if (ratingsWrap) {
-      ratingsWrap.innerHTML = yourRating != null
-        ? `<span class="tds-rating-chip tds-rating-chip--user">${esc(t("seasons.episodeRatingYours", { rating: formatRatingValue(yourRating) }))}</span>`
-        : "";
-      ratingsWrap.hidden = yourRating == null;
+      const yourNote = P()?.getEpisodeNote?.(entry, seasonNum, epNum) || "";
+      const parts = [];
+      if (yourRating != null) {
+        parts.push(`<span class="tds-rating-chip tds-rating-chip--user">${esc(t("seasons.episodeRatingYours", { rating: formatRatingValue(yourRating) }))}</span>`);
+      }
+      if (yourNote) {
+        parts.push(`<p class="tds-ep-note">${esc(yourNote)}</p>`);
+      }
+      ratingsWrap.innerHTML = parts.join("");
+      ratingsWrap.hidden = parts.length === 0;
     }
     row.dataset.tdsWatched = String(watched);
     if (wasWatched !== watched) {
@@ -3433,6 +3619,21 @@
   }
 
   function onSlotClick(event) {
+    const starBtn = event.target.closest("[data-tds-ep-star]");
+    if (starBtn) {
+      event.stopPropagation();
+      if (starBtn.disabled) return;
+      chooseEpisodePickerValue(Number(starBtn.dataset.tdsEpStar));
+      return;
+    }
+    const adjustBtn = event.target.closest("[data-tds-ep-adjust]");
+    if (adjustBtn) {
+      event.stopPropagation();
+      if (adjustBtn.disabled || !_epPickerChosen || _epPickerValue == null) return;
+      chooseEpisodePickerValue(_epPickerValue + Number(adjustBtn.dataset.tdsEpAdjust));
+      return;
+    }
+
     const target = event.target.closest("[data-tds-action]");
     if (!target) return;
 
@@ -3485,6 +3686,10 @@
         saveEpisodeRatingFromModal();
         break;
       }
+      case "clear-episode-rating": {
+        saveEpisodeRatingFromModal({ clear: true });
+        break;
+      }
       case "toggle-spoiler": {
         _spoilerPosters = !_spoilerPosters;
         updateSpoilerRow();
@@ -3494,6 +3699,7 @@
       case "toggle-hide-ratings": {
         _hideEpisodeRatings = !_hideEpisodeRatings;
         updateSpoilerRow();
+        if (_selectedSeason != null) updateSeasonActions(_selectedSeason);
         break;
       }
       case "toggle-hide-filler": {

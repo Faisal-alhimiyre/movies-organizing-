@@ -8,7 +8,17 @@
  *
  * Secret env vars:
  *   TMDB_API_KEY   (required)
+ *   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY — series_metadata_cache
  */
+
+import {
+  isForceRefresh,
+  TTL_EPISODES_MS,
+  TTL_RATINGS_MS,
+  TTL_RESOLVE_MS,
+  TTL_SERIES_MS,
+  withSeriesCache,
+} from "../_shared/series-metadata-cache.ts";
 
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMDB_SUGGEST_BASE = "https://v2.sg.media-imdb.com/suggestion";
@@ -761,29 +771,105 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    const forceRefresh = isForceRefresh(body);
     let result: unknown;
     switch (action) {
-      case "resolve":
-        result = await actionResolve(body);
+      case "resolve": {
+        const imdbId = s(body.imdbId);
+        result = imdbId
+          ? await withSeriesCache({
+              cacheKey: `tmdb:v1:resolve:imdb:${imdbId}`,
+              provider: "tmdb",
+              kind: "resolve",
+              locale: "en",
+              ttlMs: TTL_RESOLVE_MS,
+              forceRefresh,
+              compute: () => actionResolve(body),
+            })
+          : await actionResolve(body);
         break;
-      case "seasonRatings":
-        result = await actionSeasonRatings(body);
+      }
+      case "seasonRatings": {
+        const tmdbId = n(body.tmdbId);
+        const season = n(body.season);
+        const lang = tmdbLanguage(body.locale);
+        result =
+          tmdbId && season != null
+            ? await withSeriesCache({
+                cacheKey: `tmdb:v1:seasonRatings:${tmdbId}:${season}:${lang}`,
+                provider: "tmdb",
+                kind: "seasonRatings",
+                locale: lang,
+                ttlMs: TTL_RATINGS_MS,
+                forceRefresh,
+                compute: () => actionSeasonRatings(body),
+              })
+            : await actionSeasonRatings(body);
         break;
-      case "details":
-        result = await actionDetails(body);
+      }
+      case "details": {
+        const tmdbId = n(body.tmdbId);
+        const mediaType = s(body.mediaType);
+        const lang = tmdbLanguage(resolveTitleLocale(body));
+        result =
+          tmdbId && (mediaType === "movie" || mediaType === "tv")
+            ? await withSeriesCache({
+                cacheKey: `tmdb:v1:details:${mediaType}:${tmdbId}:${lang}`,
+                provider: "tmdb",
+                kind: "details",
+                locale: lang,
+                ttlMs: TTL_SERIES_MS,
+                forceRefresh,
+                compute: () => actionDetails(body),
+              })
+            : await actionDetails(body);
         break;
+      }
       case "search":
         result = await actionSearch(body);
         break;
-      case "tvFetch":
-        result = await actionTvFetch(body);
+      case "tvFetch": {
+        const tmdbId = n(body.tmdbId);
+        const season = n(body.season);
+        const lang = tmdbLanguage(resolveTitleLocale(body));
+        const cacheKey = tmdbId
+          ? season != null && season >= 0
+            ? `tmdb:v1:tvFetch:${tmdbId}:s${season}:${lang}`
+            : `tmdb:v1:tvFetch:${tmdbId}:${lang}`
+          : "";
+        result = cacheKey
+          ? await withSeriesCache({
+              cacheKey,
+              provider: "tmdb",
+              kind: season != null ? "tv_season" : "tv",
+              locale: lang,
+              ttlMs: season != null ? TTL_EPISODES_MS : TTL_SERIES_MS,
+              forceRefresh,
+              compute: () => actionTvFetch(body),
+            })
+          : await actionTvFetch(body);
         break;
+      }
       case "imdbSuggest":
         result = await actionImdbSuggest(body);
         break;
-      case "similar":
-        result = await actionSimilar(body);
+      case "similar": {
+        const tmdbId = n(body.tmdbId);
+        const mediaType = s(body.mediaType) || "tv";
+        const lang = tmdbLanguage(resolveTitleLocale(body));
+        result = tmdbId
+          ? await withSeriesCache({
+              cacheKey: `tmdb:v1:similar:${mediaType}:${tmdbId}:${lang}`,
+              provider: "tmdb",
+              kind: "similar",
+              locale: lang,
+              ttlMs: TTL_SERIES_MS,
+              forceRefresh,
+              compute: () => actionSimilar(body),
+            })
+          : await actionSimilar(body);
         break;
+      }
       default:
         result = { error: "unsupported_action" };
     }

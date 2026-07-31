@@ -660,28 +660,40 @@ describe("fetchSeriesMetadata — offline without cache", () => {
     delete global.fetch;
   });
 
-  test("returns OFFLINE_NO_CACHE when fetch fails and no cache exists", async () => {
-    // Pre-populate resolve cache so we get past ID resolution
-    const resolveKey = "metadata:v5:resolve:imdb:tt9999999";
-    const cache = {
-      [resolveKey]: {
-        cachedAt: Date.now(),
-        ttlMs: 30 * 24 * 3600 * 1000,
-        source: "tmdb",
-        tmdbId: 99999,
-        imdbId: "tt9999999",
-      },
+  function resolutionFromCache() {
+    return {
+      source: "tmdb",
+      tmdbId: 99999,
+      imdbId: "tt9999999",
+      hasUsableSource: true,
     };
-    localStorage.setItem("watchlist-series-cache-v5", JSON.stringify(cache));
+  }
+
+  test("returns API_FAILURE when online fetch fails and no cache exists", async () => {
+    localStorage.setItem("watchlist-series-cache-v5", JSON.stringify({}));
     SM = loadModule();
 
+    Object.defineProperty(global.navigator, "onLine", {
+      configurable: true,
+      get: () => true,
+    });
     global.fetch = mockFetch([new Error("NetworkError")]);
 
-    const item = {
-      contentType: "tvSeries",
-      link: "https://www.imdb.com/title/tt9999999/",
-    };
-    const result = await SM.fetchSeriesMetadata(item, "en");
+    const result = await SM.fetchSeriesMetadata(resolutionFromCache(), "en");
+    expect(result.state).toBe("apiFailure");
+  });
+
+  test("returns OFFLINE_NO_CACHE when browser is offline and no cache exists", async () => {
+    localStorage.setItem("watchlist-series-cache-v5", JSON.stringify({}));
+    SM = loadModule();
+
+    Object.defineProperty(global.navigator, "onLine", {
+      configurable: true,
+      get: () => false,
+    });
+    global.fetch = mockFetch([new Error("NetworkError")]);
+
+    const result = await SM.fetchSeriesMetadata(resolutionFromCache(), "en");
     expect(result.state).toBe("offlineNoCache");
   });
 });

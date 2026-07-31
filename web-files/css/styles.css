@@ -2730,6 +2730,49 @@ html[data-theme] .header__toolbar .btn--primary:hover {
   min-height: 4.5rem;
 }
 
+.rating-episode-avg {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  margin-top: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  text-align: start;
+  font: inherit;
+  cursor: pointer;
+  color: var(--text, #fafafa);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.rating-episode-avg:hover,
+.rating-episode-avg:focus-visible {
+  background: color-mix(in srgb, var(--accent, #0095f6) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent, #0095f6) 55%, transparent);
+  outline: none;
+}
+
+.rating-episode-avg__label {
+  font-size: 0.86rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.rating-episode-avg__meta {
+  font-size: 0.74rem;
+  color: var(--text-muted, #a8a8a8);
+}
+
+#ratingSaveBtn:disabled,
+.modal__footer .btn--primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: grayscale(0.2);
+}
+
 .rating-picker__value {
   margin: 0 0 0.9rem;
   text-align: center;

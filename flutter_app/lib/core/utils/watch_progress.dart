@@ -135,9 +135,11 @@ WatchEntry? setMoviePosition(WatchEntry? entry, double fraction) {
       completed: false,
       seasonTotals: base.seasonTotals,
       episodeRatings: base.episodeRatings,
+      episodeNotes: base.episodeNotes,
     );
     if (next.episodes.isEmpty &&
         (next.episodeRatings == null || next.episodeRatings!.isEmpty) &&
+        (next.episodeNotes == null || next.episodeNotes!.isEmpty) &&
         (next.seasonTotals == null || next.seasonTotals!.isEmpty)) {
       if (entry.rating == null && (entry.note == null || entry.note!.isEmpty)) {
         return null;
@@ -162,6 +164,7 @@ WatchEntry? setMoviePosition(WatchEntry? entry, double fraction) {
       completed: base.completed,
       seasonTotals: base.seasonTotals,
       episodeRatings: base.episodeRatings,
+      episodeNotes: base.episodeNotes,
       moviePosition: rounded,
     ),
   );
@@ -465,6 +468,7 @@ WatchProgress _rebuildProgress(
     completed: completed ?? base?.completed,
     seasonTotals: base?.seasonTotals,
     episodeRatings: base?.episodeRatings,
+    episodeNotes: base?.episodeNotes,
     moviePosition: base?.moviePosition,
   );
 }
@@ -475,6 +479,34 @@ double? getEpisodeRating(WatchEntry? entry, int season, int episode) {
   final val = ratings[episodeKey(season, episode)];
   if (val == null || !val.isFinite || val <= 0 || val > 10) return null;
   return (val * 10).round() / 10;
+}
+
+/// Avg of user episode ratings only (unrated episodes are not zeros).
+({double avg, int ratedCount})? episodeRatingStats(
+  WatchEntry? entry, {
+  int? seasonNum,
+  bool includeSpecials = false,
+}) {
+  final ratings = entry?.progress?.episodeRatings;
+  if (ratings == null || ratings.isEmpty) return null;
+  final values = <double>[];
+  for (final e in ratings.entries) {
+    final parts = e.key.split(':');
+    if (parts.isEmpty) continue;
+    final s = int.tryParse(parts.first);
+    if (s == null) continue;
+    if (!includeSpecials && s == 0) continue;
+    if (seasonNum != null && s != seasonNum) continue;
+    final n = e.value;
+    if (!n.isFinite || n <= 0 || n > 10) continue;
+    values.add((n * 10).round() / 10);
+  }
+  if (values.isEmpty) return null;
+  final sum = values.fold<double>(0, (a, b) => a + b);
+  return (
+    avg: ((sum / values.length) * 10).round() / 10,
+    ratedCount: values.length,
+  );
 }
 
 WatchEntry? setEpisodeRating(
@@ -500,6 +532,7 @@ WatchEntry? setEpisodeRating(
       completed: base.completed,
       seasonTotals: base.seasonTotals,
       episodeRatings: ratings,
+      episodeNotes: base.episodeNotes,
       moviePosition: base.moviePosition,
     ),
   );
@@ -522,10 +555,50 @@ WatchEntry? clearEpisodeRating(WatchEntry? entry, int season, int episode) {
       completed: base.completed,
       seasonTotals: base.seasonTotals,
       episodeRatings: ratings.isEmpty ? null : ratings,
+      episodeNotes: base.episodeNotes,
       moviePosition: base.moviePosition,
     ),
   );
 }
+
+String getEpisodeNote(WatchEntry? entry, int season, int episode) {
+  final notes = entry?.progress?.episodeNotes;
+  if (notes == null) return '';
+  return (notes[episodeKey(season, episode)] ?? '').trim();
+}
+
+WatchEntry? setEpisodeNote(
+  WatchEntry? entry,
+  int season,
+  int episode,
+  String? note,
+) {
+  final key = episodeKey(season, episode);
+  final text = (note ?? '').trim();
+  final base = entry?.progress ?? WatchProgress.empty;
+  final notes = Map<String, String>.from(base.episodeNotes ?? {});
+  if (text.isEmpty) {
+    notes.remove(key);
+  } else {
+    notes[key] = text.length > 2000 ? text.substring(0, 2000) : text;
+  }
+  return WatchEntry(
+    rating: entry?.rating,
+    note: entry?.note,
+    progress: WatchProgress(
+      version: WatchProgress.currentVersion,
+      episodes: base.episodes,
+      completed: base.completed,
+      seasonTotals: base.seasonTotals,
+      episodeRatings: base.episodeRatings,
+      episodeNotes: notes.isEmpty ? null : notes,
+      moviePosition: base.moviePosition,
+    ),
+  );
+}
+
+WatchEntry? clearEpisodeNote(WatchEntry? entry, int season, int episode) =>
+    setEpisodeNote(entry, season, episode, '');
 
 /// Watched / total for a season using loaded episode metadata.
 ({int watched, int total}) seasonProgressFromEpisodes(

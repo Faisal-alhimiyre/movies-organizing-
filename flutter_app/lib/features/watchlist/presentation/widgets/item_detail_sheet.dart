@@ -668,51 +668,19 @@ class _DetailContent extends StatelessWidget {
           ),
           if (seasonPresentation!.overview.isNotEmpty) ...[
             const SizedBox(height: 8),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.035),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.08),
-                ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                child: Text(
-                  seasonPresentation!.overview,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: tc?.textMuted ??
-                        theme.colorScheme.onSurface.withValues(alpha: 0.72),
-                    fontSize: 14,
-                    height: 1.55,
-                  ),
-                ),
-              ),
+            _ThemeSummaryBox(
+              text: seasonPresentation!.overview,
+              theme: theme,
+              tc: tc,
             ),
           ],
         ],
         if (!hideSeriesSummary && item.summary.isNotEmpty) ...[
           const SizedBox(height: 12),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.035),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.08),
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-              child: Text(
-                item.summary,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: tc?.textMuted ??
-                      theme.colorScheme.onSurface.withValues(alpha: 0.72),
-                  fontSize: 14,
-                  height: 1.55,
-                ),
-              ),
-            ),
+          _ThemeSummaryBox(
+            text: item.summary,
+            theme: theme,
+            tc: tc,
           ),
         ],
         if (showSeasons)
@@ -727,6 +695,49 @@ class _DetailContent extends StatelessWidget {
         else if (item.contentType == 'movies')
           MovieSimilarPanel(l10n: l10n, item: item),
       ],
+    );
+  }
+}
+
+/// Theme-accent summary box (web `.td-summary` / `.td-season-detail__overview`).
+class _ThemeSummaryBox extends StatelessWidget {
+  const _ThemeSummaryBox({
+    required this.text,
+    required this.theme,
+    required this.tc,
+  });
+
+  final String text;
+  final ThemeData theme;
+  final AppTypeColors? tc;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = theme.colorScheme.primary;
+    final muted = tc?.textMuted ??
+        theme.colorScheme.onSurface.withValues(alpha: 0.72);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Color.alphaBlend(
+            accent.withValues(alpha: 0.32),
+            theme.colorScheme.outline.withValues(alpha: 0.28),
+          ),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Text(
+          text,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: muted,
+            fontSize: 14,
+            height: 1.55,
+          ),
+        ),
+      ),
     );
   }
 }

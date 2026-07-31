@@ -461,9 +461,9 @@
   padding: 0.75rem 0.85rem;
   font-size: 0.86rem;
   line-height: 1.55;
-  color: var(--text-secondary, #c8c8c8);
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-muted, #a8a8a8);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
   border-radius: 12px;
 }
 
@@ -1202,9 +1202,13 @@ html[data-theme="light"] .td-watch-rate__rate {
 
 .td-season-detail__overview {
   margin: 0.35rem 0 0;
+  padding: 0.75rem 0.85rem;
   font-size: 0.85rem;
   line-height: 1.55;
   color: var(--text-muted, #a8a8a8);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border-radius: 12px;
   white-space: pre-wrap;
   word-break: break-word;
 }

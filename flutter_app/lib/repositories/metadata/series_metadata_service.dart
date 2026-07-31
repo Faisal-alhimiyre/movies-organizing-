@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:http/http.dart' as http;
@@ -71,6 +72,20 @@ class SeriesMetadataService {
 
   // After 80 % of TTL has elapsed the result is considered stale.
   static double get _staleRatio => 0.8;
+
+  /// Fetch failed with no cache. Prefer [apiFailure] when online so the UI
+  /// does not tell connected users they are offline.
+  Future<MetadataResultState> _noCacheFailureState() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      final online = results.any((r) => r != ConnectivityResult.none);
+      return online
+          ? MetadataResultState.apiFailure
+          : MetadataResultState.offlineNoCache;
+    } catch (_) {
+      return MetadataResultState.apiFailure;
+    }
+  }
 
   // ─────────────────────────────────────────────────────────────
   // Public API
@@ -955,7 +970,7 @@ class SeriesMetadataService {
       );
     }
     return SeriesMetadataResult(
-      state: MetadataResultState.offlineNoCache,
+      state: await _noCacheFailureState(),
       debugMessage: 'TMDb tv/$tmdbId fetch failed, no stale cache',
     );
   }
@@ -1136,8 +1151,8 @@ class SeriesMetadataService {
       );
       return _enrichTmdbEpisodeRatingsIfNeeded(parsed, tmdbId, season, locale);
     }
-    return const SeasonEpisodesResult(
-      state: MetadataResultState.offlineNoCache,
+    return SeasonEpisodesResult(
+      state: await _noCacheFailureState(),
     );
   }
 
@@ -1422,7 +1437,7 @@ class SeriesMetadataService {
           forceState: MetadataResultState.offlineWithCache,
         );
       }
-      return const SeriesMetadataResult(state: MetadataResultState.offlineNoCache);
+      return SeriesMetadataResult(state: await _noCacheFailureState());
     }
 
     final title = media['title']?['english']?.toString() ??
@@ -1524,7 +1539,7 @@ class SeriesMetadataService {
         );
         return _enrichAniFillerEpisodes(parsed, anilistId);
       }
-      return const SeasonEpisodesResult(state: MetadataResultState.offlineNoCache);
+      return SeasonEpisodesResult(state: await _noCacheFailureState());
     }
 
     final poster =
@@ -1740,7 +1755,7 @@ class SeriesMetadataService {
           forceState: MetadataResultState.offlineWithCache,
         );
       }
-      return const SeasonEpisodesResult(state: MetadataResultState.offlineNoCache);
+      return SeasonEpisodesResult(state: await _noCacheFailureState());
     } catch (e) {
       return SeasonEpisodesResult(
         state: MetadataResultState.apiFailure,
@@ -2095,8 +2110,8 @@ class SeriesMetadataService {
             forceState: MetadataResultState.offlineWithCache,
           );
         }
-        return const SeriesMetadataResult(
-          state: MetadataResultState.offlineNoCache,
+        return SeriesMetadataResult(
+          state: await _noCacheFailureState(),
         );
       }
 
@@ -2261,8 +2276,8 @@ class SeriesMetadataService {
             forceState: MetadataResultState.offlineWithCache,
           );
         }
-        return const SeasonEpisodesResult(
-          state: MetadataResultState.offlineNoCache,
+        return SeasonEpisodesResult(
+          state: await _noCacheFailureState(),
         );
       }
 

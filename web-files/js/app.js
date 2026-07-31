@@ -553,6 +553,10 @@
     ratingValueDisplay: document.getElementById("ratingValueDisplay"),
     ratingNote: document.getElementById("ratingNote"),
     ratingError: document.getElementById("ratingError"),
+    ratingSaveBtn: document.getElementById("ratingSaveBtn"),
+    ratingEpisodeAvgSuggest: document.getElementById("ratingEpisodeAvgSuggest"),
+    ratingEpisodeAvgLabel: document.getElementById("ratingEpisodeAvgLabel"),
+    ratingEpisodeAvgMeta: document.getElementById("ratingEpisodeAvgMeta"),
     form: document.getElementById("itemForm"),
     modalTitle: document.getElementById("modalTitle"),
     deleteBtn: document.getElementById("deleteBtn"),
@@ -2365,6 +2369,75 @@
       button.classList.toggle("rating-picker__star--filled", filled);
       button.setAttribute("aria-pressed", String(filled));
     });
+
+    syncRatingSaveEnabled();
+  }
+
+  function syncRatingSaveEnabled() {
+    const submitBtn =
+      els.ratingSaveBtn ||
+      els.ratingForm?.querySelector('button[type="submit"]');
+    if (!submitBtn) return;
+    // Note-only mode: allow save without stars. Rating mode: require a score.
+    if (state.ratingNoteOnly) {
+      submitBtn.disabled = false;
+      return;
+    }
+    submitBtn.disabled = !state.ratingPickerChosen || state.ratingPickerValue == null;
+  }
+
+  function formatEpisodeAvgDisplay(avg) {
+    const num = Number(avg);
+    if (!Number.isFinite(num)) return "";
+    return num % 1 === 0 ? String(num) : num.toFixed(1);
+  }
+
+  function updateRatingEpisodeAvgSuggest(itemId) {
+    const box = els.ratingEpisodeAvgSuggest;
+    if (!box) return;
+    box.hidden = true;
+    box.dataset.avg = "";
+
+    if (state.ratingNoteOnly) return;
+    const item = state.items.find((entry) => entry.id === itemId);
+    if (!item) return;
+    const type = normalizeContentType(item.contentType);
+    if (type !== "tvSeries" && type !== "anime") return;
+
+    const entry = getWatchEntry(itemId);
+    const stats = window.WatchlistProgress?.episodeRatingStats?.(entry, {
+      includeSpecials: false,
+    });
+    if (!stats) return;
+
+    const avgText = formatEpisodeAvgDisplay(stats.avg);
+    if (els.ratingEpisodeAvgLabel) {
+      els.ratingEpisodeAvgLabel.textContent = t("seasons.episodeAvgSuggest", {
+        rating: avgText,
+      });
+    }
+    if (els.ratingEpisodeAvgMeta) {
+      const total = parseInt(String(item.episodeCount || "").trim(), 10);
+      els.ratingEpisodeAvgMeta.textContent =
+        Number.isFinite(total) && total > 0
+          ? t("seasons.episodeAvgRatedMeta", {
+              rated: stats.ratedCount,
+              total,
+            })
+          : t("seasons.episodeAvgRatedMetaShort", {
+              rated: stats.ratedCount,
+            });
+    }
+    box.dataset.avg = String(stats.avg);
+    box.hidden = false;
+  }
+
+  function applyRatingEpisodeAvgSuggest() {
+    const raw = els.ratingEpisodeAvgSuggest?.dataset?.avg;
+    const avg = Number(raw);
+    if (!Number.isFinite(avg) || avg <= 0) return;
+    chooseRatingPickerValue(avg);
+    setRatingError("");
   }
 
   function getRatingPickerValue() {
@@ -2591,7 +2664,9 @@
     // Hide the rating picker when the title isn't fully watched yet
     if (els.ratingPicker) els.ratingPicker.hidden = !isFullyWatched;
 
+    updateRatingEpisodeAvgSuggest(itemId);
     updateRatingModalActions();
+    syncRatingSaveEnabled();
     els.ratingModal.hidden = false;
     updateBodyScrollLock();
     closeAllCardMenus();
@@ -2612,6 +2687,10 @@
     if (els.ratingForm) els.ratingForm.reset();
     if (els.ratingPicker) els.ratingPicker.hidden = false; // restore for next open
     if (els.ratingNote) els.ratingNote.placeholder = t("rating.notePlaceholder");
+    if (els.ratingEpisodeAvgSuggest) {
+      els.ratingEpisodeAvgSuggest.hidden = true;
+      els.ratingEpisodeAvgSuggest.dataset.avg = "";
+    }
     resetRatingPicker();
     updateBodyScrollLock();
   }
@@ -13267,6 +13346,10 @@
     });
 
     els.ratingModal?.addEventListener("click", (event) => {
+      if (event.target.closest("#ratingEpisodeAvgSuggest")) {
+        applyRatingEpisodeAvgSuggest();
+        return;
+      }
       const action = event.target.closest("[data-action]")?.dataset.action;
       if (action === "close-rating-modal") {
         dismissRatingModal();

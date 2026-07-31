@@ -106,6 +106,7 @@ class WatchProgress {
     this.completed,
     this.seasonTotals,
     this.episodeRatings,
+    this.episodeNotes,
     this.moviePosition,
   });
 
@@ -130,6 +131,9 @@ class WatchProgress {
   /// Per-episode external ratings from TMDB/OMDb: `{"1:1": 8.5}`.
   final Map<String, double>? episodeRatings;
 
+  /// Optional per-episode notes: `{"1:1": "great cold open"}`.
+  final Map<String, String>? episodeNotes;
+
   /// Movie playback position as a 0–1 fraction through runtime.
   final double? moviePosition;
 
@@ -147,6 +151,7 @@ class WatchProgress {
       completed: completed,
       seasonTotals: seasonTotals,
       episodeRatings: episodeRatings,
+      episodeNotes: episodeNotes,
       moviePosition: moviePosition,
     );
   }
@@ -159,6 +164,7 @@ class WatchProgress {
       completed: false,
       seasonTotals: seasonTotals,
       episodeRatings: episodeRatings,
+      episodeNotes: episodeNotes,
       moviePosition: moviePosition,
     );
   }
@@ -170,6 +176,7 @@ class WatchProgress {
       completed: false,
       seasonTotals: seasonTotals,
       episodeRatings: episodeRatings,
+      episodeNotes: episodeNotes,
       moviePosition: moviePosition,
     );
   }
@@ -185,6 +192,9 @@ class WatchProgress {
     }
     if (episodeRatings != null && episodeRatings!.isNotEmpty) {
       json['episodeRatings'] = episodeRatings;
+    }
+    if (episodeNotes != null && episodeNotes!.isNotEmpty) {
+      json['episodeNotes'] = episodeNotes;
     }
     if (moviePosition != null && moviePosition! > 0) {
       json['moviePosition'] = moviePosition;
@@ -230,6 +240,18 @@ class WatchProgress {
       }
     }
 
+    Map<String, String>? episodeNotes;
+    final notesRaw = map['episodeNotes'];
+    if (notesRaw is Map) {
+      episodeNotes = {};
+      for (final e in notesRaw.entries) {
+        final text = e.value?.toString().trim() ?? '';
+        if (text.isEmpty) continue;
+        episodeNotes[e.key.toString()] = text;
+      }
+      if (episodeNotes.isEmpty) episodeNotes = null;
+    }
+
     double? moviePosition;
     final moviePosRaw = map['moviePosition'];
     if (moviePosRaw is num && moviePosRaw.isFinite) {
@@ -245,6 +267,7 @@ class WatchProgress {
       completed: completed,
       seasonTotals: seasonTotals,
       episodeRatings: episodeRatings,
+      episodeNotes: episodeNotes,
       moviePosition: moviePosition,
     );
   }

@@ -178,7 +178,7 @@ class L10n {
   String get progressMarkSeasonWatched =>
       _ar ? 'تعيين الموسم كمشاهَد' : 'Mark season watched';
   String get progressUnmarkSeasonWatched =>
-      _ar ? 'إلغاء تحديد الموسم' : 'Unmark season';
+      _ar ? 'الموسم مشاهَد' : 'Season watched';
   String get progressSeasonPartial => _ar ? 'مشاهَد جزئياً' : 'Partially watched';
   String get progressMarkAllWatched => _ar ? 'تعيين الكل كمشاهَد' : 'Mark all watched';
   String get progressClearAllWatched => _ar ? 'إلغاء تحديد الكل' : 'Unwatch all';
@@ -242,6 +242,17 @@ class L10n {
       _ar ? 'أنت غير متصل بالإنترنت. بيانات الحلقات غير متاحة.'
           : 'You are offline. Episode data is unavailable.';
   String get progressRetry => _ar ? 'إعادة المحاولة' : 'Retry';
+  String get seasonsLoadError =>
+      _ar ? 'تعذّر تحميل المواسم الآن.' : "Couldn't load seasons right now.";
+  String get seasonsLoadErrorHint => _ar
+      ? 'تحقق من اتصالك، ثم اضغط إعادة المحاولة.'
+      : 'Check your connection, then tap Retry.';
+  String get seasonsOfflineNoCache => _ar
+      ? 'بيانات المواسم غير متاحة دون اتصال بعد.'
+      : "Season data isn't available offline yet.";
+  String get seasonsOfflineNoCacheHint => _ar
+      ? 'اتصل بالإنترنت، ثم اضغط إعادة المحاولة. افتح هذا العنوان مرة وأنت متصل ليُحفظ للمواسم لاحقاً.'
+      : 'Connect to the internet, then tap Retry. Open this title once while online so seasons are saved for next time.';
   String get progressSpecials => _ar ? 'حلقات خاصة' : 'Specials';
   String progressSeason(int n) => _ar ? 'الموسم $n' : 'Season $n';
   String progressEpisodeCount(int n) => _ar ? '$n حلقة' : n == 1 ? '1 episode' : '$n episodes';
@@ -267,6 +278,18 @@ class L10n {
   String seasonsSeasonRatingSource(double rating) => _ar
       ? 'تقييم الموسم ${formatWatchRating(rating)}/10'
       : "Season's rating ${formatWatchRating(rating)}/10";
+  String seasonsYourSeasonRating(double rating) => _ar
+      ? 'تقييمك للموسم ${formatWatchRating(rating)}/10'
+      : 'Your season rating ${formatWatchRating(rating)}/10';
+  String seasonsEpisodeAvgSuggest(double rating) => _ar
+      ? 'استخدم متوسط مواسمك ${formatWatchRating(rating)}/10'
+      : "Use your seasons' average ${formatWatchRating(rating)}/10";
+  String seasonsEpisodeAvgRatedMeta(int rated, int total) => _ar
+      ? 'قيّمت $rated من $total'
+      : 'You rated $rated of $total';
+  String seasonsEpisodeAvgRatedMetaShort(int rated) => _ar
+      ? 'قيّمت $rated حلقات'
+      : 'You rated $rated episodes';
   String seasonsSeasonAvgSource(double rating) => _ar
       ? 'متوسط الموسم ${formatWatchRating(rating)}/10'
       : 'Season avg ${formatWatchRating(rating)}/10';
@@ -274,7 +297,7 @@ class L10n {
       ? 'متوسط OMDb ${formatWatchRating(rating)}/10'
       : 'OMDb avg ${formatWatchRating(rating)}/10';
   String get seasonsYourEpisodeRating =>
-      _ar ? 'تقييمك للحلقة (0-10)' : 'Your episode rating (0-10)';
+      _ar ? 'تقييم الحلقة' : 'Episode rating';
   String get seasonsEditEpisodeRating => _ar ? 'تعديل' : 'Edit';
   String get seasonsClearEpisodeRating => _ar ? 'مسح' : 'Clear';
   String runtimeMin(int n) => _ar ? '$n دقيقة' : '$n min';
@@ -296,6 +319,7 @@ class L10n {
       ? 'اضغط نجمة لاختيار تقييمك أولاً.'
       : 'Tap a star to choose your score first.';
   String get ratingNote => _ar ? 'ملاحظة لنفسك' : 'Note for yourself';
+  String get ratingYourThoughts => _ar ? 'أفكارك' : 'Your thoughts';
   String get ratingNotePlaceholder => _ar
       ? 'ما الذي لفت انتباهك؟ هل ستشاهده مجدداً؟'
       : 'What stood out? Would you watch again?';

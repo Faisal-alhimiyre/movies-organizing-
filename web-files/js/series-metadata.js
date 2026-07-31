@@ -205,6 +205,21 @@
     EPISODE_DETAILS_UNAVAILABLE: "episodeDetailsUnavailable",
   });
 
+  /** True only when the browser reports offline (not "fetch failed"). */
+  function isBrowserOffline() {
+    return typeof navigator !== "undefined" && navigator.onLine === false;
+  }
+
+  /**
+   * Fetch failed and there is no cache. Prefer API_FAILURE when online so the
+   * UI does not tell connected users they are offline.
+   */
+  function noCacheFailureState() {
+    return isBrowserOffline()
+      ? ResultState.OFFLINE_NO_CACHE
+      : ResultState.API_FAILURE;
+  }
+
   // ─── Locale helpers ───────────────────────────────────────────
 
   function tmdbLanguage(locale) {
@@ -833,7 +848,10 @@
     if (stale?.payload) {
       return parseCachedSeriesResult(stale, { isStale: true, forceState: ResultState.OFFLINE_WITH_CACHE });
     }
-    return { state: ResultState.OFFLINE_NO_CACHE, debugMessage: `TMDb tv/${tmdbId} failed` };
+    return {
+      state: noCacheFailureState(),
+      debugMessage: `TMDb tv/${tmdbId} failed`,
+    };
   }
 
   function normalizeTmdbSeriesResult(json, tmdbId, fallbackPoster) {
@@ -2927,7 +2945,7 @@
     if (stale?.payload) {
       return parseCachedEpisodesResult(stale, { isStale: true, forceState: ResultState.OFFLINE_WITH_CACHE });
     }
-    return { state: ResultState.OFFLINE_NO_CACHE };
+    return { state: noCacheFailureState() };
   }
 
   function normalizeTmdbSeasonEpisodes(json, tmdbId, season, fallbackPoster = "") {
@@ -3222,7 +3240,7 @@
           isStale: true,
         };
       }
-      return { state: ResultState.OFFLINE_NO_CACHE, movies: [] };
+      return { state: noCacheFailureState(), movies: [] };
     }
 
     const seasonChain = await collectAnilistSeasonChain(media);
@@ -3814,7 +3832,7 @@
     if (!imdbId && !tmdbId) {
       return { state: ResultState.INVALID_ID, titles: [] };
     }
-    return { state: ResultState.OFFLINE_NO_CACHE, titles: [] };
+    return { state: noCacheFailureState(), titles: [] };
   }
 
   /**
@@ -3895,7 +3913,7 @@
       if (stale?.payload) {
         return parseCachedSeriesResult(stale, { isStale: true, forceState: ResultState.OFFLINE_WITH_CACHE });
       }
-      return { state: ResultState.OFFLINE_NO_CACHE };
+      return { state: noCacheFailureState() };
     }
 
     const title =
@@ -4023,7 +4041,7 @@
           forceState: ResultState.OFFLINE_WITH_CACHE,
         });
       }
-      return { state: ResultState.OFFLINE_NO_CACHE };
+      return { state: noCacheFailureState() };
     }
 
     const episodeCount = parsePositiveCount(media.episodes);
@@ -4132,7 +4150,7 @@
       if (stale?.payload) {
         return parseCachedEpisodesResult(stale, { isStale: true, forceState: ResultState.OFFLINE_WITH_CACHE });
       }
-      return { state: ResultState.OFFLINE_NO_CACHE, debugMessage: String(err) };
+      return { state: noCacheFailureState(), debugMessage: String(err) };
     }
   }
 
@@ -4704,7 +4722,7 @@
             forceState: ResultState.OFFLINE_WITH_CACHE,
           });
         }
-        return { state: ResultState.OFFLINE_NO_CACHE };
+        return { state: noCacheFailureState() };
       }
 
       const poster = seriesData.poster || fallbackPoster || "";
@@ -4848,7 +4866,7 @@
             forceState: ResultState.OFFLINE_WITH_CACHE,
           });
         }
-        return { state: ResultState.OFFLINE_NO_CACHE };
+        return { state: noCacheFailureState() };
       }
 
       if (!raw.length) return { state: ResultState.UNAVAILABLE };

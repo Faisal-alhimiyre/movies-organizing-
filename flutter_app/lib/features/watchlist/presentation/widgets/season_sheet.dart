@@ -17,6 +17,7 @@ import '../../application/watchlist_controller.dart';
 import '../../../add_title/application/build_item_from_metadata.dart';
 import '../../../../models/metadata_detail.dart';
 import '../../../../core/utils/watchlist_parser.dart';
+import 'star_rating_picker.dart';
 
 enum _SeasonsDetailTab { seasons, specials, movies }
 
@@ -354,6 +355,51 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
   void dispose() {
     _posterPersistTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _retrySeriesLoad() async {
+    if (!mounted) return;
+    final resolution = _resolution;
+    if (resolution != null && resolution.hasUsableSource) {
+      setState(() {
+        _error = null;
+        _series = null;
+        _episodes = null;
+        _loadingSeries = true;
+      });
+      final svc = ref.read(seriesMetadataServiceProvider);
+      final locale = widget.l10n.isArabic ? 'ar' : 'en';
+      final result = await svc.fetchSeriesMetadata(
+        resolution: resolution,
+        locale: locale,
+        fallbackPoster: widget.item.poster,
+        forceRefresh: true,
+      );
+      if (!mounted) return;
+      setState(() {
+        _series = result;
+        _loadingSeries = false;
+      });
+      unawaited(_persistSeriesCountsFromMetadata(result));
+      final snapshot = ref.read(watchlistControllerProvider).value;
+      final entry = snapshot?.watched[widget.item.id];
+      final seasons =
+          _filterVisibleSeasons(result.seasons ?? [], entry: entry);
+      if (seasons.isEmpty) return;
+      final regularOnly = seasons.where((s) => s.seasonNumber > 0).toList();
+      final autoSelect = _pickInitialSeason(regularOnly, entry);
+      setState(() => _activeTab = _SeasonsDetailTab.seasons);
+      await _selectSeason(autoSelect, forceRefresh: true);
+      return;
+    }
+    setState(() {
+      _error = null;
+      _series = null;
+      _episodes = null;
+      _loadingId = true;
+      _loadingSeries = false;
+    });
+    await _resolveAndLoad();
   }
 
   Future<void> _resolveAndLoad() async {
@@ -1341,8 +1387,8 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
       l10n: widget.l10n,
       episode: ep,
       entry: snapshot?.watched[widget.item.id],
-      onSave: ({required double? rating, required bool clear}) =>
-          _saveEpisodeRating(ep, rating: rating, clear: clear),
+      onSave: ({required double? rating, required bool clear, String? note}) =>
+          _saveEpisodeRating(ep, rating: rating, clear: clear, note: note),
     );
   }
 
@@ -1350,6 +1396,7 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
     EpisodeDetail ep, {
     double? rating,
     bool clear = false,
+    String? note,
   }) async {
     final snapshot = ref.read(watchlistControllerProvider).value;
     if (snapshot == null) return;
@@ -1385,12 +1432,19 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
     WatchEntry? updated;
     if (clear || rating == null) {
       updated = clearEpisodeRating(entry, ep.seasonNumber, ep.episodeNumber);
+      updated = clearEpisodeNote(updated, ep.seasonNumber, ep.episodeNumber);
     } else {
       updated = setEpisodeRating(
         entry,
         ep.seasonNumber,
         ep.episodeNumber,
         rating,
+      );
+      updated = setEpisodeNote(
+        updated,
+        ep.seasonNumber,
+        ep.episodeNumber,
+        note,
       );
     }
     if (updated == null) return;
@@ -1577,17 +1631,59 @@ class _TitleSeasonsPanelState extends ConsumerState<TitleSeasonsPanel> {
   }
 
   Widget _statusMessage(L10n l10n, ThemeData theme) {
+    final online = ref.watch(connectivityProvider).valueOrNull ?? true;
+    // Prefer offline copy only when the device reports offline. offlineNoCache
+    // while online is usually a failed fetch — don't say the user is offline.
+    final useOffline = !online;
+    final msg = useOffline ? l10n.seasonsOfflineNoCache : l10n.seasonsLoadError;
+    final sub = useOffline
+        ? l10n.seasonsOfflineNoCacheHint
+        : l10n.seasonsLoadErrorHint;
+
     return Padding(
       padding: EdgeInsets.symmetric(
-        vertical: widget.embedded ? 20 : 48,
-        horizontal: widget.embedded ? 0 : 24,
+        vertical: widget.embedded ? 16 : 40,
+        horizontal: widget.embedded ? 4 : 24,
       ),
-      child: Text(
-        l10n.progressLoadError,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            useOffline ? Icons.wifi_off_rounded : Icons.error_outline,
+            size: 28,
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.45),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            msg,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.88),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            sub,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.4,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.58),
+            ),
+          ),
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: () => unawaited(_retrySeriesLoad()),
+            icon: const Icon(Icons.refresh, size: 16),
+            label: Text(l10n.progressRetry),
+            style: OutlinedButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1840,14 +1936,10 @@ class _SeasonContent extends StatelessWidget {
   List<Widget> _episodesBlock(SeasonSummary selSeason, [List<EpisodeDetail>? episodeList]) {
     final list = episodeList ?? episodes?.episodes ?? [];
     return [
-      _SeasonActionsBar(
+      _SeasonMarkButton(
         season: selSeason,
         entry: entry,
         episodes: list,
-        seasonRating: episodes?.seasonRating,
-        seasonRatingSource: episodes?.seasonRatingSource,
-        seriesImdbRating: seriesImdbRating,
-        regularSeasonCount: _regularSeasons.length,
         l10n: l10n,
         tc: tc,
         theme: theme,
@@ -1883,6 +1975,19 @@ class _SeasonContent extends StatelessWidget {
                 onToggleHideStills: onToggleHideStills,
                 onToggleHideRatings: onToggleHideRatings,
                 onToggleHideFiller: onToggleHideFiller,
+              ),
+              _SeasonRatingBadges(
+                season: selSeason,
+                entry: entry,
+                episodes: list,
+                seasonRating: episodes?.seasonRating,
+                seasonRatingSource: episodes?.seasonRatingSource,
+                seriesImdbRating: seriesImdbRating,
+                regularSeasonCount: _regularSeasons.length,
+                hideSourceRatings: hideSourceRatings,
+                l10n: l10n,
+                theme: theme,
+                tc: tc,
               ),
             ],
           ),
@@ -2695,15 +2800,11 @@ int seasonEpisodeTotal(SeasonSummary season, WatchEntry? entry) {
 // Season actions (watched progress + mark season)
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _SeasonActionsBar extends StatelessWidget {
-  const _SeasonActionsBar({
+class _SeasonMarkButton extends StatelessWidget {
+  const _SeasonMarkButton({
     required this.season,
     required this.entry,
     required this.episodes,
-    this.seasonRating,
-    this.seasonRatingSource,
-    this.seriesImdbRating,
-    this.regularSeasonCount = 0,
     required this.l10n,
     required this.tc,
     required this.theme,
@@ -2713,10 +2814,6 @@ class _SeasonActionsBar extends StatelessWidget {
   final SeasonSummary season;
   final WatchEntry? entry;
   final List<EpisodeDetail> episodes;
-  final double? seasonRating;
-  final String? seasonRatingSource;
-  final String? seriesImdbRating;
-  final int regularSeasonCount;
   final L10n l10n;
   final AppTypeColors? tc;
   final ThemeData theme;
@@ -2726,14 +2823,6 @@ class _SeasonActionsBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final watchedColor = tc?.watched ?? const Color(0xFF58C322);
     final seasonEps = episodesForSeason(episodes, season.seasonNumber);
-    final resolved = _resolveSeasonExternalRating(
-      seasonNum: season.seasonNumber,
-      seasonRating: seasonRating,
-      seasonRatingSource: seasonRatingSource,
-      seriesImdbRating: seriesImdbRating,
-      regularSeasonCount: regularSeasonCount,
-    );
-
     final seasonRef = SeasonRef(
       seasonNumber: season.seasonNumber,
       episodes: seasonEps
@@ -2750,71 +2839,152 @@ class _SeasonActionsBar extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          Material(
-            color: isFullyWatched
-                ? watchedColor.withValues(alpha: 0.12)
-                : theme.colorScheme.onSurface.withValues(alpha: 0.05),
-            shape: StadiumBorder(
-              side: BorderSide(
-                color: isFullyWatched
-                    ? watchedColor.withValues(alpha: 0.55)
-                    : theme.colorScheme.onSurface.withValues(alpha: 0.28),
-              ),
+      child: Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: Material(
+          color: isFullyWatched
+              ? watchedColor
+              : theme.colorScheme.onSurface.withValues(alpha: 0.08),
+          shape: StadiumBorder(
+            side: BorderSide(
+              color: isFullyWatched
+                  ? watchedColor
+                  : theme.colorScheme.onSurface.withValues(alpha: 0.35),
             ),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: () => onMarkSeason(season, !isFullyWatched),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                child: Text(
-                  isFullyWatched
-                      ? l10n.progressUnmarkSeasonWatched
-                      : l10n.progressMarkSeasonWatched,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: isFullyWatched
-                        ? watchedColor
-                        : theme.colorScheme.onSurface.withValues(alpha: 0.95),
-                  ),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => onMarkSeason(season, !isFullyWatched),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 10,
+              ),
+              child: Text(
+                isFullyWatched
+                    ? l10n.progressUnmarkSeasonWatched
+                    : l10n.progressMarkSeasonWatched,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: isFullyWatched
+                      ? Colors.white
+                      : theme.colorScheme.onSurface.withValues(alpha: 0.95),
                 ),
               ),
             ),
           ),
-          if (resolved != null)
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.04),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.16),
-                ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                child: Text(
-                  l10n.seasonsSeasonRatingSource(resolved.value),
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.72),
-                  ),
-                ),
-              ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SeasonRatingBadges extends StatelessWidget {
+  const _SeasonRatingBadges({
+    required this.season,
+    required this.entry,
+    required this.episodes,
+    this.seasonRating,
+    this.seasonRatingSource,
+    this.seriesImdbRating,
+    this.regularSeasonCount = 0,
+    this.hideSourceRatings = false,
+    required this.l10n,
+    required this.theme,
+    required this.tc,
+  });
+
+  final SeasonSummary season;
+  final WatchEntry? entry;
+  final List<EpisodeDetail> episodes;
+  final double? seasonRating;
+  final String? seasonRatingSource;
+  final String? seriesImdbRating;
+  final int regularSeasonCount;
+  final bool hideSourceRatings;
+  final L10n l10n;
+  final ThemeData theme;
+  final AppTypeColors? tc;
+
+  @override
+  Widget build(BuildContext context) {
+    final resolved = hideSourceRatings
+        ? null
+        : _resolveSeasonExternalRating(
+            seasonNum: season.seasonNumber,
+            seasonRating: seasonRating,
+            seasonRatingSource: seasonRatingSource,
+            seriesImdbRating: seriesImdbRating,
+            regularSeasonCount: regularSeasonCount,
+          );
+    final userStats = episodeRatingStats(
+      entry,
+      seasonNum: season.seasonNumber,
+      includeSpecials: season.seasonNumber == 0,
+    );
+    if (userStats == null && resolved == null) {
+      return const SizedBox.shrink();
+    }
+
+    final accent = theme.colorScheme.primary;
+    final onSurface = theme.colorScheme.onSurface;
+    final border = Color.alphaBlend(
+      accent.withValues(alpha: 0.42),
+      theme.colorScheme.outline.withValues(alpha: 0.35),
+    );
+    final badgeBg = accent.withValues(alpha: 0.14);
+    final badgeFg = onSurface.withValues(alpha: 0.92);
+
+    Widget badge(String label) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          color: badgeBg,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: border),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 6,
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              fontFeatures: const [FontFeature.tabularFigures()],
+              color: badgeFg,
             ),
-        ],
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            top: BorderSide(
+              color: onSurface.withValues(alpha: 0.1),
+            ),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              if (userStats != null)
+                badge(l10n.seasonsYourSeasonRating(userStats.avg)),
+              if (resolved != null)
+                badge(l10n.seasonsSeasonRatingSource(resolved.value)),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -3092,6 +3262,7 @@ class _EpisodeListColumn extends StatelessWidget {
             isWatched:
                 isEpisodeWatched(entry, ep.seasonNumber, ep.episodeNumber),
             userRating: getEpisodeRating(entry, ep.seasonNumber, ep.episodeNumber),
+            userNote: getEpisodeNote(entry, ep.seasonNumber, ep.episodeNumber),
             hideEpisodeStills: hideEpisodeStills,
             hideSourceRatings: hideSourceRatings,
             l10n: l10n,
@@ -3111,6 +3282,7 @@ class _EpisodeRow extends StatelessWidget {
     required this.seasonPoster,
     required this.isWatched,
     required this.userRating,
+    required this.userNote,
     required this.hideEpisodeStills,
     required this.hideSourceRatings,
     required this.l10n,
@@ -3124,6 +3296,7 @@ class _EpisodeRow extends StatelessWidget {
   final String seasonPoster;
   final bool isWatched;
   final double? userRating;
+  final String userNote;
   final bool hideEpisodeStills;
   final bool hideSourceRatings;
   final L10n l10n;
@@ -3134,9 +3307,14 @@ class _EpisodeRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final watchedColor = tc?.watched ?? const Color(0xFF58C322);
-    final mutedColor = theme.colorScheme.onSurface.withValues(alpha: 0.55);
-    final titleText = _episodeDisplayTitle(ep, l10n);
+    final mutedColor = tc?.textMuted ??
+        theme.colorScheme.onSurface.withValues(alpha: 0.62);
+    final watchedColor = tc?.watched ?? const Color(0xFF4ADE80);
+    final accent = theme.colorScheme.primary;
+    final onSurface = theme.colorScheme.onSurface;
+    final titleText = ep.name.trim().isNotEmpty
+        ? ep.name.trim()
+        : (ep.overview.trim().isNotEmpty ? ep.overview.trim() : '');
     final sourceRating = hideSourceRatings ? null : _episodeExternalRating(ep);
     final stillUrl = hideEpisodeStills && seasonPoster.isNotEmpty
         ? seasonPoster
@@ -3247,12 +3425,56 @@ class _EpisodeRow extends StatelessWidget {
                             style: TextStyle(fontSize: 10, color: mutedColor),
                           ),
                         ],
-                        if (userRating != null) ...[
+                        if (userRating != null || userNote.isNotEmpty) ...[
                           const SizedBox(height: 6),
-                          _UserRatingChip(
-                            label: l10n.seasonsEpisodeRatingYours(userRating!),
-                            tc: tc,
-                            theme: theme,
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: accent.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: Color.alphaBlend(
+                                  accent.withValues(alpha: 0.42),
+                                  theme.colorScheme.outline
+                                      .withValues(alpha: 0.35),
+                                ),
+                              ),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              child: Row(
+                                children: [
+                                  if (userRating != null)
+                                    Text(
+                                      l10n.seasonsEpisodeRatingYours(
+                                          userRating!),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        color: onSurface.withValues(alpha: 0.92),
+                                      ),
+                                    ),
+                                  if (userRating != null &&
+                                      userNote.isNotEmpty)
+                                    const SizedBox(width: 6),
+                                  if (userNote.isNotEmpty)
+                                    Expanded(
+                                      child: Text(
+                                        userNote,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          height: 1.3,
+                                          color: onSurface.withValues(alpha: 0.72),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
                           ),
                         ],
                       ],
@@ -3367,18 +3589,28 @@ class _UserRatingChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = tc?.titleAccent ?? theme.colorScheme.primary;
+    final accent = theme.colorScheme.primary;
+    final onSurface = theme.colorScheme.onSurface;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.12),
+        color: accent.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: accent.withValues(alpha: 0.3)),
+        border: Border.all(
+          color: Color.alphaBlend(
+            accent.withValues(alpha: 0.42),
+            theme.colorScheme.outline.withValues(alpha: 0.35),
+          ),
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         child: Text(
           label,
-          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: accent),
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: onSurface.withValues(alpha: 0.92),
+          ),
         ),
       ),
     );
@@ -3445,6 +3677,7 @@ Future<void> showEpisodeRatingModal(
   required Future<void> Function({
     required double? rating,
     required bool clear,
+    String? note,
   }) onSave,
 }) {
   return showDialog<void>(
@@ -3473,6 +3706,7 @@ class _EpisodeRatingDialog extends StatefulWidget {
   final Future<void> Function({
     required double? rating,
     required bool clear,
+    String? note,
   }) onSave;
 
   @override
@@ -3480,8 +3714,12 @@ class _EpisodeRatingDialog extends StatefulWidget {
 }
 
 class _EpisodeRatingDialogState extends State<_EpisodeRatingDialog> {
-  late final TextEditingController _controller;
-  bool _editing = false;
+  late bool _chosen;
+  double? _value;
+  late final TextEditingController _noteController;
+  late bool _editing;
+  double? _savedRating;
+  String _savedNote = '';
 
   @override
   void initState() {
@@ -3491,41 +3729,52 @@ class _EpisodeRatingDialogState extends State<_EpisodeRatingDialog> {
       widget.episode.seasonNumber,
       widget.episode.episodeNumber,
     );
-    _controller = TextEditingController(
-      text: existing != null ? formatWatchRating(existing) : '',
+    _savedRating = existing;
+    _savedNote = getEpisodeNote(
+      widget.entry,
+      widget.episode.seasonNumber,
+      widget.episode.episodeNumber,
     );
+    _chosen = existing != null;
+    _value = existing;
+    _editing = existing == null;
+    _noteController = TextEditingController(text: _savedNote);
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _noteController.dispose();
     super.dispose();
   }
 
-  double? get _existingRating => getEpisodeRating(
-        widget.entry,
-        widget.episode.seasonNumber,
-        widget.episode.episodeNumber,
-      );
-
-  double? _parseInput() {
-    final text = _controller.text.trim().replaceAll(',', '.');
-    if (text.isEmpty) return null;
-    final n = double.tryParse(text);
-    if (n == null || !n.isFinite || n < 0 || n > 10) return null;
-    return n;
-  }
+  bool get _viewing => _savedRating != null && !_editing;
 
   Future<void> _submit({bool clear = false}) async {
-    if (!clear && _existingRating != null && !_editing) {
+    if (!clear && _viewing) {
       setState(() => _editing = true);
       return;
     }
+    if (!clear && (!_chosen || _value == null)) return;
     await widget.onSave(
-      rating: clear ? null : _parseInput(),
+      rating: clear ? null : _value,
       clear: clear,
+      note: clear ? '' : _noteController.text,
     );
-    if (mounted) Navigator.of(context).pop();
+    if (!mounted) return;
+    setState(() {
+      if (clear) {
+        _savedRating = null;
+        _savedNote = '';
+        _chosen = false;
+        _value = null;
+        _noteController.clear();
+        _editing = true;
+      } else {
+        _savedRating = _value;
+        _savedNote = _noteController.text.trim();
+        _editing = false;
+      }
+    });
   }
 
   @override
@@ -3535,12 +3784,13 @@ class _EpisodeRatingDialogState extends State<_EpisodeRatingDialog> {
     final ep = widget.episode;
     final l10n = widget.l10n;
     final sourceRating = _episodeExternalRating(ep);
-    final yourRating = _existingRating;
-    final showForm = yourRating == null || _editing;
+    final yourRating = _savedRating;
     final titleText = _episodeDisplayTitle(ep, l10n);
     final displayTitle = titleText.isEmpty
         ? l10n.progressEpisodeNum(ep.episodeNumber)
         : titleText;
+    final errorColor = theme.colorScheme.error;
+    final viewing = _viewing;
 
     return Dialog(
       backgroundColor: tc?.bgElevated ?? theme.colorScheme.surfaceContainerHigh,
@@ -3549,117 +3799,241 @@ class _EpisodeRatingDialogState extends State<_EpisodeRatingDialog> {
         constraints: const BoxConstraints(maxWidth: 420),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Align(
-                alignment: AlignmentDirectional.topEnd,
-                child: IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close, size: 20),
-                  visualDensity: VisualDensity.compact,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Align(
+                  alignment: AlignmentDirectional.topEnd,
+                  child: IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close, size: 20),
+                    visualDensity: VisualDensity.compact,
+                  ),
                 ),
-              ),
-              if (ep.still.isNotEmpty)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: AspectRatio(
+                if (ep.still.isNotEmpty)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: Image.network(ep.still, fit: BoxFit.cover),
+                    ),
+                  )
+                else
+                  const AspectRatio(
                     aspectRatio: 16 / 9,
-                    child: Image.network(ep.still, fit: BoxFit.cover),
+                    child: _StillPlaceholder(),
                   ),
-                )
-              else
-                const AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: _StillPlaceholder(),
-                ),
-              const SizedBox(height: 12),
-              Text(
-                '${l10n.progressEpisodeNum(ep.episodeNumber)} · $displayTitle',
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              if (ep.airDate != null || ep.runtimeMinutes != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  [
-                    if (ep.airDate != null && ep.airDate!.length >= 10)
-                      ep.airDate!.substring(0, 10),
-                    if (ep.runtimeMinutes != null)
-                      l10n.runtimeMin(ep.runtimeMinutes!),
-                  ].join(' · '),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.62),
-                  ),
-                ),
-              ],
-              if (ep.overview.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(
-                  ep.overview,
-                  style: theme.textTheme.bodySmall?.copyWith(height: 1.45),
-                ),
-              ],
-              const SizedBox(height: 12),
-              if (sourceRating != null)
-                _UserRatingChip(
-                  label: l10n.seasonsEpisodeRatingSource(sourceRating),
-                  tc: tc,
-                  theme: theme,
-                ),
-              if (yourRating != null) ...[
-                const SizedBox(height: 6),
-                _UserRatingChip(
-                  label: l10n.seasonsEpisodeRatingYours(yourRating),
-                  tc: tc,
-                  theme: theme,
-                ),
-              ],
-              if (showForm) ...[
                 const SizedBox(height: 12),
                 Text(
-                  l10n.seasonsYourEpisodeRating,
-                  style: theme.textTheme.labelMedium,
-                ),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _controller,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    hintText: '8.5',
-                    isDense: true,
+                  '${l10n.progressEpisodeNum(ep.episodeNumber)} · $displayTitle',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
                   ),
-                  autofocus: true,
                 ),
-              ],
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: Text(l10n.btnCancel),
-                  ),
-                  if (yourRating != null) ...[
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () => _submit(clear: true),
-                      child: Text(l10n.seasonsClearEpisodeRating),
-                    ),
-                  ],
-                  const Spacer(),
-                  FilledButton(
-                    onPressed: _submit,
-                    child: Text(
-                      yourRating != null && !_editing
-                          ? l10n.seasonsEditEpisodeRating
-                          : l10n.btnSave,
+                if (ep.airDate != null || ep.runtimeMinutes != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    [
+                      if (ep.airDate != null && ep.airDate!.length >= 10)
+                        ep.airDate!.substring(0, 10),
+                      if (ep.runtimeMinutes != null)
+                        l10n.runtimeMin(ep.runtimeMinutes!),
+                    ].join(' · '),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color:
+                          theme.colorScheme.onSurface.withValues(alpha: 0.62),
                     ),
                   ),
                 ],
-              ),
-            ],
+                if (sourceRating != null || (yourRating != null && !viewing)) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      if (sourceRating != null)
+                        _UserRatingChip(
+                          label: l10n.seasonsEpisodeRatingSource(sourceRating),
+                          tc: tc,
+                          theme: theme,
+                        ),
+                      if (yourRating != null && !viewing)
+                        _UserRatingChip(
+                          label: l10n.seasonsEpisodeRatingYours(yourRating),
+                          tc: tc,
+                          theme: theme,
+                        ),
+                    ],
+                  ),
+                ],
+                if (ep.overview.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    ep.overview,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      height: 1.45,
+                      color: tc?.textMuted ??
+                          theme.colorScheme.onSurface.withValues(alpha: 0.72),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                if (viewing)
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.04),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: theme.colorScheme.onSurface.withValues(alpha: 0.12),
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
+                            children: [
+                              Text(
+                                l10n.cardYourRating.toUpperCase(),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: tc?.textMuted ??
+                                      theme.colorScheme.onSurface
+                                          .withValues(alpha: 0.55),
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.8,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                '★ ',
+                                style: TextStyle(
+                                  color: tc?.titleAccent ??
+                                      theme.colorScheme.primary,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              Text(
+                                formatWatchRating(yourRating!),
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: tc?.titleAccent ??
+                                      theme.colorScheme.primary,
+                                ),
+                              ),
+                              Text(
+                                '/10',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: tc?.textMuted ??
+                                      theme.colorScheme.onSurface
+                                          .withValues(alpha: 0.55),
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (_savedNote.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.onSurface
+                                    .withValues(alpha: 0.03),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: theme.colorScheme.onSurface
+                                      .withValues(alpha: 0.12),
+                                ),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                child: Text(
+                                  _savedNote,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    height: 1.45,
+                                    color: theme.colorScheme.onSurface
+                                        .withValues(alpha: 0.78),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: AlignmentDirectional.centerEnd,
+                            child: TextButton(
+                              onPressed: () => _submit(),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                minimumSize: const Size(0, 32),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              child: Text(
+                                l10n.mobileEditRating,
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else ...[
+                  StarRatingPicker(
+                    l10n: l10n,
+                    chosen: _chosen,
+                    value: _value,
+                    onChoose: (rating) => setState(() {
+                      _chosen = true;
+                      _value = clampRatingValue(rating);
+                    }),
+                    onAdjust: (delta) {
+                      if (!_chosen || _value == null) return;
+                      setState(
+                          () => _value = clampRatingValue(_value! + delta));
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _noteController,
+                    decoration: InputDecoration(
+                      hintText: l10n.ratingYourThoughts,
+                      isDense: true,
+                    ),
+                    minLines: 2,
+                    maxLines: 4,
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      if (yourRating != null)
+                        TextButton(
+                          onPressed: () => _submit(clear: true),
+                          style: TextButton.styleFrom(
+                              foregroundColor: errorColor),
+                          child: Text(l10n.seasonsClearEpisodeRating),
+                        ),
+                      const Spacer(),
+                      FilledButton(
+                        onPressed: (!_chosen || _value == null)
+                            ? null
+                            : () => _submit(),
+                        child: Text(l10n.btnSave),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),
