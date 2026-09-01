@@ -12525,13 +12525,13 @@
 
     const host = window.location.hostname;
     if (host === "localhost" || host === "127.0.0.1") return null;
-    return new URL("./", window.location.href).href;
+    return `${window.location.origin}/`;
   }
 
   function buildShareUrl(shareId) {
     const base = getShareBaseUrl();
     if (!base) return "";
-    const url = new URL("gate.html", base);
+    const url = new URL("/", base);
     url.search = "";
     url.searchParams.set("share", shareId);
     return url.toString();
@@ -13624,7 +13624,7 @@
     if (!window.WatchlistAuth?.isAuthenticated()) {
       const shareId = new URLSearchParams(window.location.search).get("share")?.trim();
       window.location.replace(
-        shareId ? `gate.html?share=${encodeURIComponent(shareId)}` : "gate.html"
+        shareId ? `/?share=${encodeURIComponent(shareId)}` : "/"
       );
       return;
     }

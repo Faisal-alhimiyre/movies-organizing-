@@ -85,8 +85,8 @@
     const shareId = readPendingShareId();
     if (shareId) persistPendingShareId(shareId);
     window.location.href = shareId
-      ? `index.html?share=${encodeURIComponent(shareId)}`
-      : "index.html";
+      ? `/app/?share=${encodeURIComponent(shareId)}`
+      : "/app/";
   }
 
   function evaluateCodeRules(code) {

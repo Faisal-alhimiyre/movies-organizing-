@@ -3,7 +3,7 @@
 
   const ICON_NOTE_KEY = "omn-ios-icon-note-v3";
   const SW_RELOAD_SESSION_KEY = "omn-sw-update-reload";
-  const SW_URL = "./sw.js";
+  const SW_URL = "/web-files/sw.js";
 
   let bannerEl = null;
   let swRegistration = null;

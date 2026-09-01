@@ -692,7 +692,7 @@
 
   function signOut(options = {}) {
     clearSession();
-    window.location.href = options.deleted ? "gate.html?deleted=1" : "gate.html";
+    window.location.href = options.deleted ? "/?deleted=1" : "/";
   }
 
   function codeHasList(code) {
