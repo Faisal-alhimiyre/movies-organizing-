@@ -3040,8 +3040,8 @@
     return `${pct}%`;
   }
 
-  const BRAND_IMDB_LOGO = "assets/brand/imdb.svg";
-  const BRAND_ANILIST_LOGO = "assets/brand/anilist.svg";
+  const BRAND_IMDB_LOGO = "/web-files/assets/brand/imdb.svg";
+  const BRAND_ANILIST_LOGO = "/web-files/assets/brand/anilist.svg";
 
   function renderExternalRatings(item) {
     const parts = [];
