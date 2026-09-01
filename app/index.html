@@ -72,13 +72,30 @@
   </head>
   <body>
     <a href="#mainContent" class="skip-link">Skip to main content</a>
+
     <div class="app" id="app">
+    
+      <!-- Site logo -->
+      <a href="/" class="site-logo" aria-label="The Encyclopedia home">
+        <img
+          src="/web-files/assets/icons/icon-192.png"
+          alt="The Encyclopedia"
+          class="site-logo__image"
+        />
+      </a>
+    
       <header class="header">
         <div class="header__main">
           <div class="header__brand">
             <div class="header__title-wrap" id="headerTitleWrap">
+    
               <h1 class="header__title" id="headerTitle"></h1>
-              <div class="list-title-dropdown" id="listTitleDropdown" hidden>
+    
+              <div
+                class="list-title-dropdown"
+                id="listTitleDropdown"
+                hidden
+              >
                 <button
                   type="button"
                   class="list-title-dropdown__trigger"
@@ -87,8 +104,16 @@
                   aria-expanded="false"
                   aria-controls="listTitleDropdownPanel"
                 >
-                  <span class="list-title-dropdown__label" id="listTitleDropdownLabel"></span>
-                  <svg class="list-title-dropdown__chevron" viewBox="0 0 24 24" aria-hidden="true">
+                  <span
+                    class="list-title-dropdown__label"
+                    id="listTitleDropdownLabel"
+                  ></span>
+    
+                  <svg
+                    class="list-title-dropdown__chevron"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
                     <path
                       d="M6 9l6 6 6-6"
                       fill="none"
@@ -99,6 +124,7 @@
                     />
                   </svg>
                 </button>
+    
                 <div
                   class="list-title-dropdown__panel"
                   id="listTitleDropdownPanel"
@@ -106,6 +132,7 @@
                   hidden
                 ></div>
               </div>
+    
             </div>
             <script>
               (function () {
