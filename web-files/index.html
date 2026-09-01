@@ -1,1 +1,337 @@
-<!doctype html><html><head><meta charset="utf-8"><title>Redirecting…</title><script>location.replace('/app/'+location.search+location.hash)</script></head><body><a href="/app/">Continue</a></body></html>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <base href="/web-files/" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=overlays-content"
+    />
+    <meta name="theme-color" content="#141416" />
+    <meta
+      name="description"
+      content="Sign in to Our Movie Nights — your personal movie, TV, and anime watchlist."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Our Movie Nights" />
+    <meta property="og:title" content="Our Movie Nights" />
+    <meta
+      property="og:description"
+      content="Free personal watchlist for movies, TV series, and anime. Organized by genre, synced to the cloud, shared by link."
+    />
+    <meta property="og:image" content="assets/og/og-image.svg" />
+    <meta property="og:image:type" content="image/svg+xml" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Our Movie Nights — movies, TV, and anime watchlists"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Our Movie Nights" />
+    <meta
+      name="twitter:description"
+      content="Free personal watchlist for movies, TV series, and anime. Organized by genre, synced to the cloud, shared by link."
+    />
+    <meta name="twitter:image" content="assets/og/og-image.svg" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Movie Nights" />
+    <title>Our Movie Nights</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="assets/icons/icon-192.png" type="image/png" />
+    <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" sizes="180x180" />
+    <link rel="apple-touch-icon" href="assets/icons/icon-192.png" sizes="192x192" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css?v=139" />
+    <link rel="stylesheet" href="css/theme.css?v=139" />
+    <link rel="stylesheet" href="css/theme-light.css?v=139" />
+    <link rel="stylesheet" href="css/theme-purple.css?v=139" />
+    <link rel="stylesheet" href="css/theme-brown.css?v=139" />
+    <link rel="stylesheet" href="css/theme-pink.css?v=139" />
+    <link rel="stylesheet" href="css/theme-consistency.css?v=139" />
+    <link rel="stylesheet" href="css/typography.css?v=139" />
+    <link rel="stylesheet" href="css/reduced-motion.css?v=139" />
+    <link rel="stylesheet" href="css/accessibility.css?v=139" />
+    <link rel="stylesheet" href="css/rtl.css?v=139" />
+    <script src="js/build-version.js?v=139"></script>
+    <script src="js/themes.js?v=139"></script>
+  </head>
+  <body>
+    <a href="#gateMain" class="skip-link">Skip to main content</a>
+    <div class="gate">
+      <div class="gate__card">
+        <div class="gate__toolbar">
+          <div class="gate__lang gate__lang--compact">
+            <button
+              type="button"
+              class="gate__lang-btn gate__lang-btn--icon"
+              data-action="set-language"
+              data-lang="en"
+              aria-label="English"
+              title="English"
+            >
+              <span class="gate__lang-letter">E</span>
+            </button>
+            <button
+              type="button"
+              class="gate__lang-btn gate__lang-btn--icon"
+              data-action="set-language"
+              data-lang="ar"
+              aria-label="العربية"
+              title="العربية"
+            >
+              <span class="gate__lang-letter">ع</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="gate__brand">
+          <img
+            class="gate__logo"
+            src="assets/icons/icon.svg"
+            width="96"
+            height="96"
+            alt=""
+            aria-hidden="true"
+          />
+          <h1 class="gate__title" data-i18n="gate.title">Our Movie Nights</h1>
+        </div>
+
+        <div id="gateMain" class="gate__main" tabindex="-1">
+        <div class="gate__modes" role="tablist" aria-label="Account access">
+          <button
+            type="button"
+            class="gate__mode gate__mode--active"
+            role="tab"
+            aria-selected="true"
+            tabindex="0"
+            data-mode="open"
+          >
+            Log in
+          </button>
+          <button
+            type="button"
+            class="gate__mode"
+            role="tab"
+            aria-selected="false"
+            tabindex="-1"
+            data-mode="create"
+          >
+            Create new account
+          </button>
+        </div>
+
+        <form id="openForm" class="gate__panel" novalidate>
+          <div class="gate__field">
+            <input
+              type="password"
+              id="openCode"
+              class="gate__input"
+              autocomplete="current-password"
+              placeholder="Your code"
+              required
+            />
+            <button
+              type="button"
+              class="gate__toggle-password"
+              data-action="toggle-password"
+              data-target="openCode"
+              aria-label="Show code"
+              aria-pressed="false"
+            >
+              <svg class="gate__eye gate__eye--show" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5C7 5 2.7 8.1 1 12c1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z" fill="currentColor"/>
+              </svg>
+              <svg class="gate__eye gate__eye--hide" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 6.5c3.1 0 5.8 1.7 7.4 4.2-.8 1.2-1.9 2.2-3.2 2.9l1.4 1.4c1.7-1 3.1-2.4 4.1-4.1C20.7 7.6 16.7 4.5 12 4.5c-1.1 0-2.1.2-3.1.5l1.5 1.5c.5-.1 1-.2 1.6-.2zM3.3 2.5 2 3.8l2.1 2.1C2.4 7.7 1.3 9.8.5 12c1.7 3.9 6 7 11 7 1.8 0 3.5-.4 5-1.1l2.2 2.2 1.3-1.3L3.3 2.5zm6.2 6.2 1.5 1.5c.1-.3.2-.7.2-1.1 0-1.4-1.1-2.5-2.5-2.5-.4 0-.8.1-1.1.2l1.9 1.9zm2.5 6.8c-3.1 0-5.8-1.7-7.4-4.2.7-1.1 1.7-2 2.9-2.7l1.5 1.5c-1 .6-1.8 1.5-2.4 2.5.9 1.2 2.3 2 3.9 2 1 0 1.9-.2 2.7-.6l1.4 1.4c-1.2.5-2.5.8-3.9.8-4.1 0-7.7-2.5-9.3-5 .5-.8 1.1-1.5 1.8-2.1l1.5 1.5z" fill="currentColor"/>
+              </svg>
+            </button>
+          </div>
+          <button type="submit" class="btn btn--primary gate__submit">Log in</button>
+        </form>
+
+        <form id="createForm" class="gate__panel" hidden novalidate>
+          <p class="gate__warning" id="createCodeWarning" role="note">
+            Write your code down and keep it safe. If you lose it, we cannot recover your account or lists.
+          </p>
+          <div class="gate__field">
+            <input
+              type="password"
+              id="createCode"
+              class="gate__input"
+              autocomplete="new-password"
+              placeholder="Choose a code"
+              required
+            />
+            <button
+              type="button"
+              class="gate__toggle-password"
+              data-action="toggle-password"
+              data-target="createCode"
+              aria-label="Show code"
+              aria-pressed="false"
+            >
+              <svg class="gate__eye gate__eye--show" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5C7 5 2.7 8.1 1 12c1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z" fill="currentColor"/>
+              </svg>
+              <svg class="gate__eye gate__eye--hide" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 6.5c3.1 0 5.8 1.7 7.4 4.2-.8 1.2-1.9 2.2-3.2 2.9l1.4 1.4c1.7-1 3.1-2.4 4.1-4.1C20.7 7.6 16.7 4.5 12 4.5c-1.1 0-2.1.2-3.1.5l1.5 1.5c.5-.1 1-.2 1.6-.2zM3.3 2.5 2 3.8l2.1 2.1C2.4 7.7 1.3 9.8.5 12c1.7 3.9 6 7 11 7 1.8 0 3.5-.4 5-1.1l2.2 2.2 1.3-1.3L3.3 2.5zm6.2 6.2 1.5 1.5c.1-.3.2-.7.2-1.1 0-1.4-1.1-2.5-2.5-2.5-.4 0-.8.1-1.1.2l1.9 1.9zm2.5 6.8c-3.1 0-5.8-1.7-7.4-4.2.7-1.1 1.7-2 2.9-2.7l1.5 1.5c-1 .6-1.8 1.5-2.4 2.5.9 1.2 2.3 2 3.9 2 1 0 1.9-.2 2.7-.6l1.4 1.4c-1.2.5-2.5.8-3.9.8-4.1 0-7.7-2.5-9.3-5 .5-.8 1.1-1.5 1.8-2.1l1.5 1.5z" fill="currentColor"/>
+              </svg>
+            </button>
+          </div>
+          <p class="gate__hint" id="createCodeHint">Capitalization doesn't matter</p>
+          <ul class="gate__rules" id="createCodeRules" aria-label="Code requirements">
+            <li class="gate__rule" data-rule="length">6+ characters</li>
+            <li class="gate__rule" data-rule="alnum">Letters and numbers</li>
+            <li class="gate__rule" data-rule="spaces">No spaces</li>
+          </ul>
+          <div class="gate__field">
+            <input
+              type="password"
+              id="confirmCode"
+              class="gate__input"
+              autocomplete="new-password"
+              placeholder="Confirm code"
+              required
+            />
+            <button
+              type="button"
+              class="gate__toggle-password"
+              data-action="toggle-password"
+              data-target="confirmCode"
+              aria-label="Show code"
+              aria-pressed="false"
+            >
+              <svg class="gate__eye gate__eye--show" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5C7 5 2.7 8.1 1 12c1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z" fill="currentColor"/>
+              </svg>
+              <svg class="gate__eye gate__eye--hide" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 6.5c3.1 0 5.8 1.7 7.4 4.2-.8 1.2-1.9 2.2-3.2 2.9l1.4 1.4c1.7-1 3.1-2.4 4.1-4.1C20.7 7.6 16.7 4.5 12 4.5c-1.1 0-2.1.2-3.1.5l1.5 1.5c.5-.1 1-.2 1.6-.2zM3.3 2.5 2 3.8l2.1 2.1C2.4 7.7 1.3 9.8.5 12c1.7 3.9 6 7 11 7 1.8 0 3.5-.4 5-1.1l2.2 2.2 1.3-1.3L3.3 2.5zm6.2 6.2 1.5 1.5c.1-.3.2-.7.2-1.1 0-1.4-1.1-2.5-2.5-2.5-.4 0-.8.1-1.1.2l1.9 1.9zm2.5 6.8c-3.1 0-5.8-1.7-7.4-4.2.7-1.1 1.7-2 2.9-2.7l1.5 1.5c-1 .6-1.8 1.5-2.4 2.5.9 1.2 2.3 2 3.9 2 1 0 1.9-.2 2.7-.6l1.4 1.4c-1.2.5-2.5.8-3.9.8-4.1 0-7.7-2.5-9.3-5 .5-.8 1.1-1.5 1.8-2.1l1.5 1.5z" fill="currentColor"/>
+              </svg>
+            </button>
+          </div>
+          <button type="submit" class="btn btn--primary gate__submit">Create account</button>
+        </form>
+
+        <p class="gate__error" id="gateError" hidden></p>
+        </div>
+
+        <div class="gate__theme-row">
+          <span class="gate__theme-label">Theme</span>
+          <div class="gate__theme-swatches" role="group" aria-label="Theme">
+            <button
+              type="button"
+              class="gate__theme-swatch gate__theme-swatch--dark"
+              data-action="set-theme"
+              data-theme="dark"
+              aria-label="Dark"
+              title="Dark"
+            ></button>
+            <button
+              type="button"
+              class="gate__theme-swatch gate__theme-swatch--light"
+              data-action="set-theme"
+              data-theme="light"
+              aria-label="Light"
+              title="Light"
+            ></button>
+            <button
+              type="button"
+              class="gate__theme-swatch gate__theme-swatch--purple"
+              data-action="set-theme"
+              data-theme="purple"
+              aria-label="Purple"
+              title="Purple"
+            ></button>
+            <button
+              type="button"
+              class="gate__theme-swatch gate__theme-swatch--brown"
+              data-action="set-theme"
+              data-theme="brown"
+              aria-label="Brown"
+              title="Brown"
+            ></button>
+            <button
+              type="button"
+              class="gate__theme-swatch gate__theme-swatch--pink"
+              data-action="set-theme"
+              data-theme="pink"
+              aria-label="Pink"
+              title="Pink"
+            ></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="themeModal" hidden>
+      <div class="modal__backdrop" data-action="close-theme-modal"></div>
+      <div
+        class="modal__panel modal__panel--compact"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="themeModalTitle"
+      >
+        <header class="modal__header">
+          <h2 class="modal__title" id="themeModalTitle">Theme</h2>
+          <button
+            type="button"
+            class="modal__close"
+            data-action="close-theme-modal"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        <div class="modal__body">
+          <p class="backup-modal__text theme-modal__intro" id="themeModalIntro">
+            Pick how the app looks. Your choice is saved on this device.
+          </p>
+          <div class="theme-options">
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="dark">
+              <span class="theme-option__preview theme-option__preview--dark" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="dark">Dark</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="light">
+              <span class="theme-option__preview theme-option__preview--light" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="light">Light</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="purple">
+              <span class="theme-option__preview theme-option__preview--purple" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="purple">Purple</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="brown">
+              <span class="theme-option__preview theme-option__preview--brown" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="brown">Brown</span>
+            </button>
+            <button type="button" class="theme-option" data-action="set-theme" data-theme="pink">
+              <span class="theme-option__preview theme-option__preview--pink" aria-hidden="true"></span>
+              <span class="theme-option__title" data-theme-label="pink">Pink</span>
+            </button>
+          </div>
+          <footer class="modal__footer modal__footer--simple">
+            <button type="button" class="btn btn--ghost" data-action="close-theme-modal">
+              Close
+            </button>
+          </footer>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/i18n.js?v=165"></script>
+    <script src="js/accessibility.js?v=139"></script>
+    <script src="js/dialog.js?v=139"></script>
+    <script src="js/auth.js?v=165"></script>
+    <script src="js/sync.js?v=139"></script>
+    <script src="js/gate.js?v=139"></script>
+    <script src="js/pwa.js?v=139"></script>
+  </body>
+</html>
