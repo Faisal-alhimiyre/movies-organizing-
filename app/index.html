@@ -76,121 +76,139 @@
     <div class="app" id="app">
     
       <header class="header">
+
+        <!-- Website identity -->
+        <div class="site-identity">
+          <a href="/" class="site-logo" aria-label="The Encyclopedia home">
+            <img
+              src="/web-files/assets/icons/icon-192.png"
+              alt=""
+              class="site-logo__image"
+            />
+          </a>
+      
+          <div class="site-identity__text">
+            <div class="site-identity__name">THE ENCYCLOPEDIA</div>
+            <div class="site-identity__tagline">your personal watchlist.</div>
+          </div>
+        </div>
+      
         <div class="header__main">
       
           <div class="header__brand">
       
-            <a href="/" class="site-logo" aria-label="The Encyclopedia home">
-              <img
-                src="/web-files/assets/icons/icon-192.png"
-                alt="The Encyclopedia"
-                class="site-logo__image"
-              />
-            </a>
+            <div class="header__title-wrap" id="headerTitleWrap">
+              <h1 class="header__title" id="headerTitle"></h1>
       
-            <div class="header__brand-content">
+              <div
+                class="list-title-dropdown"
+                id="listTitleDropdown"
+                hidden
+              >
+                <button
+                  type="button"
+                  class="list-title-dropdown__trigger"
+                  id="listTitleDropdownBtn"
+                  aria-haspopup="listbox"
+                  aria-expanded="false"
+                  aria-controls="listTitleDropdownPanel"
+                >
+                  <span
+                    class="list-title-dropdown__label"
+                    id="listTitleDropdownLabel"
+                  ></span>
       
-              <div class="header__title-wrap" id="headerTitleWrap">
-                <h1 class="header__title" id="headerTitle"></h1>
+                  <svg
+                    class="list-title-dropdown__chevron"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M6 9l6 6 6-6"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
       
                 <div
-                  class="list-title-dropdown"
-                  id="listTitleDropdown"
+                  class="list-title-dropdown__panel"
+                  id="listTitleDropdownPanel"
+                  role="listbox"
                   hidden
-                >
-                  <button
-                    type="button"
-                    class="list-title-dropdown__trigger"
-                    id="listTitleDropdownBtn"
-                    aria-haspopup="listbox"
-                    aria-expanded="false"
-                    aria-controls="listTitleDropdownPanel"
-                  >
-                    <span
-                      class="list-title-dropdown__label"
-                      id="listTitleDropdownLabel"
-                    ></span>
-      
-                    <svg
-                      class="list-title-dropdown__chevron"
-                      viewBox="0 0 24 24"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M6 9l6 6 6-6"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
-                  </button>
-      
-                  <div
-                    class="list-title-dropdown__panel"
-                    id="listTitleDropdownPanel"
-                    role="listbox"
-                    hidden
-                  ></div>
-                </div>
+                ></div>
               </div>
+            </div>
       
-              <script>
-                (function () {
-                  try {
-                    var sessionRaw = sessionStorage.getItem("watchlist-session-v2");
-                    var session = sessionRaw ? JSON.parse(sessionRaw) : null;
+            <script>
+              (function () {
+                try {
+                  var sessionRaw =
+                    sessionStorage.getItem("watchlist-session-v2");
       
-                    if (!session?.listId) {
-                      var legacyRaw = sessionStorage.getItem("watchlist-session-v1");
+                  var session = sessionRaw
+                    ? JSON.parse(sessionRaw)
+                    : null;
       
-                      if (legacyRaw) {
-                        var legacy = JSON.parse(legacyRaw);
+                  if (!session?.listId) {
+                    var legacyRaw =
+                      sessionStorage.getItem("watchlist-session-v1");
       
-                        session = {
-                          accountId: legacy.accountId || legacy.listId,
-                          listId: legacy.listId,
-                        };
-                      }
+                    if (legacyRaw) {
+                      var legacy = JSON.parse(legacyRaw);
+      
+                      session = {
+                        accountId: legacy.accountId || legacy.listId,
+                        listId: legacy.listId,
+                      };
                     }
+                  }
       
-                    if (!session?.listId) return;
+                  if (!session?.listId) return;
       
-                    var accountId = session.accountId || session.listId;
+                  var accountId =
+                    session.accountId || session.listId;
       
-                    var libraryRaw = localStorage.getItem(
+                  var libraryRaw =
+                    localStorage.getItem(
                       "watchlist-library-v2-" + accountId
                     );
       
-                    var library = libraryRaw ? JSON.parse(libraryRaw) : [];
+                  var library = libraryRaw
+                    ? JSON.parse(libraryRaw)
+                    : [];
       
-                    var entry = library.find(function (item) {
-                      return item.listId === session.listId;
-                    });
+                  var entry = library.find(function (item) {
+                    return item.listId === session.listId;
+                  });
       
-                    var name = (entry && entry.name) || "My list";
+                  var name =
+                    (entry && entry.name) || "My list";
       
-                    var titleEl = document.getElementById("headerTitle");
+                  var titleEl =
+                    document.getElementById("headerTitle");
       
-                    if (titleEl) {
-                      titleEl.textContent = name;
-                    }
-      
-                    document.title = name;
-                  } catch (err) {
-                    /* ignore */
+                  if (titleEl) {
+                    titleEl.textContent = name;
                   }
-                })();
-              </script>
       
-              <div
-                class="header__stats"
-                id="stats"
-                aria-live="polite"
-              ></div>
+                  document.title = name;
       
-            </div>
+                } catch (err) {
+                  /* ignore */
+                }
+              })();
+            </script>
+      
+            <div
+              class="header__stats"
+              id="stats"
+              aria-live="polite"
+            ></div>
+      
           </div>
       
           <div class="header__actions">
