@@ -75,19 +75,11 @@
 
     <div class="app" id="app">
     
-      <!-- Site logo -->
-      <a href="/" class="site-logo" aria-label="The Encyclopedia home">
-        <img
-          src="/web-files/assets/icons/icon-192.png"
-          alt="The Encyclopedia"
-          class="site-logo__image"
-        />
-      </a>
-    
       <header class="header">
         <div class="header__main">
+      
           <div class="header__brand">
-
+      
             <a href="/" class="site-logo" aria-label="The Encyclopedia home">
               <img
                 src="/web-files/assets/icons/icon-192.png"
@@ -95,87 +87,112 @@
                 class="site-logo__image"
               />
             </a>
-          
-            <div class="header__title-wrap" id="headerTitleWrap">
-    
-              <h1 class="header__title" id="headerTitle"></h1>
-    
-              <div
-                class="list-title-dropdown"
-                id="listTitleDropdown"
-                hidden
-              >
-                <button
-                  type="button"
-                  class="list-title-dropdown__trigger"
-                  id="listTitleDropdownBtn"
-                  aria-haspopup="listbox"
-                  aria-expanded="false"
-                  aria-controls="listTitleDropdownPanel"
-                >
-                  <span
-                    class="list-title-dropdown__label"
-                    id="listTitleDropdownLabel"
-                  ></span>
-    
-                  <svg
-                    class="list-title-dropdown__chevron"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M6 9l6 6 6-6"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    />
-                  </svg>
-                </button>
-    
+      
+            <div class="header__brand-content">
+      
+              <div class="header__title-wrap" id="headerTitleWrap">
+                <h1 class="header__title" id="headerTitle"></h1>
+      
                 <div
-                  class="list-title-dropdown__panel"
-                  id="listTitleDropdownPanel"
-                  role="listbox"
+                  class="list-title-dropdown"
+                  id="listTitleDropdown"
                   hidden
-                ></div>
+                >
+                  <button
+                    type="button"
+                    class="list-title-dropdown__trigger"
+                    id="listTitleDropdownBtn"
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                    aria-controls="listTitleDropdownPanel"
+                  >
+                    <span
+                      class="list-title-dropdown__label"
+                      id="listTitleDropdownLabel"
+                    ></span>
+      
+                    <svg
+                      class="list-title-dropdown__chevron"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M6 9l6 6 6-6"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
+      
+                  <div
+                    class="list-title-dropdown__panel"
+                    id="listTitleDropdownPanel"
+                    role="listbox"
+                    hidden
+                  ></div>
+                </div>
               </div>
-    
-            </div>
-            <script>
-              (function () {
-                try {
-                  var sessionRaw = sessionStorage.getItem("watchlist-session-v2");
-                  var session = sessionRaw ? JSON.parse(sessionRaw) : null;
-                  if (!session?.listId) {
-                    var legacyRaw = sessionStorage.getItem("watchlist-session-v1");
-                    if (legacyRaw) {
-                      var legacy = JSON.parse(legacyRaw);
-                      session = {
-                        accountId: legacy.accountId || legacy.listId,
-                        listId: legacy.listId,
-                      };
+      
+              <script>
+                (function () {
+                  try {
+                    var sessionRaw = sessionStorage.getItem("watchlist-session-v2");
+                    var session = sessionRaw ? JSON.parse(sessionRaw) : null;
+      
+                    if (!session?.listId) {
+                      var legacyRaw = sessionStorage.getItem("watchlist-session-v1");
+      
+                      if (legacyRaw) {
+                        var legacy = JSON.parse(legacyRaw);
+      
+                        session = {
+                          accountId: legacy.accountId || legacy.listId,
+                          listId: legacy.listId,
+                        };
+                      }
                     }
+      
+                    if (!session?.listId) return;
+      
+                    var accountId = session.accountId || session.listId;
+      
+                    var libraryRaw = localStorage.getItem(
+                      "watchlist-library-v2-" + accountId
+                    );
+      
+                    var library = libraryRaw ? JSON.parse(libraryRaw) : [];
+      
+                    var entry = library.find(function (item) {
+                      return item.listId === session.listId;
+                    });
+      
+                    var name = (entry && entry.name) || "My list";
+      
+                    var titleEl = document.getElementById("headerTitle");
+      
+                    if (titleEl) {
+                      titleEl.textContent = name;
+                    }
+      
+                    document.title = name;
+                  } catch (err) {
+                    /* ignore */
                   }
-                  if (!session?.listId) return;
-                  var accountId = session.accountId || session.listId;
-                  var libraryRaw = localStorage.getItem("watchlist-library-v2-" + accountId);
-                  var library = libraryRaw ? JSON.parse(libraryRaw) : [];
-                  var entry = library.find(function (item) {
-                    return item.listId === session.listId;
-                  });
-                  var name = (entry && entry.name) || "My list";
-                  var titleEl = document.getElementById("headerTitle");
-                  if (titleEl) titleEl.textContent = name;
-                  document.title = name;
-                } catch (err) {
-                  /* ignore */
-                }
-              })();
-            </script>
-            <div class="header__stats" id="stats" aria-live="polite"></div>
+                })();
+              </script>
+      
+              <div
+                class="header__stats"
+                id="stats"
+                aria-live="polite"
+              ></div>
+      
+            </div>
           </div>
+      
           <div class="header__actions">
             <div class="header__toolbar">
             <button type="button" class="btn btn--primary" id="addBtn">
