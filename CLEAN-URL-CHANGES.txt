@@ -1,0 +1,8 @@
+Clean URL package
+=================
+Public entry/login: https://theencyclopedia.net/
+Authenticated app:  https://theencyclopedia.net/app/
+Share links:         https://theencyclopedia.net/?share=...
+
+The original web-files directory is retained as a backup/source copy.
+Runtime assets were copied to the repository root so existing relative asset paths continue to work.
