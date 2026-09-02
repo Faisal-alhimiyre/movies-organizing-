@@ -79,7 +79,7 @@
   const STANDARD_GENRES = window.STANDARD_GENRES || [];
 
   const CARD_LAYOUT_KEY = "watchlist-card-layout-v2";
-  const CARD_LAYOUTS = ["hover", "poster"];
+  const CARD_LAYOUTS = ["poster"];
   const SYNC_META_PREFIX = "watchlist-sync-meta-";
   const LEGACY_UI_PREFS_PREFIX = "watchlist-ui-prefs-";
 
@@ -5163,8 +5163,7 @@
   }
 
   function loadCardLayout() {
-    const saved = localStorage.getItem(CARD_LAYOUT_KEY);
-    return CARD_LAYOUTS.includes(saved) ? saved : "hover";
+    return "poster";
   }
 
   function saveCardLayout(layout) {
@@ -5188,13 +5187,18 @@
   }
 
   function setCardLayout(layout) {
-    if (!CARD_LAYOUTS.includes(layout)) return;
+    if (layout !== "poster") return;
+  
     clearTypeViewDomCache();
-    state.cardLayout = layout;
-    saveCardLayout(layout);
+  
+    state.cardLayout = "poster";
+  
+    saveCardLayout("poster");
+  
     applyCardLayout();
-    syncLayoutToggles();
+  
     hideLinkPreviewPopover();
+  
     render();
   }
 
