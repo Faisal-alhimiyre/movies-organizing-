@@ -211,7 +211,7 @@
       parts.push(
         `<span class="card__score card__score--imdb" title="IMDb ${escapeHtml(imdb)}">
           <span class="card__score-value text-num">${escapeHtml(imdb)}</span>
-          <img class="card__score-logo card__score-logo--imdb" src="assets/brand/imdb.svg" width="46" height="20" alt="" />
+          <img class="card__score-logo card__score-logo--imdb" src="/web-files/assets/brand/imdb.svg" width="46" height="20" alt="" />
         </span>`
       );
     }
@@ -219,7 +219,7 @@
       parts.push(
         `<span class="card__score card__score--anilist" title="AniList ${escapeHtml(anilist)}">
           <span class="card__score-value text-num">${escapeHtml(anilist)}</span>
-          <img class="card__score-logo card__score-logo--anilist" src="assets/brand/anilist.svg" width="34" height="26" alt="" />
+          <img class="card__score-logo card__score-logo--anilist" src="/web-files/assets/brand/anilist.svg" width="34" height="26" alt="" />
         </span>`
       );
     }

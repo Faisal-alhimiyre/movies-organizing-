@@ -1463,7 +1463,7 @@
       const pct = Math.round(n > 10 ? n : n * 10);
       return `<span class="card__score card__score--anilist" title="AniList ${esc(`${pct}%`)}">
         <span class="card__score-value text-num">${esc(`${pct}%`)}</span>
-        <img class="card__score-logo card__score-logo--anilist" src="assets/brand/anilist.svg" width="34" height="26" alt="" />
+        <img class="card__score-logo card__score-logo--anilist" src="/web-files/assets/brand/anilist.svg" width="34" height="26" alt="" />
       </span>`;
     }
 
@@ -1472,7 +1472,7 @@
     const display = Number.isInteger(score) ? String(score) : score.toFixed(1);
     return `<span class="card__score card__score--imdb" title="IMDb ${esc(display)}">
       <span class="card__score-value text-num">${esc(display)}</span>
-      <img class="card__score-logo card__score-logo--imdb" src="assets/brand/imdb.svg" width="46" height="20" alt="" />
+      <img class="card__score-logo card__score-logo--imdb" src="/web-files/assets/brand/imdb.svg" width="46" height="20" alt="" />
     </span>`;
   }
 
