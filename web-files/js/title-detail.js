@@ -1034,7 +1034,7 @@
                title="IMDb ${esc(display)}">
               <span class="card__score-value text-num">${esc(display)}</span>
               <img class="card__score-logo card__score-logo--imdb"
-                   src="assets/brand/imdb.svg"
+                  src="/web-files/assets/brand/imdb.svg"
                    width="46" height="20" alt="IMDb" />
             </a>`
           );
@@ -1043,7 +1043,7 @@
             `<span class="card__score card__score--imdb" title="IMDb ${esc(display)}">
               <span class="card__score-value text-num">${esc(display)}</span>
               <img class="card__score-logo card__score-logo--imdb"
-                   src="assets/brand/imdb.svg"
+                   src="/web-files/assets/brand/imdb.svg"
                    width="46" height="20" alt="" />
             </span>`
           );
@@ -1068,7 +1068,7 @@
                title="AniList ${esc(display)}">
               <span class="card__score-value text-num">${esc(display)}</span>
               <img class="card__score-logo card__score-logo--anilist"
-                   src="assets/brand/anilist.svg"
+                   src="/web-files/assets/brand/anilist.svg"
                    width="34" height="26" alt="AniList" />
             </a>`
           );
@@ -1077,7 +1077,7 @@
             `<span class="card__score card__score--anilist" title="AniList ${esc(display)}">
               <span class="card__score-value text-num">${esc(display)}</span>
               <img class="card__score-logo card__score-logo--anilist"
-                   src="assets/brand/anilist.svg"
+                   src="/web-files/assets/brand/anilist.svg"
                    width="34" height="26" alt="" />
             </span>`
           );
